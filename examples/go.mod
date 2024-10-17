@@ -1,10 +1,10 @@
 module github.com/fido-device-onboard/go-fdo/examples
 
-go 1.23.0
+go 1.23
 
 replace github.com/fido-device-onboard/go-fdo/sqlite => ../sqlite
 
-replace github.com/fido-device-onboard/go-fdo => ..
+replace github.com/fido-device-onboard/go-fdo => ../
 
 replace github.com/fido-device-onboard/go-fdo/fsim => ../fsim
 

@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"bytes"
 	"flag"
 	"fmt"
 	"iter"
@@ -57,9 +58,12 @@ var (
 	resaleGUID       string
 	resaleKey        string
 	reuseCred        bool
+	useDelegate      bool
 	rvBypass         bool
 	rvDelay          int
 	printOwnerPubKey string
+	printOwnerPrivKey string
+	printOwnerChain string
 	importVoucher    string
 	downloads        stringList
 	uploadDir        string
@@ -82,6 +86,7 @@ func init() {
 	serverFlags.StringVar(&dbPath, "db", "", "SQLite database file path")
 	serverFlags.StringVar(&dbPass, "db-pass", "", "SQLite database encryption-at-rest passphrase")
 	serverFlags.BoolVar(&debug, "debug", debug, "Print HTTP contents")
+	serverFlags.BoolVar(&useDelegate, "delegate", debug, "Generate and Onboard to Delegate")
 	serverFlags.StringVar(&to0Addr, "to0", "", "Rendezvous server `addr`ess to register RV blobs (disables self-registration)")
 	serverFlags.StringVar(&to0GUID, "to0-guid", "", "Device `guid` to immediately register an RV blob (requires to0 flag)")
 	serverFlags.StringVar(&extAddr, "ext-http", "", "External `addr`ess devices should connect to (default \"127.0.0.1:${LISTEN_PORT}\")")
@@ -93,6 +98,8 @@ func init() {
 	serverFlags.BoolVar(&rvBypass, "rv-bypass", false, "Skip TO1")
 	serverFlags.IntVar(&rvDelay, "rv-delay", 0, "Delay TO1 by N `seconds`")
 	serverFlags.StringVar(&printOwnerPubKey, "print-owner-public", "", "Print owner public key of `type` and exit")
+	serverFlags.StringVar(&printOwnerPrivKey, "print-owner-private", "", "Print owner private key of `type` and exit")
+	serverFlags.StringVar(&printOwnerChain, "print-owner-chain", "", "Print owner chain of `type` and exit")
 	serverFlags.StringVar(&importVoucher, "import-voucher", "", "Import a PEM encoded voucher file at `path`")
 	serverFlags.Var(&downloads, "download", "Use fdo.download FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
@@ -118,6 +125,13 @@ func server() error { //nolint:gocyclo
 		return doPrintOwnerPubKey(state)
 	}
 
+	if printOwnerPrivKey != "" {
+		return doPrintOwnerPrivKey(state)
+	}
+
+	if printOwnerChain != "" {
+		return doPrintOwnerChain(state)
+	}
 	// If importing a voucher, do so and exit
 	if importVoucher != "" {
 		return doImportVoucher(state)
@@ -208,6 +222,30 @@ func serveHTTP(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) error {
 	return srv.Serve(lis)
 }
 
+func doPrintOwnerChain(state *sqlite.DB) error {
+	keyType, err := protocol.ParseKeyType(printOwnerChain)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	_, chain, err := state.OwnerKey(keyType)
+	if err != nil {
+		return err
+	}
+	slog.Debug("BKG","Type",fmt.Sprintf("%T",chain),"OwnerKeyChain",chain)
+	var pemData bytes.Buffer
+	for _, cert := range chain {
+		pemBlock := &pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: cert.Raw,
+		}
+	        if err := pem.Encode(&pemData, pemBlock); err != nil {
+            		fmt.Fprintf(os.Stderr, "Failed to encode certificate: %v\n", err)
+			return err
+		}
+	}
+	fmt.Println(pemData.String())
+	return nil
+}
 func doPrintOwnerPubKey(state *sqlite.DB) error {
 	keyType, err := protocol.ParseKeyType(printOwnerPubKey)
 	if err != nil {
@@ -225,6 +263,43 @@ func doPrintOwnerPubKey(state *sqlite.DB) error {
 		Type:  "PUBLIC KEY",
 		Bytes: der,
 	})
+}
+
+func doPrintOwnerPrivKey(state *sqlite.DB) error {
+	var pemBlock *pem.Block
+	keyType, err := protocol.ParseKeyType(printOwnerPrivKey)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	key, _, err := state.OwnerKey(keyType)
+	fmt.Printf("Key is %T %V\n",key,key)
+	if err != nil {
+		return err
+	}
+
+	switch key.(type) {
+		case *rsa.PrivateKey:
+			der := x509.MarshalPKCS1PrivateKey(key.(*rsa.PrivateKey))
+			pemBlock = &pem.Block{
+				Type:  "PRIVATE KEY",
+				Bytes: der,
+			}
+		case *ecdsa.PrivateKey:
+			der, err := x509.MarshalECPrivateKey(key.(*ecdsa.PrivateKey))
+			if err != nil {
+				return err
+			}
+			pemBlock = &pem.Block{
+				Type:  "EC PRIVATE KEY",
+				Bytes: der,
+			}
+
+		default:
+			err =  fmt.Errorf("Unknown Owner key type %T", key)
+			return err
+	}
+
+	return pem.Encode(os.Stdout, pemBlock)
 }
 
 func doImportVoucher(state *sqlite.DB) error {
@@ -444,6 +519,12 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 	if err != nil {
 		return nil, err
 	}
+
+	ec384OwnerCert, err := generateCA(ec384OwnerKey)
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("BKG","eckey",ec384OwnerCert)
 	if err := state.AddOwnerKey(protocol.Rsa2048RestrKeyType, rsa2048OwnerKey, nil); err != nil {
 		return nil, err
 	}
@@ -456,9 +537,10 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 	if err := state.AddOwnerKey(protocol.Secp256r1KeyType, ec256OwnerKey, nil); err != nil {
 		return nil, err
 	}
-	if err := state.AddOwnerKey(protocol.Secp384r1KeyType, ec384OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.Secp384r1KeyType, ec384OwnerKey, ec384OwnerCert); err != nil {
 		return nil, err
 	}
+
 
 	// Auto-register RV blob so that TO1 can be tested unless a TO0 address is
 	// given or RV bypass is set

@@ -130,6 +130,7 @@ type TO2Config struct {
 // If the Credential Reuse protocol is allowed and occurs, then the returned
 // device credential will be nil.
 func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c TO2Config) (*DeviceCredential, error) {
+	slog.Debug("BKG","to2","TO2")
 	ctx = contextWithErrMsg(ctx)
 
 	// Configure defaults
@@ -198,6 +199,7 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 	defer func() { _ = serviceInfoWriter.Close() }()
 
 	// Send devmod KVs in initial ServiceInfo
+	slog.Debug("bkg","to2","DeviceModeules","Modules",c.DeviceModules)
 	go c.Devmod.Write(ctx, c.DeviceModules, sendMTU, serviceInfoWriter)
 
 	// Loop, sending and receiving service info until done
@@ -232,6 +234,7 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 
 // Stop any plugin device modules
 func stopPlugins(modules *deviceModuleMap) {
+	slog.Debug("BKG","to2","stopPlugins")
 	pluginStopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var pluginStopWg sync.WaitGroup
@@ -267,6 +270,7 @@ func stopPlugins(modules *deviceModuleMap) {
 // all ownership voucher entries, which are retrieved iteratively with
 // subsequence requests.
 func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c *TO2Config) (protocol.Nonce, crypto.PublicKey, *VoucherHeader, kex.Session, error) {
+	slog.Debug("BKG","to2","verifyOwner")
 	proveDeviceNonce, info, sess, err := sendHelloDevice(ctx, transport, c)
 	if err != nil {
 		return protocol.Nonce{}, nil, nil, nil, err
@@ -290,6 +294,7 @@ func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[prot
 }
 
 func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], info *ovhValidationContext, c *TO2Config) error {
+	slog.Debug("BKG","to2","verifyVoucher")
 	// Construct ownership voucher from parts received from the owner service
 	var entries []cose.Sign1Tag[VoucherEntryPayload, []byte]
 	for i := 0; i < info.NumVoucherEntries; i++ {
@@ -386,6 +391,7 @@ type ovhValidationContext struct {
 //
 //nolint:gocyclo // This is very complex validation that is better understood linearly
 func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (protocol.Nonce, *ovhValidationContext, kex.Session, error) {
+	slog.Debug("BKG","to2","sendHelloDevice")
 	// Generate a new nonce
 	var proveOVNonce protocol.Nonce
 	if _, err := rand.Read(proveOVNonce[:]); err != nil {
@@ -526,6 +532,7 @@ type ovhProof struct {
 //
 // TODO: Handle MaxDeviceMessageSize
 func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1Tag[ovhProof, []byte], error) { //nolint:gocyclo
+	slog.Debug("BKG","to2","proveOVHdr")
 	// Parse request
 	var rawHello cbor.RawBytes
 	if err := cbor.NewDecoder(msg).Decode(&rawHello); err != nil {
@@ -656,6 +663,7 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 }
 
 func (s *TO2Server) ownerKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding) (crypto.Signer, *protocol.PublicKey, error) {
+	slog.Debug("BKG","to2","ownerKey")
 	key, chain, err := s.OwnerKeys.OwnerKey(keyType)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil, fmt.Errorf("owner key type %s not supported", keyType)
@@ -696,6 +704,7 @@ func (s *TO2Server) ownerKey(keyType protocol.KeyType, keyEncoding protocol.KeyE
 
 // GetOVNextEntry(62) -> OVNextEntry(63)
 func sendNextOVEntry(ctx context.Context, transport Transport, i int) (*cose.Sign1Tag[VoucherEntryPayload, []byte], error) {
+	slog.Debug("BKG","to2","sendNextOVEntry")
 	// Define request structure
 	msg := struct {
 		OVEntryNum int
@@ -744,6 +753,7 @@ type ovEntry struct {
 
 // GetOVNextEntry(62) -> OVNextEntry(63)
 func (s *TO2Server) ovNextEntry(ctx context.Context, msg io.Reader) (*ovEntry, error) {
+	slog.Debug("BKG","to2","ovNextEntry")
 	// Parse request
 	var nextEntry struct {
 		OVEntryNum int
@@ -774,6 +784,7 @@ func (s *TO2Server) ovNextEntry(ctx context.Context, msg io.Reader) (*ovEntry, e
 
 // ProveDevice(64) -> SetupDevice(65)
 func proveDevice(ctx context.Context, transport Transport, proveDeviceNonce protocol.Nonce, ownerPublicKey crypto.PublicKey, sess kex.Session, c *TO2Config) (protocol.Nonce, *VoucherHeader, error) {
+	slog.Debug("BKG","to2","proveDevice")
 	// Generate a new nonce
 	var setupDeviceNonce protocol.Nonce
 	if _, err := rand.Read(setupDeviceNonce[:]); err != nil {
@@ -880,6 +891,7 @@ type deviceSetup struct {
 //
 //nolint:gocyclo // This is very complex validation that is better understood linearly
 func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1Tag[deviceSetup, []byte], error) {
+	slog.Debug("BKG","to2","setupDevice")
 	// Decode a fully-parsed and raw COSE Sign1. The latter is used for
 	// verifying in a more lenient way, as it doesn't require deterministic
 	// encoding of CBOR (even though FDO requires this).
@@ -1018,6 +1030,7 @@ type deviceServiceInfoReady struct {
 
 // DeviceServiceInfoReady(66) -> OwnerServiceInfoReady(67)
 func sendReadyServiceInfo(ctx context.Context, transport Transport, alg protocol.HashAlg, replacementOVH *VoucherHeader, sess kex.Session, c *TO2Config) (maxDeviceServiceInfoSiz uint16, err error) {
+	slog.Debug("BKG","to2","sendReadyServiceInfo")
 	// Calculate the new OVH HMac similar to DI.SetHMAC
 	var h hash.Hash
 	switch alg {
@@ -1083,6 +1096,7 @@ type ownerServiceInfoReady struct {
 
 // DeviceServiceInfoReady(66) -> OwnerServiceInfoReady(67)
 func (s *TO2Server) ownerServiceInfoReady(ctx context.Context, msg io.Reader) (*ownerServiceInfoReady, error) {
+	slog.Debug("BKG","to2","onwerServiceINfoReady")
 	// Parse request
 	var deviceReady deviceServiceInfoReady
 	if err := cbor.NewDecoder(msg).Decode(&deviceReady); err != nil {
@@ -1176,6 +1190,7 @@ func exchangeServiceInfo(ctx context.Context,
 	sess kex.Session,
 	c *TO2Config,
 ) error {
+	slog.Debug("BKG","to2","excahngeServiceInfo")
 	// Shadow context to ensure that any goroutines still running after this
 	// function exits will shutdown
 	ctx, cancel := context.WithCancel(ctx)
@@ -1212,6 +1227,7 @@ func exchangeServiceInfo(ctx context.Context,
 	defer stopPlugins(&modules)
 
 	var prevModuleName string
+	slog.Debug("bkg","to2","DoServiceInfoThing")
 	for {
 		// Handle received owner service info and produce zero or more service
 		// info to send. Each service info grouping is automatically chunked
@@ -1221,6 +1237,7 @@ func exchangeServiceInfo(ctx context.Context,
 		// the default MTU. If both queues fill, the device will deadlock. This
 		// should only happen for a poorly behaved owner module.
 		deviceInfo, deviceInfoIn := serviceinfo.NewChunkOutPipe(1000)
+		slog.Debug("bkg","to2","ServiceInfoThing","deviceInfo",deviceInfo,"deviceInfoIn",deviceInfoIn)
 		ctxWithMTU := context.WithValue(ctx, serviceinfo.MTUKey{}, mtu)
 		// Track the owner module in use so that if the next round has no data
 		// exchanged, we can still yield to the appropriate device module.
@@ -1274,12 +1291,14 @@ func exchangeServiceInfo(ctx context.Context,
 		case <-ctx.Done():
 			return ctx.Err()
 		case prevModuleName = <-moduleName:
+			slog.Debug("bkg","to2","DoServiceInfoThing","prevModuleName",prevModuleName)
 			ownerInfo = nextOwnerInfo
 		}
 	}
 }
 
 func discardDeviceInfo(deviceInfo *serviceinfo.ChunkReader) {
+	slog.Debug("BKG","to2","discardDeviceInfo")
 	for {
 		kv, err := deviceInfo.ReadChunk(math.MaxUint16)
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -1300,6 +1319,7 @@ func discardDeviceInfo(deviceInfo *serviceinfo.ChunkReader) {
 
 // Done(70) -> Done2(71)
 func sendDone(ctx context.Context, transport Transport, proveDvNonce, setupDvNonce protocol.Nonce, sess kex.Session) error {
+	slog.Debug("BKG","to2","sendDone")
 	// Finalize TO2 by sending Done message
 	msg := doneMsg{
 		NonceTO2ProveDv: proveDvNonce,
@@ -1369,6 +1389,7 @@ func (info ownerServiceInfo) String() string {
 func exchangeServiceInfoRound(ctx context.Context, transport Transport, mtu uint16,
 	r *serviceinfo.ChunkReader, w *serviceinfo.ChunkWriter, sess kex.Session,
 ) (int, bool, error) {
+	slog.Debug("BKG","to2","exchangeServiceInfoRound")
 	// Create DeviceServiceInfo request structure
 	var msg deviceServiceInfo
 	maxRead := mtu
@@ -1416,6 +1437,7 @@ func exchangeServiceInfoRound(ctx context.Context, transport Transport, mtu uint
 
 // DeviceServiceInfo(68) -> OwnerServiceInfo(69)
 func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceServiceInfo, sess kex.Session) (*ownerServiceInfo, error) {
+	slog.Debug("BKG","to2","sendDeviceServiceInfo","Msg",msg)
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceServiceInfoMsgType, msg, sess)
 	if err != nil {
@@ -1432,6 +1454,7 @@ func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceS
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
 			return nil, fmt.Errorf("error parsing TO2.OwnerServiceInfo contents: %w", err)
 		}
+		slog.Debug("BKG","to2","GotOwnerServiceInfo","ownerServiceInfo",ownerServiceInfo)
 		return &ownerServiceInfo, nil
 
 	case protocol.ErrorMsgType:
@@ -1449,6 +1472,8 @@ func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceS
 
 // DeviceServiceInfo(68) -> OwnerServiceInfo(69)
 func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*ownerServiceInfo, error) {
+
+	slog.Debug("BKG","to2","ownerServiceInfo")
 	// Parse request
 	var deviceInfo deviceServiceInfo
 	if err := cbor.NewDecoder(msg).Decode(&deviceInfo); err != nil {
@@ -1468,6 +1493,7 @@ func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*owner
 	// Handle data with owner module
 	unchunked, unchunker := serviceinfo.NewChunkInPipe(len(deviceInfo.ServiceInfo))
 	for _, kv := range deviceInfo.ServiceInfo {
+		slog.Debug("BKG","to2","ownerServiceInfo","KV",kv)
 		if err := unchunker.WriteChunk(kv); err != nil {
 			return nil, fmt.Errorf("error unchunking received device service info: write: %w", err)
 		}
@@ -1520,6 +1546,7 @@ func (s *TO2Server) continueWithModule(moduleName string, mod serviceinfo.OwnerM
 
 // Allow owner module to produce data
 func (s *TO2Server) produceOwnerServiceInfo(ctx context.Context, moduleName string, mod serviceinfo.OwnerModule) (*ownerServiceInfo, error) {
+	slog.Debug("BKG","to2","produceOwnerServiceInfo")
 	mtu, err := s.Session.MTU(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting max device service info size: %w", err)
@@ -1550,6 +1577,7 @@ func (s *TO2Server) produceOwnerServiceInfo(ctx context.Context, moduleName stri
 
 // Done(70) -> Done2(71)
 func (s *TO2Server) to2Done2(ctx context.Context, msg io.Reader) (*done2Msg, error) {
+	slog.Debug("BKG","to2","Done")
 	// Parse request
 	var done doneMsg
 	if err := cbor.NewDecoder(msg).Decode(&done); err != nil {

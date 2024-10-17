@@ -9,6 +9,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 )
@@ -93,6 +94,7 @@ type Devmod struct {
 
 // Write the devmod messages.
 func (d *Devmod) Write(ctx context.Context, deviceModules map[string]DeviceModule, mtu uint16, w *UnchunkWriter) {
+	slog.Debug("BKG","devmod","Write")
 	defer func() { _ = w.Close() }()
 
 	var modules []string
@@ -137,6 +139,7 @@ func (d *Devmod) Write(ctx context.Context, deviceModules map[string]DeviceModul
 }
 
 func (d *Devmod) writeDescriptorMessages(w *UnchunkWriter) error {
+	slog.Debug("BKG","devmod","writeDescriptorMessages")
 	// Active must always be true
 	if err := w.NextServiceInfo(devmodModuleName, "active"); err != nil {
 		return err
@@ -149,7 +152,8 @@ func (d *Devmod) writeDescriptorMessages(w *UnchunkWriter) error {
 	dm := reflect.ValueOf(d).Elem()
 	for i := 0; i < dm.NumField(); i++ {
 		tag := dm.Type().Field(i).Tag.Get("devmod")
-		messageName, _, _ := strings.Cut(tag, ",")
+		messageName, val, _ := strings.Cut(tag, ",")
+		slog.Debug("BKG","devmod","writeDescriptorMessage","MessageName",messageName,"Value",val)
 		if dm.Field(i).Len() == 0 {
 			continue
 		}
@@ -166,6 +170,7 @@ func (d *Devmod) writeDescriptorMessages(w *UnchunkWriter) error {
 
 // Validate checks that all required fields are not their zero value.
 func (d *Devmod) Validate() error {
+	slog.Debug("BKG","devmod","validate")
 	// Use reflection to get each field and check required fields are not empty
 	dm := reflect.ValueOf(d).Elem()
 	for i := 0; i < dm.NumField(); i++ {
@@ -180,6 +185,7 @@ func (d *Devmod) Validate() error {
 }
 
 func (d *Devmod) writeModuleMessages(modules []string, mtu uint16, w *UnchunkWriter) error {
+	slog.Debug("BKG","devmod","writeModuleMessages")
 	writeChunk := func(chunk DevmodModulesChunk) error {
 		if err := w.NextServiceInfo(devmodModuleName, "modules"); err != nil {
 			return err
@@ -239,7 +245,9 @@ func (d *Devmod) writeModuleMessages(modules []string, mtu uint16, w *UnchunkWri
 
 type sizewriter int
 
-func (w *sizewriter) Write(p []byte) (int, error) { *w += sizewriter(len(p)); return len(p), nil }
+func (w *sizewriter) Write(p []byte) (int, error) { 
+	slog.Debug("BKG","devmod","Write")
+	*w += sizewriter(len(p)); return len(p), nil }
 
 // DevmodModulesChunk is the CBOR array value used in devmod:modules messages.
 // Instead of representing it as an []any, it provides a more typed interface,

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
@@ -26,10 +27,13 @@ type Upload struct {
 var _ serviceinfo.DeviceModule = (*Upload)(nil)
 
 // Transition implements serviceinfo.DeviceModule.
-func (u *Upload) Transition(active bool) error { u.reset(); return nil }
+func (u *Upload) Transition(active bool) error { 
+	slog.Debug("BKG","Upload","Transition")
+	u.reset(); return nil }
 
 // Receive implements serviceinfo.DeviceModule.
 func (u *Upload) Receive(ctx context.Context, messageName string, messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
+	slog.Debug("BKG","Upload","Recieve")
 	if err := u.receive(messageName, messageBody, respond, yield); err != nil {
 		u.reset()
 		return err
@@ -38,6 +42,7 @@ func (u *Upload) Receive(ctx context.Context, messageName string, messageBody io
 }
 
 func (u *Upload) receive(messageName string, messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
+	slog.Debug("BKG","Upload","recieve")
 	switch messageName {
 	case "name":
 		var name string
@@ -59,8 +64,10 @@ func (u *Upload) receive(messageName string, messageBody io.Reader, respond func
 }
 
 func (u *Upload) upload(name string, respond func(string) io.Writer, yield func()) error {
+	slog.Debug("BKG","Upload","upload")
 	defer u.reset()
 
+	slog.Debug("bkg","upload","name")
 	f, err := u.FS.Open(name)
 	if err != nil {
 		return err
@@ -101,9 +108,13 @@ func (u *Upload) upload(name string, respond func(string) io.Writer, yield func(
 	return cbor.NewEncoder(respond("sha-384")).Encode(hash.Sum(nil))
 }
 
-func (u *Upload) reset() { u.needSha = false }
+func (u *Upload) reset() { 
+	slog.Debug("BKG","Upload","Reset")
+	u.needSha = false 
+	}
 
 // Yield implements DeviceModule.
 func (u *Upload) Yield(ctx context.Context, respond func(message string) io.Writer, yield func()) error {
+	slog.Debug("BKG","Upload","Yield")
 	return nil
 }
