@@ -65,6 +65,8 @@ var (
 	printOwnerPubKey string
 	printOwnerPrivKey string
 	printOwnerChain string
+	printDelegateChain    string
+	printDelegatePrivKey string
 	ownerCert	 bool
 	importVoucher    string
 	downloads        stringList
@@ -103,6 +105,8 @@ func init() {
 	serverFlags.StringVar(&printOwnerPubKey, "print-owner-public", "", "Print owner public key of `type` and exit")
 	serverFlags.StringVar(&printOwnerPrivKey, "print-owner-private", "", "Print owner private key of `type` and exit")
 	serverFlags.StringVar(&printOwnerChain, "print-owner-chain", "", "Print owner chain of `type` and exit")
+	serverFlags.StringVar(&printDelegateChain, "print-delegate-chain", "", "Print delegate chain of `type` and exit")
+	serverFlags.StringVar(&printDelegatePrivKey, "print-delegate-private", "", "Print delegate private key of `type` and exit")
 	serverFlags.StringVar(&importVoucher, "import-voucher", "", "Import a PEM encoded voucher file at `path`")
 	serverFlags.Var(&downloads, "download", "Use fdo.download FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
@@ -135,6 +139,15 @@ func server() error { //nolint:gocyclo
 	if printOwnerChain != "" {
 		return doPrintOwnerChain(state)
 	}
+
+	if printDelegateChain != "" {
+		return doPrintDelegateChain(state)
+	}
+
+	if printDelegatePrivKey != "" {
+		return doPrintDelegatePrivKey(state)
+	}
+
 	// If importing a voucher, do so and exit
 	if importVoucher != "" {
 		return doImportVoucher(state)
@@ -261,6 +274,68 @@ func doPrintOwnerChain(state *sqlite.DB) error {
 	fmt.Println(pemData.String())
 	return nil
 }
+func doPrintDelegateChain(state *sqlite.DB) error {
+	keyType, err := protocol.ParseKeyType(printDelegateChain)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	_, chain, err := state.Delegate(keyType)
+	if err != nil {
+		return err
+	}
+	var pemData bytes.Buffer
+	for _, cert := range chain {
+		pemBlock := &pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: cert.Raw,
+		}
+	        if err := pem.Encode(&pemData, pemBlock); err != nil {
+            		fmt.Fprintf(os.Stderr, "Failed to encode certificate: %v\n", err)
+			return err
+		}
+	}
+
+	fmt.Println(pemData.String())
+	return nil
+}
+
+func doPrintDelegatePrivKey(state *sqlite.DB) error {
+	var pemBlock *pem.Block
+	keyType, err := protocol.ParseKeyType(printDelegatePrivKey)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	key, _, err := state.Delegate(keyType)
+	if err != nil {
+		return err
+	}
+	// Private Key
+	switch key.(type) {
+		case *rsa.PrivateKey:
+			der := x509.MarshalPKCS1PrivateKey(key.(*rsa.PrivateKey))
+			pemBlock = &pem.Block{
+				Type:  "PRIVATE KEY",
+				Bytes: der,
+			}
+		case *ecdsa.PrivateKey:
+			der, err := x509.MarshalECPrivateKey(key.(*ecdsa.PrivateKey))
+			if err != nil {
+				return err
+			}
+			pemBlock = &pem.Block{
+				Type:  "EC PRIVATE KEY",
+				Bytes: der,
+			}
+
+		default:
+			err =  fmt.Errorf("Unknown Owner key type %T", key)
+			return err
+	}
+
+	return pem.Encode(os.Stdout, pemBlock)
+	return nil
+}
+
 func doPrintOwnerPubKey(state *sqlite.DB) error {
 	keyType, err := protocol.ParseKeyType(printOwnerPubKey)
 	if err != nil {
@@ -314,7 +389,8 @@ func doPrintOwnerPrivKey(state *sqlite.DB) error {
 			return err
 	}
 
-	return pem.Encode(os.Stdout, pemBlock)
+	print( pem.Encode(os.Stdout, pemBlock))
+	return nil
 }
 
 func doImportVoucher(state *sqlite.DB) error {
@@ -593,6 +669,10 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 
 			ec384DelegateCert, err := generateDelegate(ec384OwnerKey,ec384DelegateKey)
 			if err != nil {
+				return nil, err
+			}
+
+			if err := state.AddDelegateKey(protocol.Secp384r1KeyType, ec384DelegateKey, ec384DelegateCert); err != nil {
 				return nil, err
 			}
 
