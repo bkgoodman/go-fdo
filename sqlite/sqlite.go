@@ -78,6 +78,11 @@ func Init(db *sql.DB) (*DB, error) {
 			, pkcs8 BLOB NOT NULL
 			, x509_chain BLOB NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS delegate_certs
+			( type INTEGER UNIQUE NOT NULL
+			, pkcs8 BLOB NOT NULL
+			, x509_chain BLOB 
+			)`,
 		`CREATE TABLE IF NOT EXISTS owner_keys
 			( type INTEGER UNIQUE NOT NULL
 			, pkcs8 BLOB NOT NULL

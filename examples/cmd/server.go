@@ -16,6 +16,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
+	"encoding/asn1"
 	"errors"
 	"bytes"
 	"flag"
@@ -64,6 +65,7 @@ var (
 	printOwnerPubKey string
 	printOwnerPrivKey string
 	printOwnerChain string
+	ownerCert	 bool
 	importVoucher    string
 	downloads        stringList
 	uploadDir        string
@@ -95,6 +97,7 @@ func init() {
 	serverFlags.StringVar(&resaleKey, "resale-key", "", "The `path` to a PEM-encoded x.509 public key for the next owner")
 	serverFlags.BoolVar(&reuseCred, "reuse-cred", false, "Perform the Credential Reuse Protocol in TO2")
 	serverFlags.BoolVar(&insecureTLS, "insecure-tls", false, "Listen with a self-signed TLS certificate")
+	serverFlags.BoolVar(&ownerCert, "owner-certs", false, "Generate Owner Certificatats (in addition to keys)")
 	serverFlags.BoolVar(&rvBypass, "rv-bypass", false, "Skip TO1")
 	serverFlags.IntVar(&rvDelay, "rv-delay", 0, "Delay TO1 by N `seconds`")
 	serverFlags.StringVar(&printOwnerPubKey, "print-owner-public", "", "Print owner public key of `type` and exit")
@@ -222,6 +225,19 @@ func serveHTTP(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) error {
 	return srv.Serve(lis)
 }
 
+func printCert(cert *x509.Certificate) {
+	var pemData bytes.Buffer
+	pemBlock := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert.Raw,
+	}
+	if err := pem.Encode(&pemData, pemBlock); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to encode certificate: %v\n", err)
+		return 
+	}
+
+	fmt.Println(pemData.String())
+}
 func doPrintOwnerChain(state *sqlite.DB) error {
 	keyType, err := protocol.ParseKeyType(printOwnerChain)
 	if err != nil {
@@ -231,7 +247,6 @@ func doPrintOwnerChain(state *sqlite.DB) error {
 	if err != nil {
 		return err
 	}
-	slog.Debug("BKG","Type",fmt.Sprintf("%T",chain),"OwnerKeyChain",chain)
 	var pemData bytes.Buffer
 	for _, cert := range chain {
 		pemBlock := &pem.Block{
@@ -434,6 +449,11 @@ func mustMarshal(v any) []byte {
 
 //nolint:gocyclo
 func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport.Handler, error) {
+	var ec384OwnerCert []*x509.Certificate = nil
+	var ec256OwnerCert []*x509.Certificate = nil
+	var rsa3072OwnerCert []*x509.Certificate = nil
+	var rsa2048OwnerCert []*x509.Certificate = nil
+
 	// Generate manufacturing component keys
 	rsa2048MfgKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -470,6 +490,28 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 		}
 		return []*x509.Certificate{cert}, nil
 	}
+	generateDelegate := func(key crypto.Signer, delegateKey crypto.Signer) ([]*x509.Certificate, error) {
+		template := &x509.Certificate{
+			SerialNumber:          big.NewInt(1),
+			Subject:               pkix.Name{CommonName: "Test Delegate"},
+			NotBefore:             time.Now(),
+			NotAfter:              time.Now().Add(30 * 365 * 24 * time.Hour),
+			BasicConstraintsValid: true,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+			UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateOnboard,fdo.OID_delegateUpload,fdo.OID_delegateRedirect},
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, delegateKey.Public(), key)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, err
+		}
+		printCert(cert)
+		return []*x509.Certificate{cert}, nil
+	}
+
 	rsa2048Chain, err := generateCA(rsa2048MfgKey)
 	if err != nil {
 		return nil, err
@@ -520,21 +562,55 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 		return nil, err
 	}
 
-	ec384OwnerCert, err := generateCA(ec384OwnerKey)
-	if err != nil {
+	// Generate full owner Certificates, if requested
+
+	if (ownerCert) {
+		ec384OwnerCert, err = generateCA(ec384OwnerKey)
+		if err != nil {
+			return nil, err
+		}
+
+		ec256OwnerCert, err = generateCA(ec256OwnerKey)
+		if err != nil {
+			return nil, err
+		}
+
+		rsa3072OwnerCert, err = generateCA(rsa3072OwnerKey)
+		if err != nil {
+			return nil, err
+		}
+
+		rsa2048OwnerCert, err = generateCA(rsa2048OwnerKey)
+		if err != nil {
+			return nil, err
+		}
+
+		if (useDelegate) {
+			ec384DelegateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			if err != nil {
+				return nil, err
+			}
+
+			ec384DelegateCert, err := generateDelegate(ec384OwnerKey,ec384DelegateKey)
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Printf("%T Delegate Cert Created BKG",ec384DelegateCert)
+		}
+	}
+
+
+	if err := state.AddOwnerKey(protocol.Rsa2048RestrKeyType, rsa2048OwnerKey, rsa2048OwnerCert); err != nil {
 		return nil, err
 	}
-	slog.Debug("BKG","eckey",ec384OwnerCert)
-	if err := state.AddOwnerKey(protocol.Rsa2048RestrKeyType, rsa2048OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.RsaPkcsKeyType, rsa3072OwnerKey, rsa3072OwnerCert); err != nil {
 		return nil, err
 	}
-	if err := state.AddOwnerKey(protocol.RsaPkcsKeyType, rsa3072OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.RsaPssKeyType, rsa3072OwnerKey, rsa3072OwnerCert); err != nil {
 		return nil, err
 	}
-	if err := state.AddOwnerKey(protocol.RsaPssKeyType, rsa3072OwnerKey, nil); err != nil {
-		return nil, err
-	}
-	if err := state.AddOwnerKey(protocol.Secp256r1KeyType, ec256OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.Secp256r1KeyType, ec256OwnerKey, ec256OwnerCert); err != nil {
 		return nil, err
 	}
 	if err := state.AddOwnerKey(protocol.Secp384r1KeyType, ec384OwnerKey, ec384OwnerCert); err != nil {

@@ -7,3 +7,5 @@ openssl pkey  -pubin  -text -noout -in /tmp/mykey.key
 figlet MyPriv
 go run ./examples/cmd server -debug -db test.db -print-owner-private SECP384R1 > /tmp/mypriv.key
 openssl pkey  -text -noout -in /tmp/mypriv.key
+
+go run ./examples/cmd server -debug -db test.db -delegate -owner-certs
