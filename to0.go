@@ -57,10 +57,15 @@ func (c *TO0Client) RegisterBlob(ctx context.Context, transport Transport, guid 
 	return c.ownerSign(ctx, transport, guid, ttl, nonce, addrs)
 }
 
+
 // Hello(20) -> HelloAck(21)
 func (c *TO0Client) hello(ctx context.Context, transport Transport) (protocol.Nonce, error) {
 	// Define request structure
-	msg := struct{}{}
+	//msg := struct{}{}
+	msg := CapabilityFlags
+	//if vendor_unique, err := cbor.Marshal(test.input); err != nil {
+	//	return protocol.Nonce{}, fmt.Errorf("error Marshalling Vendor Unique String")
+	//}
 
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO0HelloMsgType, msg, nil)

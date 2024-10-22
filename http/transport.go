@@ -17,6 +17,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"encoding/hex"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/kex"
@@ -108,7 +109,7 @@ func (t *Transport) Send(ctx context.Context, msgType uint8, msg any, sess kex.S
 	if debugEnabled() {
 		debugReq, _ := httputil.DumpRequestOut(req, false)
 		slog.Debug("request", "dump", string(bytes.TrimSpace(debugReq)),
-			"body", tryDebugNotation(body.Bytes()))
+			"body", tryDebugNotation(body.Bytes()),"bodyRaw",hex.EncodeToString(body.Bytes()))
 	}
 	resp, err := t.Client.Do(req)
 	if err != nil {

@@ -1283,6 +1283,7 @@ func (e *Encoder) encodeArray(size int, get func(int) reflect.Value) error {
 
 func (e *Encoder) encodeStruct(size int, get func([]int) reflect.Value, field func([]int) reflect.StructField) error {
 	// Get encoding order of fields
+
 	indices, omittable := fieldOrder(size, func(i int) reflect.StructField { return field([]int{i}) })
 
 	// Filter omittable fields which are the zero value for the associated type

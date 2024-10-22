@@ -16,13 +16,32 @@ import (
 	"github.com/fido-device-onboard/go-fdo/cbor"
 )
 
+type ttt struct {
+	test string
+}
+func TestBKGEncode(t *testing.T) {
+	type a struct {
+		A string
+		B int
+	}
+	a1 := a{A: "hello", B: 22}
+	//input := []*a{&a1, nil}
+	input := a1
+	got, err := cbor.Marshal(input)
+	_ = got
+	//t.Errorf("Marshaling %+v  to %X", input, got)
+	if err != nil {
+		t.Errorf("error marshaling %+v: %v", input, err)
+	}
+	//t.Errorf("BKG Error")
+}
 func TestEncodeInt(t *testing.T) {
 	t.Run("int", func(t *testing.T) {
 		input := 999
 		expect := []byte{0x19, 0x03, 0xe7}
 
 		if got, err := cbor.Marshal(input); err != nil {
-			t.Errorf("error marshaling %d: %v", input, err)
+			t.Errorf("error marshaling %v: %d", input, err)
 		} else if !bytes.Equal(got, expect) {
 			t.Errorf("marshaling %d; expected % x, got % x", input, expect, got)
 		}
@@ -1616,6 +1635,21 @@ func TestEncodeFixedArray(t *testing.T) {
 			expect []byte
 		}{
 			{expect: []byte{0x84, 0x01, 0x02, 0x03, 0x04}, input: [4]*int{&one, &two, &three, &four}},
+		} {
+			if got, err := cbor.Marshal(test.input); err != nil {
+				t.Errorf("error marshaling % x: %v", test.input, err)
+			} else if !reflect.DeepEqual(got[:], test.expect[:]) {
+				t.Errorf("marshaling % x; expected % x, got % x", test.input, test.expect, got)
+			}
+		}
+	})
+
+	t.Run("string array", func(t *testing.T) {
+		for _, test := range []struct {
+			input  [4]string
+			expect []byte
+		}{
+			{expect: []byte{0x84, 0x64, 0x54, 0x68, 0x69, 0x73, 0x62, 0x69, 0x73, 0x61, 0x61, 0x64, 0x74, 0x65, 0x73, 0x74}, input: [4]string{"This","is","a","test"}},
 		} {
 			if got, err := cbor.Marshal(test.input); err != nil {
 				t.Errorf("error marshaling % x: %v", test.input, err)

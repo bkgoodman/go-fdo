@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"log/slog"
+	//"log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
@@ -52,7 +52,7 @@ func handleOwnerModuleMessages(ctx context.Context, prevModuleName string, modul
 			return prevModuleName
 		}
 		moduleName, messageName, _ := strings.Cut(key, ":")
-		slog.Debug("bkg","to2_module","ModuleName",moduleName,"MessageName",messageName,"messageBody",messageBody)
+		//slog.Debug("bkg","to2_module","ModuleName",moduleName,"MessageName",messageName,"messageBody",string(messageBody))
 		prevModuleName = moduleName
 
 		// Automatically receive and respond to active messages. This send is

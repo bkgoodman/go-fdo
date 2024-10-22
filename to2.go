@@ -332,7 +332,7 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 	}
 
 	// Ensure that the voucher entry chain ends with given owner key.
-	//
+	// Delegate DELEGATE
 	// Note that this check is REQUIRED in this case, because the the owner public
 	// key from the ProveOVHdr message's unprotected headers is used to
 	// validate its COSE signature. If the public key were not to match the

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -122,14 +123,14 @@ func (h Handler) debugRequest(ctx context.Context, w http.ResponseWriter, r *htt
 		r.Body = io.NopCloser(&saveBody)
 	}
 	slog.Debug("request", "dump", string(bytes.TrimSpace(debugReq)),
-		"body", tryDebugNotation(saveBody.Bytes()))
+		"body", tryDebugNotation(saveBody.Bytes()),"bodyRaw",hex.EncodeToString(saveBody.Bytes()))
 
 	// Dump response
 	rr := httptest.NewRecorder()
 	h.handleRequest(ctx, rr, r, msgType, resp)
 	debugResp, _ := httputil.DumpResponse(rr.Result(), false)
 	slog.Debug("response", "dump", string(bytes.TrimSpace(debugResp)),
-		"body", tryDebugNotation(rr.Body.Bytes()))
+		"resp", tryDebugNotation(rr.Body.Bytes()),"respRaw",hex.EncodeToString(rr.Body.Bytes()))
 
 	// Copy recorded response into response writer
 	for key, values := range rr.Header() {
