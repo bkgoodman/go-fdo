@@ -9,6 +9,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"log"
 	"errors"
 	"fmt"
 	"io"
@@ -58,7 +59,7 @@ func TO1(ctx context.Context, transport Transport, cred DeviceCredential, key cr
 type helloRV struct {
 	GUID     protocol.GUID
 	ASigInfo sigInfo
-	CapabilityFlags capabilityFlags `cbor:",flat2"`
+	CapabilityFlags capabilityFlags `cbor:",omitempty,flat2"`
 }
 
 // HelloRV(30) -> HelloRVAck(31)
@@ -113,7 +114,7 @@ func helloRv(ctx context.Context, transport Transport, cred DeviceCredential, ke
 type rvAck struct {
 	NonceTO1Proof protocol.Nonce
 	BSigInfo      sigInfo
-	CapabilityFlags capabilityFlags `cbor:",flat2"`
+	CapabilityFlags capabilityFlags `cbor:"omitempty,flat2"`
 }
 
 // HelloRV(30) -> HelloRVAck(31)
@@ -150,12 +151,15 @@ func (s *TO1Server) helloRVAck(ctx context.Context, msg io.Reader) (*rvAck, erro
 // ProveToRV(32) -> RVRedirect(33)
 func proveToRv(ctx context.Context, transport Transport, cred DeviceCredential, nonce protocol.Nonce, key crypto.Signer, opts crypto.SignerOpts) (*cose.Sign1[protocol.To1d, []byte], error) {
 	// Define request structure
+	log.Printf("proveToRv \n")
 	token := cose.Sign1[eatoken, []byte]{
 		Payload: cbor.NewByteWrap(newEAT(cred.GUID, nonce, nil, nil)),
 	}
+	log.Printf("proveToRv Token %v\n",token)
 	if err := token.Sign(key, nil, nil, opts); err != nil {
 		return nil, fmt.Errorf("error signing EAT payload for TO1.ProveToRV: %w", err)
 	}
+	log.Printf("proveToRv WE DONT GET HERE TokenTag %v\n",token.Tag())
 	msg := token.Tag()
 
 	// Make request

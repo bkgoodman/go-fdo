@@ -378,6 +378,7 @@ type helloDeviceMsg struct {
 	KexSuiteName         kex.Suite
 	CipherSuite          kex.CipherSuiteID
 	SigInfoA             sigInfo
+	CapabilityFlags capabilityFlags `cbor:",omitempty,flatx"`
 }
 
 type ovhValidationContext struct {
@@ -412,6 +413,7 @@ func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (pr
 		KexSuiteName:         c.KeyExchange,
 		CipherSuite:          c.CipherSuite,
 		SigInfoA:             *aSigInfo,
+		CapabilityFlags:      CapabilityFlags,
 	}
 
 	// Make a request
@@ -526,6 +528,7 @@ type ovhProof struct {
 	KeyExchangeA        []byte
 	HelloDeviceHash     protocol.Hash
 	MaxOwnerMessageSize uint16
+	CapabilityFlags capabilityFlags `cbor:"omitempty,flatx"`
 }
 
 // HelloDevice(60) -> ProveOVHdr(61)
@@ -646,6 +649,7 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 			KeyExchangeA:        xA,
 			HelloDeviceHash:     helloDeviceHash,
 			MaxOwnerMessageSize: 65535, // TODO: Make this configurable and match handler config
+			CapabilityFlags: CapabilityFlags,
 		}),
 	}
 	if err := s1.Sign(ownerKey, nil, nil, opts); err != nil {

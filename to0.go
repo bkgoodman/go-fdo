@@ -100,6 +100,7 @@ func (c *TO0Client) hello(ctx context.Context, transport Transport) (protocol.No
 
 type to0Ack struct {
 	NonceTO0Sign protocol.Nonce
+	CapabilityFlags capabilityFlags `cbor:",omitempty,flat2"`
 }
 
 // Hello(20) -> HelloAck(21)

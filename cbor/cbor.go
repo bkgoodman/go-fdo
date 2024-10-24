@@ -205,6 +205,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"reflect"
 	"slices"
@@ -300,14 +301,19 @@ type FlatUnmarshaler interface {
 	FlatUnmarshalCBOR(io.Reader) error
 }
 
-func flatN(sf reflect.StructField) (int, bool) {
+
+func flatN(sf reflect.StructField, rv reflect.Value) (int, bool) {
 	_, options, _ := strings.Cut(sf.Tag.Get("cbor"), ",")
 	for _, option := range strings.Split(options, ",") {
 		if strings.HasPrefix(option, "flat") {
 			if option == "flat" {
 				return 1, true
 			}
-			n, err := strconv.Atoi(strings.TrimPrefix(option, "flat"))
+			nstr := strings.TrimPrefix(option, "flat")
+			if (nstr == "x") {
+				return flatX(sf,rv)
+			}
+			n, err := strconv.Atoi(nstr)
 			if err != nil {
 				panic("invalid cbor struct tag 'flatNNN' option: " + err.Error())
 			}
@@ -315,6 +321,30 @@ func flatN(sf reflect.StructField) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// flatX  will determine flattened size by counting
+// elements, taking into account any zero, omitempty
+
+func flatX(sf reflect.StructField, rv reflect.Value) (int, bool) {
+	log.Printf("FLATX PROCESS %T %v %T %v\n",sf,sf,rv,rv)
+		// Get the reflect value of the struct
+	// Get the type information
+	//typ := reflect.TypeOf(sf)
+	// Iterate over the fields
+	count := 0
+	nestedType := sf.Type
+	for i := 0; i < nestedType.NumField(); i++ {
+		field := nestedType.Field(i)
+		//val := sf.Field(i)
+		log.Printf("FLATX Field Name: %s, Field Type: %s, Tag: %s, FIELD: %v\n",
+			field.Name,field.Type,field.Tag,rv.Field(i))
+		//if (!checkOmmittable(string(field.Tag)) || (val.Len() != 0)) {
+		//	count += 1
+		//}
+	}
+	log.Printf("FLATX Return field count: %d\n",count)
+	return count,true
 }
 
 // RawBytes encodes and decodes untransformed. When encoding, it must contain
@@ -769,7 +799,7 @@ func (d *Decoder) decodeArrayToStruct(rv reflect.Value, additional []byte) error
 	}
 
 	// Get order of fields and filter out up to one if necessary
-	indices, omittable := fieldOrder(rv.NumField(), rv.Type().Field)
+	indices, omittable := fieldOrder(rv,rv.Type().Field) // .NumField(), rv.Type().Field)
 	if int(length) != len(indices) {
 		omittedOne := false
 		for i, idx := range indices {
@@ -808,6 +838,7 @@ func (d *Decoder) decodeArrayToStruct(rv reflect.Value, additional []byte) error
 
 func (d *Decoder) decodeStructField(rv reflect.Value, idx []int) error {
 	// Allocate any nil embedded struct pointer fields on the index path
+	log.Printf("decodeStructField %v %v\n",rv,idx)
 	for i := 1; i < len(idx); i++ {
 		embed := rv.FieldByIndex(idx[:i])
 		// TODO: Handle embedded interfaces?
@@ -818,7 +849,7 @@ func (d *Decoder) decodeStructField(rv reflect.Value, idx []int) error {
 	f := rv.FieldByIndex(idx)
 
 	// Use FlatUnmarshaler if flatN option is given
-	if n, ok := flatN(rv.Type().FieldByIndex(idx)); ok {
+	if n, ok := flatN(rv.Type().FieldByIndex(idx),rv); ok {
 		fm, ok := f.Interface().(FlatUnmarshaler)
 		if !ok && f.CanAddr() {
 			fm, ok = f.Addr().Interface().(FlatUnmarshaler)
@@ -1125,7 +1156,7 @@ func (e *Encoder) Encode(v any) error {
 	case rv.Kind() == reflect.Array || rv.Kind() == reflect.Slice:
 		return e.encodeArray(rv.Len(), rv.Index)
 	case rv.Kind() == reflect.Struct:
-		return e.encodeStruct(rv.NumField(), rv.FieldByIndex, rv.Type().FieldByIndex)
+		return e.encodeStruct(rv) //rv.NumField(), rv.FieldByIndex, rv.Type().FieldByIndex)
 	case rv.Kind() == reflect.Map:
 		return e.encodeMap(rv.Len(), rv.MapKeys(), rv.MapIndex)
 	case rv.Kind() == reflect.Bool:
@@ -1281,13 +1312,20 @@ func (e *Encoder) encodeArray(size int, get func(int) reflect.Value) error {
 	return nil
 }
 
-func (e *Encoder) encodeStruct(size int, get func([]int) reflect.Value, field func([]int) reflect.StructField) error {
+func (e *Encoder) encodeStruct(rv reflect.Value) error { //size int, get func([]int) reflect.Value, field func([]int) reflect.StructField) error {
 	// Get encoding order of fields
+	//size := rv.NumField()
+	get := rv.FieldByIndex
+	field := rv.Type().FieldByIndex
 
-	indices, omittable := fieldOrder(size, func(i int) reflect.StructField { return field([]int{i}) })
+	log.Printf("encodeStruct call rv %v\n",rv)
+	indices, omittable := fieldOrder(rv, func(i int) reflect.StructField { return field([]int{i}) })
+	log.Printf("[End fieldOrder]\n")
+
 
 	// Filter omittable fields which are the zero value for the associated type
 	for i, idx := range indices {
+		//log.Printf("Object %v Ommittable %v Zero %v\n",get(idx),omittable(idx),get(idx).IsZero())
 		if omittable(idx) && get(idx).IsZero() {
 			indices = append(indices[:i], indices[i+1:]...)
 		}
@@ -1309,7 +1347,9 @@ func (e *Encoder) encodeStruct(size int, get func([]int) reflect.Value, field fu
 		}
 
 		// Use FlatMarshaler, if available
-		if n, ok := flatN(field(idx)); ok {
+		log.Printf("encodeStruct INDEX ALL  call flatN i %d idx %d Field %v rv %v\n",i,idx[0],field(idx),rv)
+		log.Printf("encodeStruct INDEX THIS call flatN i %d idx %d Field %v rv %v\n",i,idx[0],field(idx),rv.Field(idx[0]))
+		if n, ok := flatN(field(idx),rv.Field(idx[0])); ok {
 			rv := get(idx)
 			fm, ok := rv.Interface().(FlatMarshaler)
 			if !ok && rv.CanAddr() {
@@ -1420,9 +1460,12 @@ type weightedField struct {
 }
 
 // Handle weighting/skipping options in struct tags
-func fieldOrder(n int, field func(int) reflect.StructField) (indices [][]int, omittable func([]int) bool) {
+//func fieldOrder(n int, field func(int) reflect.StructField) (indices [][]int, omittable func([]int) bool) 
+func fieldOrder(rv reflect.Value, field func(int) reflect.StructField) (indices [][]int, omittable func([]int) bool) {
 	// Collect weights by struct tag and skip fields with "-"
-	fields := collectFieldWeights(nil, 0, n, field, nil)
+	n := rv.NumField()
+	log.Printf("fieldOrder calling collectFieldWeights")
+	fields := collectFieldWeights(rv,nil, 0, n, field, nil)
 
 	// Use weights to order indices using the following algorithm:
 	//
@@ -1457,15 +1500,28 @@ func fieldOrder(n int, field func(int) reflect.StructField) (indices [][]int, om
 	}
 }
 
-func collectFieldWeights(parents []int, i, upper int, field func(int) reflect.StructField, fields []weightedField) []weightedField {
+func checkOmmittable(tag string) bool {
+	_,options, _ := strings.Cut(tag, ",")
+
+	for _, option := range strings.Split(options, ",") {
+		if option  == "omitempty" {
+			return true
+		}
+	}
+	return false
+}
+
+
+func collectFieldWeights(rv reflect.Value, parents []int, i, upper int, field func(int) reflect.StructField, fields []weightedField) []weightedField {
 	if i >= upper {
 		return fields
 	}
 	f := field(i)
+	log.Printf("CollectFieldWeights for index %d field %v rv %v\n",i,f,rv)
 
 	// Skip private fields
 	if !f.IsExported() {
-		return collectFieldWeights(parents, i+1, upper, field, fields)
+		return collectFieldWeights(rv, parents, i+1, upper, field, fields)
 	}
 
 	// Extract cbor tag value before the first comma separator (if any)
@@ -1474,7 +1530,7 @@ func collectFieldWeights(parents []int, i, upper int, field func(int) reflect.St
 
 	// Skip item if it is a struct field and has the tag `cbor:"-"`
 	if val == "-" {
-		return collectFieldWeights(parents, i+1, upper, field, fields)
+		return collectFieldWeights(rv,parents, i+1, upper, field, fields)
 	}
 
 	// Parse weight from string
@@ -1490,32 +1546,33 @@ func collectFieldWeights(parents []int, i, upper int, field func(int) reflect.St
 	}
 
 	// Return duplicates indices if flat (un)marshaling
-	if n, ok := flatN(f); ok {
+	log.Printf("collectFieldWeights calling flatN %v\n",rv)
+	if n, ok := flatN(f,rv); ok {
 		for j := 0; j < n; j++ {
 			fields = append(fields, weightedField{
 				index:  append(parents, i),
 				weight: weight,
 			})
 		}
-		return collectFieldWeights(parents, i+1, upper, field, fields)
+		return collectFieldWeights(rv,parents, i+1, upper, field, fields)
 	}
 
 	// Handle embedded fields
 	if f.Anonymous {
 		switch {
 		case f.Type.Kind() == reflect.Struct:
-			nested := collectFieldWeights(append(parents, i), 0, f.Type.NumField(), f.Type.Field, nil)
-			return collectFieldWeights(parents, i+1, upper, field, append(fields, nested...))
+			nested := collectFieldWeights(rv,append(parents, i), 0, f.Type.NumField(), f.Type.Field, nil)
+			return collectFieldWeights(rv,parents, i+1, upper, field, append(fields, nested...))
 		case f.Type.Kind() == reflect.Pointer && f.Type.Elem().Kind() == reflect.Struct:
-			nested := collectFieldWeights(append(parents, i), 0, f.Type.Elem().NumField(), f.Type.Elem().Field, nil)
-			return collectFieldWeights(parents, i+1, upper, field, append(fields, nested...))
+			nested := collectFieldWeights(rv,append(parents, i), 0, f.Type.Elem().NumField(), f.Type.Elem().Field, nil)
+			return collectFieldWeights(rv,parents, i+1, upper, field, append(fields, nested...))
 		default:
 			// TODO: Should embedded interfaces be handled differently?
 		}
 	}
 
 	// Append to field list
-	return collectFieldWeights(parents, i+1, upper, field, append(fields, weightedField{
+	return collectFieldWeights(rv,parents, i+1, upper, field, append(fields, weightedField{
 		index:     append(parents, i),
 		weight:    weight,
 		omittable: omittable,

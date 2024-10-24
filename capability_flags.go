@@ -9,8 +9,21 @@ import (
 )
 
 type capabilityFlags struct {
-	Flags []byte //`cbor:bstr`
-	VendorUnique []string //`cbor:omitempty`
+	Flags []byte 
+	VendorUnique []string `cbor:",omitempty"`
+}
+
+// Return number of fields that we are NOT marshalling because
+// they are EMPTY (upstream code will use to resize arrays
+// correctly. Since we will not return a venorUnique array
+// at all if there are zero entries in it, return 1 in this case
+
+func (f capabilityFlags) FlatMarshalEmptyFields() int {
+	
+	if len(f.VendorUnique) == 0 {
+		return 1
+	}
+	return 0
 }
 
 func (f capabilityFlags) FlatMarshalCBOR(w io.Writer) error {
