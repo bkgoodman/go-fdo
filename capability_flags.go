@@ -55,6 +55,6 @@ var VendorUniqueFlags = []string{"com.example.test"}
 // should be contants
 var CapabilityFlags = capabilityFlags{
 	Flags: []byte{DelegateSupportFlag}, // Delegate support
-	//VendorUnique: VendorUniqueFlags,
+	VendorUnique: VendorUniqueFlags,
 }
 

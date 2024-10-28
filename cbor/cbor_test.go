@@ -16,25 +16,59 @@ import (
 	"github.com/fido-device-onboard/go-fdo/cbor"
 )
 
-type ttt struct {
-	test string
+type flatStruct struct {
+	A string
+	B []byte `cbor:",omitempty"`
+}
+func (f flatStruct) FlatMarshalEmptyFields() int {
+	
+	if len(f.B) == 0 {
+		return 1
+	}
+	return 0
+}
+
+func (f flatStruct) FlatMarshalCBOR(w io.Writer) error {
+	e:=cbor.NewEncoder(w)
+	if err := e.Encode(f.A); err != nil {
+		return err
+	}
+	if len(f.B) > 0 {
+		e.Encode(f.B)
+	}
+	return nil
+}
+
+func (f *flatStruct) FlatUnmarshalCBOR(r io.Reader) error {
+	if err := cbor.NewDecoder(r).Decode(&f.A); err != nil {
+		return err
+	}
+	// Decode if present - i.e. ignore errors.
+	f.B=[]byte{}
+	cbor.NewDecoder(r).Decode(&f.B)
+	return nil
 }
 func TestBKGEncode(t *testing.T) {
-	type a struct {
-		A string
-		B int
+	type outer struct {
+		H Flatten `cbor:",flat2"`
+		C string
+		I flatStruct `cbor:",omitempty,flatx"`
 	}
-	a1 := a{A: "hello", B: 22}
-	//input := []*a{&a1, nil}
-	input := a1
-	got, err := cbor.Marshal(input)
-	_ = got
-	//t.Errorf("Marshaling %+v  to %X", input, got)
-	if err != nil {
-		t.Errorf("error marshaling %+v: %v", input, err)
+	//o := outer{C: "hello", I: inner{A: "test", B:42}}
+	o := outer{H: Flatten{B: "Header",C:[]byte{1,2,3}}, C: "hello", I: flatStruct{A: "test"} }
+
+	input := o
+	expect := []byte{ 0x84, 0x67, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x21, 0x43, 0x01, 0x02, 0x03, 0x65, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x64, 0x74, 0x65, 0x73, 0x74 }
+
+	if got, err := cbor.Marshal(input); err != nil {
+		t.Errorf("error marshaling %v: %d", input, err)
+	} else if !bytes.Equal(got, expect) {
+		t.Errorf("marshaling %v; expected %x, got %x", input, expect, got)
 	}
 	//t.Errorf("BKG Error")
 }
+
+
 func TestEncodeInt(t *testing.T) {
 	t.Run("int", func(t *testing.T) {
 		input := 999
@@ -43,7 +77,7 @@ func TestEncodeInt(t *testing.T) {
 		if got, err := cbor.Marshal(input); err != nil {
 			t.Errorf("error marshaling %v: %d", input, err)
 		} else if !bytes.Equal(got, expect) {
-			t.Errorf("marshaling %d; expected % x, got % x", input, expect, got)
+			t.Errorf("marshaling %v; expected % x, got % x", input, expect, got)
 		}
 	})
 

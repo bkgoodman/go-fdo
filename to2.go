@@ -528,7 +528,7 @@ type ovhProof struct {
 	KeyExchangeA        []byte
 	HelloDeviceHash     protocol.Hash
 	MaxOwnerMessageSize uint16
-	CapabilityFlags capabilityFlags `cbor:"omitempty,flatx"`
+	CapabilityFlags capabilityFlags `cbor:",omitempty,flatx"`
 }
 
 // HelloDevice(60) -> ProveOVHdr(61)

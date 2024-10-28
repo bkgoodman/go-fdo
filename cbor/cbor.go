@@ -307,13 +307,16 @@ func flatN(sf reflect.StructField, rv reflect.Value) (int, bool) {
 	for _, option := range strings.Split(options, ",") {
 		if strings.HasPrefix(option, "flat") {
 			if option == "flat" {
+			log.Printf("Calling flat1\n")
 				return 1, true
 			}
 			nstr := strings.TrimPrefix(option, "flat")
 			if (nstr == "x") {
+			log.Printf("Calling flatx\n")
 				return flatX(sf,rv)
 			}
 			n, err := strconv.Atoi(nstr)
+			log.Printf("Calling flat%d\n",n)
 			if err != nil {
 				panic("invalid cbor struct tag 'flatNNN' option: " + err.Error())
 			}
@@ -336,12 +339,15 @@ func flatX(sf reflect.StructField, rv reflect.Value) (int, bool) {
 	nestedType := sf.Type
 	for i := 0; i < nestedType.NumField(); i++ {
 		field := nestedType.Field(i)
-		//val := sf.Field(i)
+		val := rv.Field(i)
 		log.Printf("FLATX Field Name: %s, Field Type: %s, Tag: %s, FIELD: %v\n",
 			field.Name,field.Type,field.Tag,rv.Field(i))
-		//if (!checkOmmittable(string(field.Tag)) || (val.Len() != 0)) {
-		//	count += 1
-		//}
+		//count += 1
+		if (checkOmmittable(string(field.Tag)) && (val.Len() == 0)) {
+			log.Printf(" - Ommit empty field %d\n",i)
+		} else {
+			count += 1
+		}
 	}
 	log.Printf("FLATX Return field count: %d\n",count)
 	return count,true
@@ -848,6 +854,7 @@ func (d *Decoder) decodeStructField(rv reflect.Value, idx []int) error {
 	}
 	f := rv.FieldByIndex(idx)
 
+	log.Printf("decodeStruct IDX %v",idx)
 	// Use FlatUnmarshaler if flatN option is given
 	if n, ok := flatN(rv.Type().FieldByIndex(idx),rv); ok {
 		fm, ok := f.Interface().(FlatUnmarshaler)

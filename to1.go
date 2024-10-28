@@ -114,7 +114,7 @@ func helloRv(ctx context.Context, transport Transport, cred DeviceCredential, ke
 type rvAck struct {
 	NonceTO1Proof protocol.Nonce
 	BSigInfo      sigInfo
-	CapabilityFlags capabilityFlags `cbor:"omitempty,flat2"`
+	CapabilityFlags capabilityFlags `cbor:",omitempty,flat2"`
 }
 
 // HelloRV(30) -> HelloRVAck(31)
