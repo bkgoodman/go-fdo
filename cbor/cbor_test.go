@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"fmt"
 	"testing"
 
 	"github.com/fido-device-onboard/go-fdo"
@@ -21,7 +22,7 @@ type flatStruct struct {
         B []string `cbor:",omitempty"`
 
 }
-func (f flatStruct) FlatMarshalEmptyFields() int {
+func (f flatStruct) FlatMarshalEmptyCount() int {
 	
 	if len(f.B) == 0 {
 		return 1
@@ -29,9 +30,13 @@ func (f flatStruct) FlatMarshalEmptyFields() int {
 	return 0
 }
 
+
 func (f flatStruct) FlatMarshalCBOR(w io.Writer) error {
 	e:=cbor.NewEncoder(w)
-	if err := e.Encode(f.A); err != nil {
+
+	if (len(f.A) == 0) {
+		e.Encode([]byte{0})
+	} else  if err := e.Encode(f.A); err != nil {
 		return err
 	}
 	if len(f.B) > 0 {
@@ -63,10 +68,6 @@ func TestBKGEncode(t *testing.T) {
 		expect []byte
 	}{
 		{
-			expect: []byte{0x83,0x67,0x48,0x65,0x61,0x64,0x65,0x72,0x21,0x43,0x01,0x02,0x03,0x65,0x68,0x65,0x6C,0x6C,0x6F},
-			input: outer{H: Flatten{B: "Header",C:[]byte{1,2,3}}, C: "hello", I: flatStruct{}},
-		},
-		{
 			expect: []byte{0x85,0x67,0x48,0x65,0x61,0x64,0x65,0x72,0x21,0x43,0x01,0x02,0x03,0x65,0x68,0x65,0x6c,0x6c,0x6f,0x41,0x2a,0x81,0x64,0x74,0x65,0x73,0x74},
 			input: outer{H: Flatten{B: "Header",C:[]byte{1,2,3}}, C: "hello", I: flatStruct{B: []string{"test"}, A: []byte{42}} },
 		},
@@ -74,12 +75,19 @@ func TestBKGEncode(t *testing.T) {
 			expect: []byte{0x84,0x67,0x48,0x65,0x61,0x64,0x65,0x72,0x21,0x43,0x01,0x02,0x03,0x65,0x68,0x65,0x6c,0x6c,0x6f,0x41,0x2a},
 			input: outer{H: Flatten{B: "Header",C:[]byte{1,2,3}}, C: "hello", I: flatStruct{A: []byte{42}}},
 		},
+		{
+			expect: []byte{0x84,0x67,0x48,0x65,0x61,0x64,0x65,0x72,0x21,0x43,0x01,0x02,0x03,0x65,0x68,0x65,0x6C,0x6C,0x6F,0x41,0x00},
+			input: outer{H: Flatten{B: "Header",C:[]byte{1,2,3}}, C: "hello", I: flatStruct{}},
+		},
 	 } 	{
 			if got, err := cbor.Marshal(test.input); err != nil {
 				t.Errorf("error marshaling (case %d) %v: %v", i, test.input, err)
+				panic ("Dared")
 			} else if !bytes.Equal(got, test.expect) {
 				t.Errorf("marshaling (case %d) %v; expected %x, got %x", i, test.input, test.expect, got)
+				panic ("Dared")
 			}
+			fmt.Printf("==== CASE %d DONE ====\n",i)
 		}
 
 }
@@ -2019,6 +2027,8 @@ func TestDecodeOVHeaderX5Chain(t *testing.T) {
 	t.Logf("Header: %+v", ovh)
 }
 
+
+
 type Flatten struct {
 	B string
 	C []byte
@@ -2040,6 +2050,15 @@ func (f *Flatten) FlatUnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 	return cbor.NewDecoder(r).Decode(&f.C)
+}
+
+// Return 1 if "C" is empty and will be ommitted when flattened
+func (f Flatten) FlatMarshalEmptyCount() int { 
+	if (len(f.C) == 0) {
+		return 1
+	} else {
+		return 0
+	}
 }
 
 func TestFlatMarshal(t *testing.T) {

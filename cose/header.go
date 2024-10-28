@@ -20,6 +20,8 @@ type Header struct {
 var _ cbor.FlatMarshaler = (*Header)(nil)
 var _ cbor.FlatUnmarshaler = (*Header)(nil)
 
+func (hdr Header) FlatMarshalEmptyCount() int { return 0 }
+
 // FlatMarshalCBOR implements cbor.FlatMarshaler.
 func (hdr Header) FlatMarshalCBOR(w io.Writer) error {
 	protectedHeader, err := newEmptyOrSerializedMap(hdr.Protected)

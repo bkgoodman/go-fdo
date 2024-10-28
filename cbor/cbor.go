@@ -287,6 +287,9 @@ type FlatMarshaler interface {
 	// array). The number of objects decoded must match the flatN option of the
 	// cbor tag.
 	FlatMarshalCBOR(io.Writer) error
+	// EmptyCount returns the number of fields which are EMPTY and
+	// will dissapear when flattened (so we can adjust containing array size)
+	FlatMarshalEmptyCount() int
 }
 
 // FlatUnmarshaler is implemented by types to consume more than one object of
@@ -307,16 +310,15 @@ func flatN(sf reflect.StructField, rv reflect.Value) (int, bool) {
 	for _, option := range strings.Split(options, ",") {
 		if strings.HasPrefix(option, "flat") {
 			if option == "flat" {
-			log.Printf("Calling flat1\n")
+				log.Printf("flatN Calling flat1\n")
 				return 1, true
 			}
 			nstr := strings.TrimPrefix(option, "flat")
 			if (nstr == "x") {
-			log.Printf("Calling flatx\n")
+				log.Printf("flatN Calling flatx\n")
 				return flatX(sf,rv)
 			}
 			n, err := strconv.Atoi(nstr)
-			log.Printf("Calling flat%d\n",n)
 			if err != nil {
 				panic("invalid cbor struct tag 'flatNNN' option: " + err.Error())
 			}
@@ -1325,9 +1327,9 @@ func (e *Encoder) encodeStruct(rv reflect.Value) error { //size int, get func([]
 	get := rv.FieldByIndex
 	field := rv.Type().FieldByIndex
 
-	log.Printf("encodeStruct call rv %v\n",rv)
+	log.Printf("encodeStruct call for Type %s rv %v\n",rv.Type(),rv)
 	indices, omittable := fieldOrder(rv, func(i int) reflect.StructField { return field([]int{i}) })
-	log.Printf("[End fieldOrder]\n")
+	log.Printf("[End fieldOrder] Indicies: %v\n",indices)
 
 
 	// Filter omittable fields which are the zero value for the associated type
@@ -1338,8 +1340,30 @@ func (e *Encoder) encodeStruct(rv reflect.Value) error { //size int, get func([]
 		}
 	}
 
+	// Removed flattend, ommitted fields from array count
+	minusFields := 0
+	for i, idx := range indices {
+		
+		if i > 0 && slices.Equal(idx, indices[i-1]) {
+			continue
+		}
+
+		rvv := get(idx)
+		fm, ok := rvv.Interface().(FlatMarshaler)
+		//log.Printf("BKG Index %v ok %d CanAddr %v Type %s\n",idx,ok,rvv.CanAddr(),rvv.Type())
+		if ok  {
+			ec := fm.FlatMarshalEmptyCount()
+			log.Printf("Index %d MTcount=%d for idx idx %v Type: %s Value: %v",i,ec,rvv.Type(),rvv)
+			minusFields += ec
+		} else {
+			log.Printf("NoMTcount idx %d %v",i,rvv)
+		}
+	}
+
 	// Write the length as additional info
-	info := u64Bytes(uint64(len(indices)))
+	info := u64Bytes(uint64(len(indices)-minusFields))
+	log.Printf("Array length will be %d - %d = %d for %s\n",
+		len(indices),minusFields,info,rv.Type())
 	if err := e.write(additionalInfo(arrayMajorType, info)); err != nil {
 		return err
 	}
@@ -1553,14 +1577,15 @@ func collectFieldWeights(rv reflect.Value, parents []int, i, upper int, field fu
 	}
 
 	// Return duplicates indices if flat (un)marshaling
-	log.Printf("collectFieldWeights calling flatN %v\n",rv)
 	if n, ok := flatN(f,rv); ok {
+		log.Printf("collectFieldWeights calling flatN %v\n",rv)
 		for j := 0; j < n; j++ {
 			fields = append(fields, weightedField{
 				index:  append(parents, i),
 				weight: weight,
 			})
 		}
+		log.Printf("collectFieldWeights finished flatN %v\n",rv)
 		return collectFieldWeights(rv,parents, i+1, upper, field, fields)
 	}
 
