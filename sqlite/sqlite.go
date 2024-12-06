@@ -1205,6 +1205,24 @@ func (db *DB) ListDelegateKeys() (names []string, err error) {
 	}
 	return
 }
+func (db *DB) ListVouchers() (guids []protocol.GUID, err error) {
+	rows,err := db.db.Query("SELECT guid from owner_vouchers;")
+        if (err != nil) {
+                return 
+        }
+        defer rows.Close()
+
+	for rows.Next() {
+		var raw []uint8
+		var guid protocol.GUID
+		if err = rows.Scan(&raw); err != nil {
+			return
+		}
+		copy(guid[:],raw)
+		guids = append(guids, guid)
+	}
+	return
+}
 
 // OwnerKey returns the private key matching a given key type and optionally
 // its certificate chain.

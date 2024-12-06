@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
         "crypto"
         "crypto/ecdsa"
         "crypto/rsa"
@@ -12,7 +13,6 @@ import (
         "crypto/x509"
         "encoding/asn1"
         "encoding/pem"
-        _ "encoding/hex"
         "errors"
         "flag"
         "fmt"
@@ -120,6 +120,13 @@ func createDelegateCertificate(state *sqlite.DB,args []string) error {
         var sigAlg x509.SignatureAlgorithm
         var priv crypto.Signer
         for i,keyType := range keyTypes {
+
+                ownerIdent := ""
+                strs := strings.Split(keyType,":")
+                keyType = strs[0]
+                if (len(strs)>1) {
+                    ownerIdent = strs[1]
+                }
                 switch keyType {
                 case "ec256":
                         priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -148,7 +155,7 @@ func createDelegateCertificate(state *sqlite.DB,args []string) error {
                         default:
                                 flags = fdo.DelegateFlagIntermediate
                 }
-                cert, err := fdo.GenerateDelegate(lastPriv,flags,priv.Public(),subject,issuer,permissions, sigAlg)
+                cert, err := fdo.GenerateDelegate(lastPriv,flags,priv.Public(),subject,issuer,permissions, sigAlg,ownerIdent)
                 if err != nil {
                         return fmt.Errorf("Failed to generate Delegate: %v\n",err)
                 }
@@ -209,6 +216,27 @@ func doListDelegateChains(state *sqlite.DB,args []string) error {
         return nil
 }
 
+// Print voucher in internal DB by GUID
+func doPrintVoucher(state *sqlite.DB,args []string) error {
+	// Parse voucher
+        if (len(args) < 1) {
+		guids,err := state.ListVouchers()
+		if (err != nil) {
+			return fmt.Errorf("Error querying GUIDS: %v",err)
+		}
+		fmt.Printf("%+v\n",guids)
+		return nil
+        }
+	guid, err:= protocol.StringToGUID(args[0])
+	if (err != nil) {
+		return fmt.Errorf("Error decoding GUID: %w",err)
+	}
+	ov,err := state.Voucher(context.TODO(),guid)
+	if (err != nil) {
+		return fmt.Errorf("Error reading voucher for GUID %s: %w",args[0],err)
+	}
+	return printVoucher(ov)
+}
 
 func doInspectVoucher(state *sqlite.DB,args []string) error {
 	// Parse voucher
@@ -230,6 +258,10 @@ func doInspectVoucher(state *sqlite.DB,args []string) error {
 	if err := cbor.Unmarshal(blk.Bytes, &ov); err != nil {
 		return fmt.Errorf("error parsing voucher: %w", err)
 	}
+	return printVoucher(&ov)
+}
+
+func printVoucher(ov *fdo.Voucher) error {
 	//fmt.Printf("RAW BYES: %s\n",hex.EncodeToString(blk.Bytes))
 	fmt.Printf("Version         :    %d\n",ov.Version)
 	//fmt.Printf("Header          :    %+v\n",ov.Header)
@@ -342,10 +374,12 @@ delegate print {chainname} [ownerKeyType]
 delegate list
 delegate key {chainname} 
 delegate inspectVoucher {filename} 
+delegate printVoucher {guid} 
 delegate create {chainName} {Permission[,Permission...]} {ownerKeyType} {keyType} [keyType...]
 
 Permissions: onboard upload redirect claim provision
 KeyTypes: ec256, ec384, rsa2048, rsa3072
+  - Each key (type) can be suffixed by :{ownerIdent} to add an owner identity 
 ownerKeyTypes - See "Key types"
 
 
@@ -382,6 +416,8 @@ func delegate(args []string) error {
                         return createDelegateCertificate(state,args[1:])
                 case "inspectVoucher":
                         return doInspectVoucher(state,args[1:])
+                case "printVoucher":
+                        return doPrintVoucher(state,args[1:])
                 case "help":
                         return doDelegateHelp(state,args[1:])
                 default:

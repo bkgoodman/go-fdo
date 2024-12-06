@@ -266,6 +266,7 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 }
 
 func encodePublicKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding, chain []*x509.Certificate) (*protocol.PublicKey, error) {
+		fmt.Printf("\n\n\n**** Encode key as %v!!!!!\n\n\n",keyEncoding)
 	switch keyEncoding {
 	case protocol.X509KeyEnc, protocol.CoseKeyEnc:
 		switch keyType {
@@ -277,6 +278,7 @@ func encodePublicKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding,
 			return nil, fmt.Errorf("unsupported key type: %s", keyType)
 		}
 	case protocol.X5ChainKeyEnc:
+		fmt.Printf("\n\n\n**** WILL ENCODE AS x5CHAIN!!!!!\n\n\n")
 		return protocol.NewPublicKey(keyType, chain, false)
 	default:
 		return nil, fmt.Errorf("unsupported key encoding: %s", keyEncoding)
@@ -373,9 +375,21 @@ func (s *DIServer[T]) maybeAutoExtend(ov *Voucher) error {
 	if err != nil {
 		return fmt.Errorf("error getting %s manufacturer key: %w", keyType, err)
 	}
-	nextOwner, _, err := s.AutoExtend.OwnerKey(keyType)
+	nextOwner, ownerChain, err := s.AutoExtend.OwnerKey(keyType)
 	if err != nil {
 		return fmt.Errorf("error getting %s owner key: %w", keyType, err)
+	}
+	fmt.Printf("\n\n!!!! AUTO EXTEND to: %T\n",nextOwner)
+	fmt.Printf("\n\n!!!! AUTO EXTEND to: %+v\n",nextOwner)
+	fmt.Printf("\n\n!!!! AUTO EXTEND to: %s\n",nextOwner)
+	if (len(ownerChain) > 0) {
+		fmt.Printf("\n\n!!!! OwnerChain: %+v\n",ownerChain)
+		extended, err := ExtendVoucher(ov, owner, ownerChain, nil)
+		if err != nil {
+			return err
+		}
+		*ov = *extended
+		return nil
 	}
 	switch owner.Public().(type) {
 	case *ecdsa.PublicKey:

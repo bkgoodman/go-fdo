@@ -189,7 +189,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 }
                 if (err != nil) { return fmt.Errorf("VerifyDelegate Error making ephemeral root CA key: %v",err) }
                 if (output) { fmt.Printf("Ephemeral Root Key: %s\n",KeyToString(rootPriv.Public()))}
-                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0)
+                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0,"")
                 if (err != nil) {
                         return fmt.Errorf("VerifyDelegate Error createing ephemerial Owner Root Cert: %v",err)
                 }
@@ -258,7 +258,7 @@ func DelegateChainSummary(chain []*x509.Certificate) (s string) {
 
 // This is a helper function, but also used in the verification process
 func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicKey,subject string,issuer string, 
-        permissions []asn1.ObjectIdentifier, sigAlg x509.SignatureAlgorithm) (*x509.Certificate, error) {
+        permissions []asn1.ObjectIdentifier, sigAlg x509.SignatureAlgorithm, ownerIdent string) (*x509.Certificate, error) {
                 parent := &x509.Certificate{
                         SerialNumber:          big.NewInt(2),
                         Subject:               pkix.Name{CommonName: issuer},
@@ -276,13 +276,22 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                         NotAfter:              time.Now().Add(30 * 24 * time.Hour),
                         BasicConstraintsValid: true,
                         IsCA:                        false,
-                        KeyUsage:                x509.KeyUsageDigitalSignature,
+                        KeyUsage:              x509.KeyUsageDigitalSignature,
                         UnknownExtKeyUsage:    permissions,
                 }
                 if (flags & (DelegateFlagIntermediate | DelegateFlagRoot))!= 0 {
                         template.KeyUsage |= x509.KeyUsageCertSign 
                         template.IsCA = true
                 }
+
+				if (ownerIdent != "") {
+                    template.ExtraExtensions = []pkix.Extension{
+                            pkix.Extension{
+                                Id:    OID_ownershipCA,
+                                Value: []byte(ownerIdent),
+                            },
+                    }
+				}
                 
                 der, err := x509.CreateCertificate(rand.Reader, template, parent, delegateKey, key)
                 if err != nil {

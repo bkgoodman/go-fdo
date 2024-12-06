@@ -140,6 +140,7 @@ func (ovh *VoucherHeader) Equal(otherOVH *VoucherHeader) bool {
 //	OVEHashHdrInfo:   Hash,  ;; hash[GUID||DeviceInfo] in header
 //	OVEExtra:         null / bstr .cbor OVEExtraInfo
 //	OVEPubKey:        PublicKey
+//	OVEOwnerIdent:    String
 //
 // ]
 //
@@ -152,6 +153,7 @@ type VoucherEntryPayload struct {
 	HeaderHash   protocol.Hash
 	Extra        *cbor.Bstr[map[int][]byte]
 	PublicKey    protocol.PublicKey
+	OwnerIdent   string `cbor:",omitempty"` // TODO should this be ommittable?!?
 }
 
 func (v *Voucher) shallowClone() *Voucher {
@@ -327,8 +329,19 @@ func (v *Voucher) VerifyEntries() error {
 }
 
 // Validate each entry recursively
-func validateNextEntry(prevOwnerKey crypto.PublicKey, alg protocol.HashAlg, prevHash hash.Hash, headerInfoHash []byte, i int, entries []cose.Sign1Tag[VoucherEntryPayload, []byte]) error {
+func validateNextEntry(prevOwnerKey crypto.PublicKey,  alg protocol.HashAlg, prevHash hash.Hash, headerInfoHash []byte, i int, entries []cose.Sign1Tag[VoucherEntryPayload, []byte]) error {
 	entry := entries[0].Untag()
+	fmt.Printf("\n\n\n*** VALIDATENEXT ENTRY: %+v\n\n\n",entry.Payload.Val.PublicKey)
+	fmt.Printf("\n\n\n*** VALIDATENEXT ENCD : %+v\n\n\n",entry.Payload.Val.PublicKey.Encoding)
+	fmt.Printf("\n\n\n*** VALIDATENEXT Ident: %+v\n\n\n",entry.Payload.Val.OwnerIdent)
+	chain, err := entry.Payload.Val.PublicKey.Chain()
+	if (err == nil) {
+		fmt.Printf("*** VALIDATENEXT CHAIN: %+v\n",CertChainToString("CERTIFICATE",chain))
+	}
+
+	// If an OwnerIdent is specified in an entry, the subsequent entry must be an x5chain
+	// in which a CA has named the leaf cert (key) as having that OwnerIden specified
+	// in the "ownershipCA" extension field string
 
 	// Check payload has a valid COSE signature from the previous owner key
 	if ok, err := entry.Verify(prevOwnerKey, nil, nil); err != nil {
@@ -336,6 +349,20 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey, alg protocol.HashAlg, prev
 	} else if !ok {
 		return fmt.Errorf("%w: COSE signature for entry %d did not match previous owner key", ErrCryptoVerifyFailed, i)
 	}
+
+	// This entry was extended to a named identifier. This means this entry
+	// must be an x5chain, whose cert chain specifies this named identifier.
+    prevOwnerIdent:=""
+	if (prevOwnerIdent != "") {
+	// TODO allow "prevOwnerKey" to be nil - if/when we can rely on a device-embedded Root CA
+	// But this would kind of require RV server to trust same CA to secure RV server...?
+		fmt.Printf("\n\n\n*** VALIDATENEXT ENTRY: %+v\n\n\n",entry.Payload.Val.PublicKey)
+		if (entry.Payload.Val.PublicKey.Encoding != protocol.X5ChainKeyEnc) {
+			return fmt.Errorf("Voucher entry %d specified named owner identity \"%s\", but entry %d was not an x5chain (certificate chain)",
+				i-1,prevOwnerIdent,i)
+		}
+	}
+
 
 	// Check payload's HeaderHash matches voucher header as hash[GUID||DeviceInfo]
 	headerHash := entry.Payload.Val.HeaderHash
@@ -483,6 +510,7 @@ func ExtendVoucher[T protocol.PublicKeyOrChain](v *Voucher, owner crypto.Signer,
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling next owner public key: %w", err)
 	}
+	fmt.Printf("**** NextOwnerPublic Key encoded like: %s\n",nextOwnerPublicKey)
 
 	// Select the appropriate hash algorithm
 	devicePubKey := (*v.CertChain)[0].PublicKey

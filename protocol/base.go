@@ -12,6 +12,15 @@ import (
 // time onboarding is successful in the Transfer Ownership 2 (TO2) protocol.
 type GUID [16]byte
 
+func StringToGUID(str string) (GUID, error) {
+    bytes, err := hex.DecodeString(str)
+    if err != nil {
+        return GUID{}, err
+    }
+    var guid GUID
+    copy(guid[:], bytes)
+    return guid, nil
+}
 
 func (g GUID) String() string {
 	return fmt.Sprintf("%s",hex.EncodeToString(g[:]))

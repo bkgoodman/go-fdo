@@ -202,7 +202,7 @@ func (pub PublicKey) String() string {
     if (err != nil) {
 	    return fmt.Sprintf("Err: %w",err)
     }
-    return Key2String(key)
+    return fmt.Sprintf("[%s] %s",pub.Encoding,Key2String(key))
 }
 
 func (pub PublicKey) LongString() string {
