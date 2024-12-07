@@ -140,7 +140,6 @@ func (ovh *VoucherHeader) Equal(otherOVH *VoucherHeader) bool {
 //	OVEHashHdrInfo:   Hash,  ;; hash[GUID||DeviceInfo] in header
 //	OVEExtra:         null / bstr .cbor OVEExtraInfo
 //	OVEPubKey:        PublicKey
-//	OVEOwnerIdent:    String
 //
 // ]
 //
@@ -153,7 +152,6 @@ type VoucherEntryPayload struct {
 	HeaderHash   protocol.Hash
 	Extra        *cbor.Bstr[map[int][]byte]
 	PublicKey    protocol.PublicKey
-	OwnerIdent   string `cbor:",omitempty"` // TODO should this be ommittable?!?
 }
 
 func (v *Voucher) shallowClone() *Voucher {
@@ -324,20 +322,16 @@ func (v *Voucher) VerifyEntries() error {
 		return fmt.Errorf("error computing initial entry hash, writing encoded header hmac: %w", err)
 	}
 
-	// Validate all entries
-	return validateNextEntry(mfgPubKey, alg, initialHash, headerInfoHash, 0, v.Entries)
+	// Validate all entries 
+    // Manufacturing specifies no owner ident - first owner cannot be named.
+	return validateNextEntry(mfgPubKey, nil, alg, initialHash, headerInfoHash, 0, v.Entries)
 }
 
 // Validate each entry recursively
-func validateNextEntry(prevOwnerKey crypto.PublicKey,  alg protocol.HashAlg, prevHash hash.Hash, headerInfoHash []byte, i int, entries []cose.Sign1Tag[VoucherEntryPayload, []byte]) error {
+func validateNextEntry(prevOwnerKey crypto.PublicKey,  prevOwnerIdent *string, alg protocol.HashAlg, prevHash hash.Hash, headerInfoHash []byte, i int, entries []cose.Sign1Tag[VoucherEntryPayload, []byte]) error {
 	entry := entries[0].Untag()
 	fmt.Printf("\n\n\n*** VALIDATENEXT ENTRY: %+v\n\n\n",entry.Payload.Val.PublicKey)
 	fmt.Printf("\n\n\n*** VALIDATENEXT ENCD : %+v\n\n\n",entry.Payload.Val.PublicKey.Encoding)
-	fmt.Printf("\n\n\n*** VALIDATENEXT Ident: %+v\n\n\n",entry.Payload.Val.OwnerIdent)
-	chain, err := entry.Payload.Val.PublicKey.Chain()
-	if (err == nil) {
-		fmt.Printf("*** VALIDATENEXT CHAIN: %+v\n",CertChainToString("CERTIFICATE",chain))
-	}
 
 	// If an OwnerIdent is specified in an entry, the subsequent entry must be an x5chain
 	// in which a CA has named the leaf cert (key) as having that OwnerIden specified
@@ -352,17 +346,32 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  alg protocol.HashAlg, pre
 
 	// This entry was extended to a named identifier. This means this entry
 	// must be an x5chain, whose cert chain specifies this named identifier.
-    prevOwnerIdent:=""
-	if (prevOwnerIdent != "") {
-	// TODO allow "prevOwnerKey" to be nil - if/when we can rely on a device-embedded Root CA
-	// But this would kind of require RV server to trust same CA to secure RV server...?
+	if (prevOwnerIdent != nil) {
+	    // TODO allow "prevOwnerKey" to be nil - if/when we can rely on a device-embedded Root CA
+	    // But this would kind of require RV server to trust same CA to secure RV server...?
 		fmt.Printf("\n\n\n*** VALIDATENEXT ENTRY: %+v\n\n\n",entry.Payload.Val.PublicKey)
 		if (entry.Payload.Val.PublicKey.Encoding != protocol.X5ChainKeyEnc) {
 			return fmt.Errorf("Voucher entry %d specified named owner identity \"%s\", but entry %d was not an x5chain (certificate chain)",
-				i-1,prevOwnerIdent,i)
+				i-1,*prevOwnerIdent,i)
 		}
+
+        chain, err := entry.Payload.Val.PublicKey.Chain()
+        if (err != nil) { return fmt.Errorf("Error getting x5chain: %v",err) }
+
+        // DEPRICATE!!
+        err = verifyNamedOwner(chain,&prevOwnerKey,*prevOwnerIdent)
+        if (err != nil) { return fmt.Errorf("Error verifying Owner Identifier: %v",err) }
 	}
 
+    // If this entry is signing over to a specific named owner,
+    // Make sure we validate it next time
+    var nextOwnerIdent *string
+	if (entry.Payload.Val.PublicKey.Encoding == protocol.X5ChainKeyEnc) {
+            chain, err := entry.Payload.Val.PublicKey.Chain()
+            if (err != nil) { return fmt.Errorf("Couldn't get x5chain to validate: %v",err) }
+            nextOwnerIdent, err = GetNamedOwner(chain)
+            if (err != nil) { return fmt.Errorf("Get Named Owner returned: %v",err) }
+    }
 
 	// Check payload's HeaderHash matches voucher header as hash[GUID||DeviceInfo]
 	headerHash := entry.Payload.Val.HeaderHash
@@ -397,7 +406,7 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  alg protocol.HashAlg, pre
 	}
 
 	// Validate the next entry recursively
-	return validateNextEntry(ownerKey, alg, prevHash, headerInfoHash, i+1, entries[1:])
+	return validateNextEntry(ownerKey, nextOwnerIdent, alg, prevHash, headerInfoHash, i+1, entries[1:])
 }
 
 // VerifyOwnerCertChain validates the certificate chain of the owner public key
@@ -511,6 +520,7 @@ func ExtendVoucher[T protocol.PublicKeyOrChain](v *Voucher, owner crypto.Signer,
 		return nil, fmt.Errorf("error marshaling next owner public key: %w", err)
 	}
 	fmt.Printf("**** NextOwnerPublic Key encoded like: %s\n",nextOwnerPublicKey)
+
 
 	// Select the appropriate hash algorithm
 	devicePubKey := (*v.CertChain)[0].PublicKey

@@ -16,11 +16,13 @@ import (
         "math/big"
         "time"
         "strings"
+        "regexp"
         "crypto"
         "encoding/asn1"
         "encoding/hex"
         "crypto/sha256"
         "crypto/x509/pkix"
+        "github.com/fido-device-onboard/go-fdo/protocol"
 )
 
 
@@ -164,9 +166,67 @@ func PrivKeyToString(key any) string {
         return pemData.String()
 }
 
+
+// See if the leaf of this chain specifies that this is signing-over
+// to a named owner
+// Returns nil string if no named owner
+func GetKeyNamedOwner(key protocol.PublicKey) (*string,error) {
+        if (key.Encoding != protocol.X5ChainKeyEnc) { return nil, nil }
+        chain, err := key.Chain()
+        if (err != nil) { return nil, fmt.Errorf("Couldn't get x5chain: %v",err) }
+        return  GetNamedOwner(chain)
+}
+
+// Returns nil string if no named owner
+func GetNamedOwner(chain []*x509.Certificate) (*string,error) {
+        if (len(chain) == 0) {
+                return nil,fmt.Errorf("Cannot verify empty chain")
+        }
+
+        for _,x := range chain[0].Extensions {
+                if (x.Id.Equal(OID_ownershipCA)) {
+                        nostring :=  string(x.Value)
+                        nostring = strings.TrimSpace(nostring)
+                        return &nostring,nil
+                }
+        }
+        return nil, nil
+}
+
+// TODO Verify all names in chain...
+// TODO DEPRICATE!!
+func verifyNamedOwner(chain []*x509.Certificate, ownerKey *crypto.PublicKey, namedOwner string) error {
+        if (len(chain) == 0) {
+                return fmt.Errorf("Cannot verify empty chain")
+        }
+        namedOwner = strings.TrimSpace(namedOwner)
+        // First make sure chain looks good and is properly rooted
+        err :=  processDelegateChain(chain,ownerKey,nil,false,&namedOwner)
+        if (err != nil) {
+                return fmt.Errorf("Error verifying Named Owner: %v",err)
+        }
+
+        // Then see if we can find name
+        // TODO use Wildcard function below
+        nostring, err := GetNamedOwner(chain)
+        if (err != nil) { return err }
+
+        if (nostring == nil) {
+                return fmt.Errorf("No named owner in chain")
+        }
+
+        for _,v := range strings.Split(*nostring,",") {
+                   if (strings.TrimSpace(v) == namedOwner) {
+                           return nil
+                   }
+        }
+
+        return fmt.Errorf("Owner Identifier not found")
+}
+
 // Verify a delegate chain against an optional owner key, 
 // optionall for a given function
-func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey, oid *asn1.ObjectIdentifier, output bool) error {
+func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey, oid *asn1.ObjectIdentifier, output bool, namedOwner *string) error {
 
         oidArray := []asn1.ObjectIdentifier{}
         if (oid != nil) {
@@ -208,6 +268,14 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 if output { fmt.Printf("%d: Subject=%s Issuer=%s  Algo=%s IsCA=%v KeyUsage=%s Perms=[%s] KeyType=%s\n",i,c.Subject,c.Issuer,
                         c.SignatureAlgorithm.String(),c.IsCA,KeyUsageToString(c.KeyUsage),permstr, KeyToString(c.PublicKey)) }
 
+                if output {
+                        for _,xx := range c.Extensions {
+                                if (xx.Id.Equal(OID_ownershipCA)) {
+                                        fmt.Printf("  - Owner Identifier: \"%s\"\n",xx.Value)
+                                }
+                        }
+                }
+
                 // Cheeck Signatures on each
                 if (i!= len(chain)-1) {
                         err := chain[i].CheckSignatureFrom(chain[i+1])
@@ -241,12 +309,38 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
         return nil
 }
 
-func VerifyDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey, oid *asn1.ObjectIdentifier) error {
-	return processDelegateChain(chain, ownerKey,oid, false )
+/*
+    // Manually check the DNS names in the leaf certificate
+    for _, dnsName := range leafCert.DNSNames {
+        if !isPermittedDNSName(dnsName, intermediateCert.PermittedDNSDomains) {
+            return fmt.Errorf("Leaf certificate DNS name \"%s\" is not permitted:",dnsName)
+        }
+    }
+*/
+func isPermittedDNSName(dnsName string, permittedDNSDomains []string) bool {
+    for _, domain := range permittedDNSDomains {
+        // Escape dots and replace wildcard '*' with '.*' for regex matching
+        regexPattern := "^" + regexp.QuoteMeta(domain) + "$"
+        regexPattern = regexp.MustCompile(`\\\*`).ReplaceAllString(regexPattern, ".*")
+
+        matched, err := regexp.MatchString(regexPattern, dnsName)
+        if err != nil {
+            fmt.Println("Error matching regex:", err)
+            return false
+        }
+        if matched {
+            return true
+        }
+    }
+    return false
+}
+
+func VerifyDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey, oid *asn1.ObjectIdentifier, namedOwner *string) error {
+	return processDelegateChain(chain, ownerKey,oid, false,namedOwner )
 }
 
 func PrintDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey, oid *asn1.ObjectIdentifier) error {
-	return processDelegateChain(chain, ownerKey,oid, true )
+	return processDelegateChain(chain, ownerKey,oid, true,nil )
 }
 
 func DelegateChainSummary(chain []*x509.Certificate) (s string) {
@@ -289,6 +383,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                             pkix.Extension{
                                 Id:    OID_ownershipCA,
                                 Value: []byte(ownerIdent),
+                                Critical: true,
                             },
                     }
 				}

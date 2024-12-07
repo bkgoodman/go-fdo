@@ -340,6 +340,14 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 	}
 	expectedOwnerPub, err := ownerPub.Public()
 
+    var namedOwner *string
+    namedOwner, err = GetKeyNamedOwner(ownerPub)
+    if (err != nil) { return fmt.Errorf("GetNamedOwner: %v",err) } 
+
+    if (namedOwner != nil) {
+            fmt.Printf("*** Last OV owner (no=%s) was: %T - %v\n",*namedOwner,ownerPub,ownerPub)
+    }
+
 	// expectedOwnerPub is expected owner as found at end of OV chain
 	// this means it will not be the one from the server if delegate is used
 	// In this case, we will need to get this fro the server-provided
@@ -358,7 +366,11 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("Failed to get Delegate Chain: %v",err)
 		}
-		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateOnboard)
+
+        // If the last Owner in the Voucher contained a Named Owner,
+        // We must make sure the Delegate is granted as-such
+
+		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateOnboard,namedOwner)
 		if (err != nil) {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("Delgate Chain Verify Failed: %v",err)
@@ -372,11 +384,11 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 			return fmt.Errorf("Couldn't get public key from delegate chain")
 		}
 
-		// TODO I think we are checking the wrong thing here...
 		if !key.(interface{ Equal(crypto.PublicKey) bool }).Equal(info.PublicKeyToValidate) {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("delegate public key did not match last entry in ownership voucher")
 		}
+
 		
 	} else {
 
@@ -416,7 +428,7 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("Failed to unfurl Blob Delegate Chain: %w", err)
 		}
-		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateRedirect)
+		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateRedirect,namedOwner)
 		if (err != nil) {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("Failed to validate RV Blob Delegate Chain: %w", err)
@@ -694,6 +706,12 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	if err != nil {
 		return nil, fmt.Errorf("error parsing owner public key from voucher: %w", err)
 	}
+
+    var namedOwner *string
+    namedOwner,err = GetKeyNamedOwner(*ownerPublicKey)
+    if (err != nil) { return nil,fmt.Errorf("GetNamedOwner: %v",err) } 
+
+
 	var delegateKey crypto.Signer
 	var delegateChain *protocol.PublicKey = nil
 
@@ -706,14 +724,12 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 		if err != nil {
 			return nil, fmt.Errorf("Delegate Chain Unavailable: %w", err)
 		}
-		// TODO keyType here is probably wrong...?
 		delegateChain,err = protocol.NewPublicKey(keyType,chain,false)
 		if (err != nil) {
 			return nil, fmt.Errorf("Failed to marshall delegate chain in proveOVHdr: %w", err)
 		}
-		//chain,err1 := delegatePublicKey.Chain()
 
-		err = VerifyDelegateChain(chain,&expectedCUPHOwnerKey,&OID_delegateOnboard)
+		err = VerifyDelegateChain(chain,&expectedCUPHOwnerKey,&OID_delegateOnboard,namedOwner)
 		if (err != nil) {
 			return nil, fmt.Errorf("Cert Chain Verification Failed: %w", err)
 		}
