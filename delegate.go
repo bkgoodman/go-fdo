@@ -34,7 +34,7 @@ var OID_delegateUpload asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1
 var OID_delegateRedirect asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,3}
 var OID_delegateClaim asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,4}
 var OID_delegateProvision asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,5}
-var OID_ownershipCA asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,6}
+var OID_delegateIdentifier asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,6}
 
 var oidMap  = map[int]string {
 	1: "onboard",
@@ -42,7 +42,7 @@ var oidMap  = map[int]string {
 	3: "redirect",
 	4: "claim",
 	5: "provision",
-	6: "ownershipCA",
+	6: "identifier",
 }
 
 func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
@@ -51,7 +51,7 @@ func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
 	if (oid.Equal(OID_delegateRedirect)) { return "redirect" }
 	if (oid.Equal(OID_delegateClaim)) { return "claim" }
 	if (oid.Equal(OID_delegateProvision)) { return "provision" }
-	if (oid.Equal(OID_delegateProvision)) { return "ownershipCA" }
+	if (oid.Equal(OID_delegateIdentifier)) { return "identifier" }
 	return fmt.Sprintf("Unknown: %s\n",oid.String())
 }
 
@@ -184,44 +184,13 @@ func GetNamedOwner(chain []*x509.Certificate) (*string,error) {
         }
 
         for _,x := range chain[0].Extensions {
-                if (x.Id.Equal(OID_ownershipCA)) {
+                if (x.Id.Equal(OID_delegateIdentifier)) {
                         nostring :=  string(x.Value)
                         nostring = strings.TrimSpace(nostring)
                         return &nostring,nil
                 }
         }
         return nil, nil
-}
-
-// TODO Verify all names in chain...
-// TODO DEPRICATE!!
-func verifyNamedOwner(chain []*x509.Certificate, ownerKey *crypto.PublicKey, namedOwner string) error {
-        if (len(chain) == 0) {
-                return fmt.Errorf("Cannot verify empty chain")
-        }
-        namedOwner = strings.TrimSpace(namedOwner)
-        // First make sure chain looks good and is properly rooted
-        err :=  processDelegateChain(chain,ownerKey,nil,false,&namedOwner)
-        if (err != nil) {
-                return fmt.Errorf("Error verifying Named Owner: %v",err)
-        }
-
-        // Then see if we can find name
-        // TODO use Wildcard function below
-        nostring, err := GetNamedOwner(chain)
-        if (err != nil) { return err }
-
-        if (nostring == nil) {
-                return fmt.Errorf("No named owner in chain")
-        }
-
-        for _,v := range strings.Split(*nostring,",") {
-                   if (strings.TrimSpace(v) == namedOwner) {
-                           return nil
-                   }
-        }
-
-        return fmt.Errorf("Owner Identifier not found")
 }
 
 // Verify a delegate chain against an optional owner key, 
@@ -232,6 +201,11 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
         if (oid != nil) {
                 oidArray = append(oidArray,*oid)
         }
+
+        if (len(chain) == 0) {
+                return fmt.Errorf("Empty chain")
+        }
+
         // If requested, verify that chain was rooted by Owner Key since we will often not have a cert for the Owner Key,
         // we will have to add a self-signed owner cert at the root of the chain
         if (ownerKey != nil) {
@@ -249,7 +223,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 }
                 if (err != nil) { return fmt.Errorf("VerifyDelegate Error making ephemeral root CA key: %v",err) }
                 if (output) { fmt.Printf("Ephemeral Root Key: %s\n",KeyToString(rootPriv.Public()))}
-                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0,"")
+                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0 ,getNamedIdentifiers(chain[len(chain)-1]))
                 if (err != nil) {
                         return fmt.Errorf("VerifyDelegate Error createing ephemerial Owner Root Cert: %v",err)
                 }
@@ -257,7 +231,11 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
         }
 
         permstr := ""
+        fmt.Printf("----\n")
+        var prevOwner string 
         for i,c := range chain {
+                if (prevOwner != "") {fmt.Printf("prevOwner %d: %s\n",i,prevOwner)}
+                var nextStr string
                 var permstrs []string
                 for _, o := range c.UnknownExtKeyUsage {
                         s := DelegateOIDtoString(o)
@@ -268,12 +246,35 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 if output { fmt.Printf("%d: Subject=%s Issuer=%s  Algo=%s IsCA=%v KeyUsage=%s Perms=[%s] KeyType=%s\n",i,c.Subject,c.Issuer,
                         c.SignatureAlgorithm.String(),c.IsCA,KeyUsageToString(c.KeyUsage),permstr, KeyToString(c.PublicKey)) }
 
-                if output {
-                        for _,xx := range c.Extensions {
-                                if (xx.Id.Equal(OID_ownershipCA)) {
-                                        fmt.Printf("  - Owner Identifier: \"%s\"\n",xx.Value)
+                fmt.Printf("CHECK %d : %s\n",i,c.Subject)
+                nid := getNamedIdentifiers(c)
+                if (nid != "") {
+
+                        fmt.Printf("  - - Check Prev %d is %v\n",i,prevOwner)
+                        if (prevOwner != "") {
+                                // We walk chains backwards. This means if a prior (child) had an owner set, this entry (parent)
+                                // must permit the child
+                                fmt.Printf("  - Owner Identifier %d: \"%s\" -> \"%s\"\n",i,prevOwner,nid)
+                                // TODO permit multiple named idenfitiers ... ???
+                                if !IsPermittedIdentifierRule(prevOwner,nid) {
+                                        return fmt.Errorf("NamedIdentifer in entry #%d %s not allowed by prior %s: %v\n",i,prevOwner,nid)
                                 }
+                        } else {
+                                fmt.Printf("  - Owner Identifier %d: (NoPrev) -> \"%s\"\n",i,nid)
                         }
+                        fmt.Printf("  - - Set NewStr %d to %s\n",i,nid)
+                        nextStr = nid
+                }
+
+                if (i!= 0) && (prevOwner == "") && (nextStr != "") { 
+                    return fmt.Errorf("No NamedIdentifer in entry #%d but \"%s\" was indicated\n",i,nextStr)
+                }
+
+                prevOwner = nextStr
+                if (prevOwner != "") {
+                        fmt.Printf("  - - NEW NAMED %d set: %s\n",i,prevOwner)
+                } else {
+                        fmt.Printf("  - - NEW NAMED %d set: <NIL>\n",i)
                 }
 
                 // Cheeck Signatures on each
@@ -291,7 +292,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                         if (chain[i].Issuer.CommonName != chain[i+1].Subject.CommonName) {
                                 return fmt.Errorf("Subject %s Issued by Issuer=%s, expected %s",c.Subject,c.Issuer,chain[i+1].Issuer)
                         }
-                } 
+                }
 
                 // TODO we do NOT check expiration or revocation
 
@@ -306,24 +307,80 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 }
         }
 
+        // If root (last entry in chain) cert scoped for only a specific named owner, 
+        // but previous cert (namedOwner) explicitly scoped a different one - fail
+
+        var rootIdent string =""
+        fmt.Printf("Check root %d %s extensions %v\n",len(chain)-1,chain[len(chain)-1].Subject,chain[len(chain)-1].Extensions)
+        for _,xx := range chain[len(chain)-1].Extensions {
+                fmt.Printf("*** Check %v=%v\n",xx.Id,xx.Value)
+                if (xx.Id.Equal(OID_delegateIdentifier)) {
+                        fmt.Printf("*** FOUDN ROOT %s\n",xx.Value)
+                        rootIdent = string(xx.Value)
+                }
+        }
+
+        fmt.Printf("CHECK VALIDATE ROOT %v vs %s\n",namedOwner,rootIdent)
+        if (namedOwner != nil) && (rootIdent != "") {
+                fmt.Printf("VALIDATE ROOT %s vs %s\n",*namedOwner,rootIdent)
+                if !IsPermittedIdentifierRule(rootIdent,*namedOwner) {
+                        return fmt.Errorf("Chain scoped to namedIdentifer \"%s\", but root only scoped for \"%s\"",*namedOwner,rootIdent)
+                } 
+        }
+
         return nil
 }
 
-/*
-    // Manually check the DNS names in the leaf certificate
-    for _, dnsName := range leafCert.DNSNames {
-        if !isPermittedDNSName(dnsName, intermediateCert.PermittedDNSDomains) {
-            return fmt.Errorf("Leaf certificate DNS name \"%s\" is not permitted:",dnsName)
+
+func IsPermittedIdentifierRule(child string, parent string) bool {
+    parent = strings.Replace(parent, " ", "", -1)
+    child = strings.Replace(child, " ", "", -1)
+
+    childIdentifiers := strings.Split(child, ",")
+    parentIdentifiers := strings.Split(parent, ",")
+
+    for _, c := range childIdentifiers {
+        permitted := false
+        for _, p := range parentIdentifiers {
+            regexPattern := "^" + regexp.QuoteMeta(p) + "$"
+            regexPattern = strings.ReplaceAll(regexPattern, `\*`, ".*")
+            matched, err := regexp.MatchString(regexPattern, c)
+            if err != nil {
+                fmt.Println("Error matching regex:", err)
+                return false
+            }
+            if matched {
+                permitted = true
+                break
+            }
+        }
+        if !permitted {
+            return false
         }
     }
-*/
-func isPermittedDNSName(dnsName string, permittedDNSDomains []string) bool {
-    for _, domain := range permittedDNSDomains {
+    return true
+}
+
+// Get a list of indentifiers from the cert
+func getNamedIdentifiers(cert *x509.Certificate) string{
+        for _,xx := range cert.Extensions {
+                if (xx.Id.Equal(OID_delegateIdentifier)) {
+                    return strings.Replace(string(xx.Value), " ", "", -1)
+                }
+        }
+
+        return ""
+}
+
+func IsPermittedIdentifier(name string, permittedNames string) bool {
+    name = strings.Replace(name," ","",-1)
+    names := strings.Split(strings.Replace(permittedNames," ","",-1),",")
+    for _, domain := range names {
         // Escape dots and replace wildcard '*' with '.*' for regex matching
         regexPattern := "^" + regexp.QuoteMeta(domain) + "$"
         regexPattern = regexp.MustCompile(`\\\*`).ReplaceAllString(regexPattern, ".*")
 
-        matched, err := regexp.MatchString(regexPattern, dnsName)
+        matched, err := regexp.MatchString(regexPattern, name)
         if err != nil {
             fmt.Println("Error matching regex:", err)
             return false
@@ -381,7 +438,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
 				if (ownerIdent != "") {
                     template.ExtraExtensions = []pkix.Extension{
                             pkix.Extension{
-                                Id:    OID_ownershipCA,
+                                Id:    OID_delegateIdentifier,
                                 Value: []byte(ownerIdent),
                                 Critical: true,
                             },

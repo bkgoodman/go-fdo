@@ -357,10 +357,8 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  prevOwnerIdent *string, a
 
         chain, err := entry.Payload.Val.PublicKey.Chain()
         if (err != nil) { return fmt.Errorf("Error getting x5chain: %v",err) }
-
-        // DEPRICATE!!
-        err = verifyNamedOwner(chain,&prevOwnerKey,*prevOwnerIdent)
-        if (err != nil) { return fmt.Errorf("Error verifying Owner Identifier: %v",err) }
+        // TODO
+        _ = chain
 	}
 
     // If this entry is signing over to a specific named owner,

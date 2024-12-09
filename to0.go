@@ -205,9 +205,6 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 			return 0, fmt.Errorf("error signing To1d payload for w/ Delegate TO0.OwnerSign: %w", err)
 		}
 
-		// TODO Do a veryify just to check if this is okay
-		//ok,err := to1d.Verify(delegateKey.Public(),nil,nil)
-
 		// This will fail if the device has been DI'd with a key of one type,
 		// but the Delegate chain was rooted by a different key of a different type
 		p, err := chain.Public()
