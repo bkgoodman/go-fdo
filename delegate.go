@@ -231,10 +231,8 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
         }
 
         permstr := ""
-        fmt.Printf("----\n")
         var prevOwner string 
         for i,c := range chain {
-                if (prevOwner != "") {fmt.Printf("prevOwner %d: %s\n",i,prevOwner)}
                 var nextStr string
                 var permstrs []string
                 for _, o := range c.UnknownExtKeyUsage {
@@ -246,23 +244,16 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 if output { fmt.Printf("%d: Subject=%s Issuer=%s  Algo=%s IsCA=%v KeyUsage=%s Perms=[%s] KeyType=%s\n",i,c.Subject,c.Issuer,
                         c.SignatureAlgorithm.String(),c.IsCA,KeyUsageToString(c.KeyUsage),permstr, KeyToString(c.PublicKey)) }
 
-                fmt.Printf("CHECK %d : %s\n",i,c.Subject)
                 nid := getNamedIdentifiers(c)
                 if (nid != "") {
 
-                        fmt.Printf("  - - Check Prev %d is %v\n",i,prevOwner)
                         if (prevOwner != "") {
                                 // We walk chains backwards. This means if a prior (child) had an owner set, this entry (parent)
                                 // must permit the child
-                                fmt.Printf("  - Owner Identifier %d: \"%s\" -> \"%s\"\n",i,prevOwner,nid)
-                                // TODO permit multiple named idenfitiers ... ???
                                 if !IsPermittedIdentifierRule(prevOwner,nid) {
-                                        return fmt.Errorf("NamedIdentifer in entry #%d %s not allowed by prior %s: %v\n",i,prevOwner,nid)
+                                        return fmt.Errorf("NamedIdentifer in entry #%d %s not allowed by prior %s\n",i,prevOwner,nid)
                                 }
-                        } else {
-                                fmt.Printf("  - Owner Identifier %d: (NoPrev) -> \"%s\"\n",i,nid)
-                        }
-                        fmt.Printf("  - - Set NewStr %d to %s\n",i,nid)
+                        } 
                         nextStr = nid
                 }
 
@@ -271,11 +262,6 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 }
 
                 prevOwner = nextStr
-                if (prevOwner != "") {
-                        fmt.Printf("  - - NEW NAMED %d set: %s\n",i,prevOwner)
-                } else {
-                        fmt.Printf("  - - NEW NAMED %d set: <NIL>\n",i)
-                }
 
                 // Cheeck Signatures on each
                 if (i!= len(chain)-1) {
@@ -311,18 +297,13 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
         // but previous cert (namedOwner) explicitly scoped a different one - fail
 
         var rootIdent string =""
-        fmt.Printf("Check root %d %s extensions %v\n",len(chain)-1,chain[len(chain)-1].Subject,chain[len(chain)-1].Extensions)
         for _,xx := range chain[len(chain)-1].Extensions {
-                fmt.Printf("*** Check %v=%v\n",xx.Id,xx.Value)
                 if (xx.Id.Equal(OID_delegateIdentifier)) {
-                        fmt.Printf("*** FOUDN ROOT %s\n",xx.Value)
                         rootIdent = string(xx.Value)
                 }
         }
 
-        fmt.Printf("CHECK VALIDATE ROOT %v vs %s\n",namedOwner,rootIdent)
         if (namedOwner != nil) && (rootIdent != "") {
-                fmt.Printf("VALIDATE ROOT %s vs %s\n",*namedOwner,rootIdent)
                 if !IsPermittedIdentifierRule(rootIdent,*namedOwner) {
                         return fmt.Errorf("Chain scoped to namedIdentifer \"%s\", but root only scoped for \"%s\"",*namedOwner,rootIdent)
                 } 
@@ -458,7 +439,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                 derParent, err := x509.CreateCertificate(rand.Reader, parent, parent, key.Public(), key)
                 certParent, err := x509.ParseCertificate(derParent)
                 err = cert.CheckSignatureFrom(certParent)
-                if (err != nil) { fmt.Printf("Verify error is: %v\n",err)}
+                if (err != nil) { return nil,fmt.Errorf("Verify error is: %v\n",err)}
 
                 return cert, nil
 }

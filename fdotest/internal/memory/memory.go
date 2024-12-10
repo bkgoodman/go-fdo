@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"time"
 	"encoding/asn1"
+    "fmt"
 
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cose"
@@ -169,51 +170,22 @@ func (s *State) DelegateKey(name string) (crypto.Signer, []*x509.Certificate, er
 	return key.Key, key.Chain, nil
 }
 
-// TODO: Make things easier by using the same key for each cert in the chain
 func newDelegateChain(owner crypto.Signer, getNewKey func () (crypto.Signer)) (crypto.Signer, []*x509.Certificate, error) {
-	rootTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(111),
-		Issuer:       pkix.Name{CommonName: "DelegateRoot"},
-		Subject:      pkix.Name{CommonName: "DelegateRoot"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour),
-		IsCA:         true,
-                BasicConstraintsValid: true,
-                KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-                UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateOnboard, fdo.OID_delegateRedirect},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, owner.Public(), owner)
-	rootCert, err := x509.ParseCertificate(der)
+    perms := []asn1.ObjectIdentifier{fdo.OID_delegateOnboard,fdo.OID_delegateRedirect}
 
-	intermediateTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(222),
-		Subject:      pkix.Name{CommonName: "DelegateIntermediate"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour),
-		IsCA:         true,
-                BasicConstraintsValid: true,
-                KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-                UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateOnboard, fdo.OID_delegateRedirect},
-	}
-	intermediateKey := getNewKey()
-	der, err = x509.CreateCertificate(rand.Reader, intermediateTemplate, rootTemplate, intermediateKey.Public(), owner)
-	intermediateCert, err := x509.ParseCertificate(der)
+    rootCert, err := fdo.GenerateDelegate(owner,fdo.DelegateFlagRoot,owner.Public(),"Test Root CA","Test Root CA",perms,0 ,"")
+    if (err != nil) { return nil, nil, fmt.Errorf("Generate Root: %v",err) }
 
-	delegateTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(333),
-		Subject:      pkix.Name{CommonName: "DelegateCert"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour),
-		
-                BasicConstraintsValid: true,
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-                UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateOnboard, fdo.OID_delegateRedirect},
-	}
-	delegateKey := getNewKey()
-	der, err = x509.CreateCertificate(rand.Reader, delegateTemplate, intermediateTemplate, delegateKey.Public(), intermediateKey)
-	delegateCert, err := x509.ParseCertificate(der)
-	return delegateKey, []*x509.Certificate{delegateCert,intermediateCert,rootCert}, err
+    intermediateKey := getNewKey()
+    intermediateCert, err := fdo.GenerateDelegate(owner,fdo.DelegateFlagIntermediate,intermediateKey.Public(),"Test Intermediate CA","Test Root CA",perms,0 ,"")
+    if (err != nil) { return nil, nil, fmt.Errorf("Generate Intermediate: %v",err) }
+
+    leafKey := getNewKey()
+    leafCert, err := fdo.GenerateDelegate(intermediateKey,fdo.DelegateFlagLeaf,leafKey.Public(),"Test Leaf","Test Intermediate CA",perms,0 ,"")
+    if (err != nil) { return nil, nil, fmt.Errorf("Generate Leaf: %v",err) }
+	return leafKey, []*x509.Certificate{leafCert,intermediateCert,rootCert}, err
 }
+
 func newCA(priv crypto.Signer) (*x509.Certificate, error) {
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
