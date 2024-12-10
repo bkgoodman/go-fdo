@@ -198,7 +198,10 @@ func newCA(priv crypto.Signer) (*x509.Certificate, error) {
 		Subject:      pkix.Name{CommonName: "CA"},
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+        KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+        BasicConstraintsValid: true,
+        IsCA:                  true,
+        UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateExtend},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, priv.Public(), priv)
 	if err != nil {

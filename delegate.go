@@ -35,6 +35,7 @@ var OID_delegateRedirect asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4
 var OID_delegateClaim asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,4}
 var OID_delegateProvision asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,5}
 var OID_delegateIdentifier asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,6}
+var OID_delegateExtend asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,7}
 
 var oidMap  = map[int]string {
 	1: "onboard",
@@ -43,6 +44,7 @@ var oidMap  = map[int]string {
 	4: "claim",
 	5: "provision",
 	6: "identifier",
+	7: "extend",
 }
 
 func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
@@ -52,6 +54,7 @@ func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
 	if (oid.Equal(OID_delegateClaim)) { return "claim" }
 	if (oid.Equal(OID_delegateProvision)) { return "provision" }
 	if (oid.Equal(OID_delegateIdentifier)) { return "identifier" }
+	if (oid.Equal(OID_delegateIdentifier)) { return "extend" }
 	return fmt.Sprintf("Unknown: %s\n",oid.String())
 }
 

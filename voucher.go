@@ -337,30 +337,20 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  prevOwnerIdent *string, a
 	// in which a CA has named the leaf cert (key) as having that OwnerIden specified
 	// in the "ownershipCA" extension field string
 
-	// Check payload has a valid COSE signature from the previous owner key
-	if ok, err := entry.Verify(prevOwnerKey, nil, nil); err != nil {
-		return fmt.Errorf("COSE signature for entry %d could not be verified: %w", i, err)
-	} else if !ok {
-		return fmt.Errorf("%w: COSE signature for entry %d did not match previous owner key", ErrCryptoVerifyFailed, i)
-	}
-
-	// This entry was extended to a named identifier. This means this entry
-	// must be an x5chain, whose cert chain specifies this named identifier.
-	if (prevOwnerIdent != nil) {
-	    // TODO allow "prevOwnerKey" to be nil - if/when we can rely on a device-embedded Root CA
-	    // But this would kind of require RV server to trust same CA to secure RV server...?
-		fmt.Printf("\n\n\n*** VALIDATENEXT ENTRY: %+v\n\n\n",entry.Payload.Val.PublicKey)
-		if (entry.Payload.Val.PublicKey.Encoding != protocol.X5ChainKeyEnc) {
-			return fmt.Errorf("Voucher entry %d specified named owner identity \"%s\", but entry %d was not an x5chain (certificate chain)",
-				i-1,*prevOwnerIdent,i)
-		}
-
-        chain, err := entry.Payload.Val.PublicKey.Chain()
-        if (err != nil) { return fmt.Errorf("Error getting x5chain: %v",err) }
-        err = VerifyDelegateChain(chain,&prevOwnerKey,&OID_delegateOnboard,prevOwnerIdent) 
-        if (err != nil) { return fmt.Errorf("NamedOwner chain verify failed: %v",err) }
-        
-	}
+    // x5chain verification is a bit different...
+	if (entry.Payload.Val.PublicKey.Encoding == protocol.X5ChainKeyEnc) {
+            chain, err := entry.Payload.Val.PublicKey.Chain()
+            if (err != nil) { return fmt.Errorf("Couldn't get x5chain to validate: %v",err) }
+            err = VerifyDelegateChain(chain,&prevOwnerKey,&OID_delegateExtend,prevOwnerIdent)
+            if (err != nil) { return fmt.Errorf("x5chain entry validate: %v",err) }
+    } else {
+            // Check payload has a valid COSE signature from the previous owner key
+            if ok, err := entry.Verify(prevOwnerKey, nil, nil); err != nil {
+                return fmt.Errorf("COSE signature for entry %d could not be verified: %w", i, err)
+            } else if !ok {
+                return fmt.Errorf("%w: COSE signature for entry %d did not match previous owner key", ErrCryptoVerifyFailed, i)
+            }
+    }
 
     // If this entry is signing over to a specific named owner,
     // Make sure we validate it next time
@@ -393,6 +383,7 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  prevOwnerIdent *string, a
 	}
 
 	// Parse owner key for next iteration
+    // For an x5chain, the next owner is last key in chain
 	ownerKey, err := entry.Payload.Val.PublicKey.Public()
 	if err != nil {
 		return fmt.Errorf("error parsing public key of entry %d: %w", i-1, err)
