@@ -70,8 +70,9 @@ func DelegateStringToOID(str string) (asn1.ObjectIdentifier, error) {
 	}
 }
 func certMissingOID(c *x509.Certificate,oid asn1.ObjectIdentifier) bool {
-        for _,o := range c.UnknownExtKeyUsage {
-                if (o.Equal(oid)) {
+        //for _,o := range c.UnknownExtKeyUsage {
+        for _,o := range c.Extensions {
+                if (o.Id.Equal(oid)) {
                         return false
                 }
         }
@@ -412,7 +413,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                         BasicConstraintsValid: true,
                         IsCA:                        false,
                         KeyUsage:              x509.KeyUsageDigitalSignature,
-                        UnknownExtKeyUsage:    permissions,
+                        //UnknownExtKeyUsage:    permissions,
                 }
                 if (flags & (DelegateFlagIntermediate | DelegateFlagRoot))!= 0 {
                         template.KeyUsage |= x509.KeyUsageCertSign 
@@ -428,6 +429,14 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                             },
                     }
 				}
+
+                for _,p := range permissions {
+                        template.ExtraExtensions = append(template.ExtraExtensions,pkix.Extension{
+                                Id:    p,
+                                Value: nil,
+                                Critical: true,
+                        })
+                }
                 
                 der, err := x509.CreateCertificate(rand.Reader, template, parent, delegateKey, key)
                 if err != nil {

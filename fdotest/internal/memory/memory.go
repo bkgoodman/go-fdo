@@ -201,7 +201,14 @@ func newCA(priv crypto.Signer) (*x509.Certificate, error) {
         KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
         BasicConstraintsValid: true,
         IsCA:                  true,
-        UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateExtend},
+        //UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_delegateExtend},
+        ExtraExtensions: []pkix.Extension{
+                            pkix.Extension{
+                                Id:    fdo.OID_delegateExtend,
+                                Value: nil,
+                                Critical: true,
+                            },
+                    },
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, priv.Public(), priv)
 	if err != nil {
