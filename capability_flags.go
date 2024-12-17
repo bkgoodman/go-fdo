@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: Apache 2.0
 
 package fdo
-
 import (
 	"io"
 	"github.com/fido-device-onboard/go-fdo/cbor"
+)
+
+
+const (
+        Capaflag_fdo_1_1 = 0
+        Capaflag_fdo_1_2 = 1
+        Capaflag_fdo_delegate = 2
 )
 
 type CapabilityFlags struct {

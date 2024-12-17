@@ -170,6 +170,7 @@ func appStart(ctx context.Context, transport Transport, info any) (*VoucherHeade
 
 type setCredentialsMsg struct {
 	OVHeader cbor.Bstr[VoucherHeader]
+	CapabilityFlags
 }
 
 // AppStart(10) -> SetCredentials(11)
