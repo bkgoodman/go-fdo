@@ -341,7 +341,7 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 	expectedOwnerPub, err := ownerPub.Public()
 
     var namedOwner *string
-    namedOwner, err = GetKeyNamedOwner(ownerPub)
+    namedOwner, err = GetKeyIdentifier(ownerPub)
     if (err != nil) { return fmt.Errorf("GetNamedOwner: %v",err) } 
 
     if (namedOwner != nil) {
@@ -708,7 +708,7 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	}
 
     var namedOwner *string
-    namedOwner,err = GetKeyNamedOwner(*ownerPublicKey)
+    namedOwner,err = GetKeyIdentifier(*ownerPublicKey)
     if (err != nil) { return nil,fmt.Errorf("GetNamedOwner: %v",err) } 
 
 

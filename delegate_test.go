@@ -83,13 +83,16 @@ func TestPermittedRules(t *testing.T) {
 }
 
 func TestDelegateIdentChains(t *testing.T) {
-        for _,test := range []struct {
+        for i,test := range []struct {
                 Prev  string     // Send to verifier, as if from previous chain
                 Root string
                 Inter string
                 Leaf string
                 Result bool      // true means test should pass
         } {
+                {"DNS:example.com", "","","DNS:example.com",true},
+                {"DNS:1.example.com", "","","DNS:*.example.com",true},
+                {"", "","","DNS:*.example.com",true},
                 {"", "DNS:example.com","","",false},
                 {"", "DNS:cocacola.com","","DNS:pepsi.com",false},
                 {"", "","DNS:cocacola.com","DNS:pepsi.com",false},
@@ -108,7 +111,7 @@ func TestDelegateIdentChains(t *testing.T) {
                 {"DNS:*.dom", "DNS:*.sub.dom","DNS:*.sub.sub.dom","DNS:srv.sub.sub.dom",true},
                 {"DNS:*.dom1", "DNS:*.sub.dom1","DNS:*.sub.sub.dom1","DNS:srv.sub.sub.dom1",true},
         } {
-                t.Run(fmt.Sprintf("%s/%s/%s/%s",test.Prev,test.Root,test.Inter,test.Leaf), func (t *testing.T) {
+                t.Run(fmt.Sprintf("No_%d/%s/%s/%s/%s",i,test.Prev,test.Root,test.Inter,test.Leaf), func (t *testing.T) {
                         perms := []asn1.ObjectIdentifier{fdo.OID_delegateOnboard}
                         rootPriv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
                         if (err != nil) { t.Errorf("Generate Root Key: %v",err) }
@@ -130,9 +133,9 @@ func TestDelegateIdentChains(t *testing.T) {
                         //fdo.PrintDelegateChain(chain, &pub, &fdo.OID_delegateOnboard)
                         var prevstr *string
                         if test.Prev != "" { prevstr = &test.Prev }
-                        err =  fdo.VerifyDelegateChain(chain, nil, &fdo.OID_delegateOnboard, prevstr)
+                        //err =  fdo.VerifyDelegateChain(chain, nil, &fdo.OID_delegateOnboard, prevstr)
                         err =  fdo.VerifyDelegateChain(chain, &pub, &fdo.OID_delegateOnboard, prevstr)
-                        if ((err != nil) == test.Result) { t.Errorf("VerifyDelegateChain FAIL: %v",err) }
+                        if ((err != nil) == test.Result) { t.Errorf("VerifyDelegateChain (Prev \"%s\") FAIL: %v",test.Prev,err) }
                 })
         }
 }

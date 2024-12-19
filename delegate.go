@@ -37,7 +37,7 @@ var OID_delegateClaim asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,
 var OID_delegateProvision asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,1,5}
 var OID_delegateExtend asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,1,6}
 
-var OID_ExtendOnlyTo asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,2}
+var OID_Identifier asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,2}
 var OID_IdentifierConstraints asn1.ObjectIdentifier = asn1.ObjectIdentifier{1,3,6,1,4,1,45724,3,3}
 
 var oidMap  = map[int]string {
@@ -56,8 +56,8 @@ func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
 	if (oid.Equal(OID_delegateRedirect)) { return "redirect" }
 	if (oid.Equal(OID_delegateClaim)) { return "claim" }
 	if (oid.Equal(OID_delegateProvision)) { return "provision" }
-	if (oid.Equal(OID_delegateIdentifier)) { return "identifier" }
-	if (oid.Equal(OID_delegateIdentifier)) { return "extend" }
+	if (oid.Equal(OID_Identifier)) { return "identifier" }
+	if (oid.Equal(OID_IdentifierConstraints)) { return "identConstraints" }
 	return fmt.Sprintf("Unknown: %s\n",oid.String())
 }
 
@@ -177,27 +177,32 @@ func PrivKeyToString(key any) string {
 // See if the leaf of this chain specifies that this is signing-over
 // to a named owner
 // Returns nil string if no named owner
-func GetKeyNamedOwner(key protocol.PublicKey) (*string,error) {
+func GetKeyIdentifier(key protocol.PublicKey) (*string,error) {
         if (key.Encoding != protocol.X5ChainKeyEnc) { return nil, nil }
         chain, err := key.Chain()
         if (err != nil) { return nil, fmt.Errorf("Couldn't get x5chain: %v",err) }
-        return  GetNamedOwner(chain)
+        return  GetIdentifier(chain)
 }
 
+func GetCertIdentifierStr(cert *x509.Certificate) (string) {
+        for _,x := range cert.Extensions {
+                if (x.Id.Equal(OID_Identifier)) {
+                        nostring :=  string(x.Value)
+                        nostring = strings.Replace(nostring," ","",-1)
+                        return nostring
+                }
+        }
+        return ""
+}
 // Returns nil string if no named owner
-func GetNamedOwner(chain []*x509.Certificate) (*string,error) {
+func GetIdentifier(chain []*x509.Certificate) (*string,error) {
         if (len(chain) == 0) {
                 return nil,fmt.Errorf("Cannot verify empty chain")
         }
 
-        for _,x := range chain[0].Extensions {
-                if (x.Id.Equal(OID_delegateIdentifier)) {
-                        nostring :=  string(x.Value)
-                        nostring = strings.TrimSpace(nostring)
-                        return &nostring,nil
-                }
-        }
-        return nil, nil
+        var id string
+        id = GetCertIdentifierStr(chain[0])
+        return &id, nil
 }
 
 // Verify a delegate chain against an optional owner key, 
@@ -230,7 +235,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 }
                 if (err != nil) { return fmt.Errorf("VerifyDelegate Error making ephemeral root CA key: %v",err) }
                 if (output) { fmt.Printf("Ephemeral Root Key: %s\n",KeyToString(rootPriv.Public()))}
-                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0 ,getNamedIdentifiers(chain[len(chain)-1]))
+                rootOwner, err := GenerateDelegate(rootPriv, DelegateFlagRoot , *public,issuer,issuer, oidArray,0 ,getIdentConstraints(chain[len(chain)-1]))
                 if (err != nil) {
                         return fmt.Errorf("VerifyDelegate Error createing ephemerial Owner Root Cert: %v",err)
                 }
@@ -251,21 +256,32 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
                 if output { fmt.Printf("%d: Subject=%s Issuer=%s  Algo=%s IsCA=%v KeyUsage=%s Perms=[%s] KeyType=%s\n",i,c.Subject,c.Issuer,
                         c.SignatureAlgorithm.String(),c.IsCA,KeyUsageToString(c.KeyUsage),permstr, KeyToString(c.PublicKey)) }
 
-                nid := getNamedIdentifiers(c)
-                if (nid != "") {
-
+                var constrs string
+                if i == 0 {
+                        c,err := GetIdentifier(chain)
+                        if (err != nil) {
+                                return fmt.Errorf("GetIdentifier: %v",err)
+                        }
+                        if (c != nil) {
+                                constrs = *c
+                        }
+                } else {
+                        constrs = getIdentConstraints(c)
+                }
+                fmt.Printf("#%d (%s) has constraints \"%s\"\n",i,c.Subject,constrs)
+                if (constrs != "") {
                         if (prevOwner != "") {
                                 // We walk chains backwards. This means if a prior (child) had an owner set, this entry (parent)
                                 // must permit the child
-                                if !IsPermittedIdentifierRule(prevOwner,nid) {
-                                        return fmt.Errorf("NamedIdentifer in entry #%d %s not allowed by prior %s\n",i,prevOwner,nid)
+                                if !IsPermittedIdentifierRule(prevOwner,constrs) {
+                                        return fmt.Errorf("NamedIdentifer in entry #%d %s not allowed by prior %s\n",i,prevOwner,constrs)
                                 }
                         } 
-                        nextStr = nid
+                        nextStr = constrs
                 }
 
                 if (i!= 0) && (prevOwner == "") && (nextStr != "") { 
-                    return fmt.Errorf("No NamedIdentifer in entry #%d but \"%s\" was indicated\n",i,nextStr)
+                    return fmt.Errorf("No NamedIdentifer in entry #%d (%s) but \"%s\" was indicated\n",i,c.Subject,nextStr)
                 }
 
                 prevOwner = nextStr
@@ -305,7 +321,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 
         var rootIdent string =""
         for _,xx := range chain[len(chain)-1].Extensions {
-                if (xx.Id.Equal(OID_delegateIdentifier)) {
+                if (xx.Id.Equal(OID_IdentifierConstraints)) {
                         rootIdent = string(xx.Value)
                 }
         }
@@ -350,9 +366,9 @@ func IsPermittedIdentifierRule(child string, parent string) bool {
 }
 
 // Get a list of indentifiers from the cert
-func getNamedIdentifiers(cert *x509.Certificate) string{
+func getIdentConstraints(cert *x509.Certificate) string{
         for _,xx := range cert.Extensions {
-                if (xx.Id.Equal(OID_delegateIdentifier)) {
+                if (xx.Id.Equal(OID_IdentifierConstraints)) {
                     return strings.Replace(string(xx.Value), " ", "", -1)
                 }
         }
@@ -396,8 +412,10 @@ func DelegateChainSummary(chain []*x509.Certificate) (s string) {
 }
 
 // This is a helper function, but also used in the verification process
+// If the cert if a CA (Root or Intermediate), "ident" is a constraintIdentifier. 
+// If the cert is a leaf, "ident" is an Identifer (name)
 func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicKey,subject string,issuer string, 
-        permissions []asn1.ObjectIdentifier, sigAlg x509.SignatureAlgorithm, ownerIdent string) (*x509.Certificate, error) {
+        permissions []asn1.ObjectIdentifier, sigAlg x509.SignatureAlgorithm, ident string) (*x509.Certificate, error) {
                 parent := &x509.Certificate{
                         SerialNumber:          big.NewInt(2),
                         Subject:               pkix.Name{CommonName: issuer},
@@ -421,17 +439,27 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                 if (flags & (DelegateFlagIntermediate | DelegateFlagRoot))!= 0 {
                         template.KeyUsage |= x509.KeyUsageCertSign 
                         template.IsCA = true
+                        if (ident != "") {
+                            template.ExtraExtensions = []pkix.Extension{
+                                    pkix.Extension{
+                                        Id:    OID_IdentifierConstraints,
+                                        Value: []byte(ident),
+                                        Critical: true,
+                                    },
+                            }
+                        }
+                } else {
+                        if (ident != "") {
+                            template.ExtraExtensions = []pkix.Extension{
+                                    pkix.Extension{
+                                        Id:    OID_Identifier,
+                                        Value: []byte(ident),
+                                        Critical: true,
+                                    },
+                            }
+                        }
                 }
 
-				if (ownerIdent != "") {
-                    template.ExtraExtensions = []pkix.Extension{
-                            pkix.Extension{
-                                Id:    OID_delegateIdentifier,
-                                Value: []byte(ownerIdent),
-                                Critical: true,
-                            },
-                    }
-				}
 
                 for _,p := range permissions {
                         template.ExtraExtensions = append(template.ExtraExtensions,pkix.Extension{

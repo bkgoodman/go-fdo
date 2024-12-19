@@ -358,7 +358,7 @@ func validateNextEntry(prevOwnerKey crypto.PublicKey,  prevOwnerIdent *string, a
 	if (entry.Payload.Val.PublicKey.Encoding == protocol.X5ChainKeyEnc) {
             chain, err := entry.Payload.Val.PublicKey.Chain()
             if (err != nil) { return fmt.Errorf("Couldn't get x5chain to validate: %v",err) }
-            nextOwnerIdent, err = GetNamedOwner(chain)
+            nextOwnerIdent, err = GetIdentifier(chain)
             if (err != nil) { return fmt.Errorf("Get Named Owner returned: %v",err) }
     }
 
