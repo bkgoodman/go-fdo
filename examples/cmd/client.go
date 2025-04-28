@@ -55,6 +55,7 @@ var (
 	printDevice bool
 	rvOnly      bool
 	dlDir       string
+	bkgcred_dc  string
 	echoCmds    bool
 	uploads     = make(fsVar)
 	wgetDir     string
@@ -139,6 +140,7 @@ func init() {
 	clientFlags.StringVar(&cipherSuite, "cipher", "A128GCM", "Name of cipher `suite` to use for encryption (see usage)")
 	clientFlags.BoolVar(&debug, "debug", debug, "Print HTTP contents")
 	clientFlags.StringVar(&dlDir, "download", "", "A `dir` to download files into (FSIM disabled if empty)")
+	clientFlags.StringVar(&bkgcred_dc, "bkgcred", "", "BKGcred credentials (FSIM disabled if empty)")
 	clientFlags.StringVar(&diURL, "di", "", "HTTP base `URL` for DI server")
 	clientFlags.StringVar(&diKey, "di-key", "ec384", "Key for device credential [options: ec256, ec384, rsa2048, rsa3072]")
 	clientFlags.StringVar(&diKeyEnc, "di-key-enc", "x509", "Public key encoding to use for manufacturer key [x509,x5chain,cose]")
@@ -437,6 +439,12 @@ func transferOwnership2(transport fdo.Transport, to1d *cose.Sign1[protocol.To1d,
 			},
 		}
 	}
+	if bkgcred_dc != "" {
+		fsims["fdo.BKGcred"] = &fsim.BKGcred{
+			Name: bkgcred_dc,
+		}
+	}
+
 	if len(uploads) > 0 {
 		fsims["fdo.upload"] = &fsim.Upload{
 			FS: uploads,

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+    "log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
@@ -71,6 +72,9 @@ func (d *devmodOwnerModule) parseModules(messageBody io.Reader) error {
 		}
 
 		copy(d.Modules[chunk.Start:chunk.Start+chunk.Len], chunk.Modules)
+        for _,n := range d.Modules {
+                slog.Warn(fmt.Sprintf("BKG MOD %s",n))
+        }
 		d.done = chunk.Start+chunk.Len == d.numModules
 	}
 }

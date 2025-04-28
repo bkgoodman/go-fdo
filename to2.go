@@ -1315,6 +1315,7 @@ func (s *TO2Server) ownerServiceInfoReady(ctx context.Context, msg io.Reader) (*
 				if !yield("devmod", &devmod) {
 					return
 				}
+        slog.Warn(fmt.Sprintf("BKG mod init %v\n",devmod.Modules))
 				ownerModules = s.OwnerModules(ctx, guid, info, deviceCertChain, devmod.Devmod, devmod.Modules)
 			}
 

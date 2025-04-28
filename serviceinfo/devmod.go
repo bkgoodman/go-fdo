@@ -9,6 +9,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+    "log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 )
@@ -138,6 +139,7 @@ func (d *Devmod) Write(ctx context.Context, deviceModules map[string]DeviceModul
 
 func (d *Devmod) writeDescriptorMessages(w *UnchunkWriter) error {
 	// Active must always be true
+    slog.Warn(fmt.Sprintf("BKGsendmodname active \"%s\"\n",devmodModuleName))
 	if err := w.NextServiceInfo(devmodModuleName, "active"); err != nil {
 		return err
 	}

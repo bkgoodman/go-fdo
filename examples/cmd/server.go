@@ -71,6 +71,7 @@ var (
 	importVoucher         string
 	cmdDate               bool
 	downloads             stringList
+	bkgcred               stringList
 	uploadDir             string
 	uploadReqs            stringList
 	wgets                 stringList
@@ -111,6 +112,7 @@ func init() {
 	serverFlags.StringVar(&importVoucher, "import-voucher", "", "Import a PEM encoded voucher file at `path`")
 	serverFlags.BoolVar(&cmdDate, "command-date", false, "Use fdo.command FSIM to have device run \"date +%s\"")
 	serverFlags.Var(&downloads, "download", "Use fdo.download FSIM for each `file` (flag may be used multiple times)")
+	serverFlags.Var(&bkgcred, "bkgcred", "Use fdo.bkgcred FSIM for each `credential` (flag may be used multiple times)")
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
 	serverFlags.Var(&uploadReqs, "upload", "Use fdo.upload FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.Var(&wgets, "wget", "Use fdo.wget FSIM for each `url` (flag may be used multiple times)")
@@ -671,7 +673,21 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 
 func ownerModules(ctx context.Context, guid protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 	return func(yield func(string, serviceinfo.OwnerModule) bool) {
+            slog.Warn(fmt.Sprintf("BKGCRED mod list \"%v\"\n",modules))
+		if slices.Contains(modules, "fdo.BKGcred") {
+            slog.Warn("BKGCRED adding bkgcred owner mod")
+			for _, name := range bkgcred {
+                    slog.Warn(fmt.Sprintf("BKGCRED adding \"%s\"\n",name))
+				if !yield("fdo.BKGcred", &fsim.BKGcred_owner{
+					Name:         name,
+				}) {
+					return
+				}
+            }
+        }
+
 		if slices.Contains(modules, "fdo.download") {
+            slog.Warn("BKGCRED adding download owner mod")
 			for _, name := range downloads {
 				f, err := os.Open(filepath.Clean(name))
 				if err != nil {
