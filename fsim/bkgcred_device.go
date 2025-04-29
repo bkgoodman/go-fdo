@@ -29,6 +29,7 @@ var _ serviceinfo.DeviceModule = (*BKGcred)(nil)
 
 // Transition implements serviceinfo.DeviceModule.
 func (d *BKGcred) Transition(active bool) error {
+    slog.Warn(fmt.Sprintf("BKGCRED active now %s",active))
 	d.reset()
 	return nil
 }
@@ -66,12 +67,16 @@ func (d *BKGcred) receive(ctx context.Context, messageName string, messageBody i
 // Yield implements serviceinfo.DeviceModule.
 func (d *BKGcred) Yield(ctx context.Context, respond func(message string) io.Writer, yield func()) error {
     code := 0
-    fmt.Printf("bkgcred_device yelid returning code 0\n");
-    if (!d.Sent) {
-            d.Sent = true
-	return cbor.NewEncoder(respond("d2o")).Encode("teststring")
+    if (d.Sent) {
+            slog.Warn("BKGCRED YIELD returning code 0");
+        return nil
     }
-	return cbor.NewEncoder(respond("done")).Encode(code)
+
+    slog.Warn("BKGCRED YEID sending data");
+    cbor.NewEncoder(respond("d2o")).Encode("teststring")
+	cbor.NewEncoder(respond("done")).Encode(code)
+    d.Sent= true
+    return nil
 }
 
 func (d *BKGcred) reset() {

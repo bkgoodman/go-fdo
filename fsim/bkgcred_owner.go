@@ -72,6 +72,7 @@ func (w *BKGcred_owner) HandleInfo(ctx context.Context, messageName string, mess
 // ProduceInfo implements serviceinfo.OwnerModule.
 func (w *BKGcred_owner) ProduceInfo(ctx context.Context, producer *serviceinfo.Producer) (blockPeer, moduleDone bool, _ error) {
 	if w.sent {
+        slog.Warn("BKGCRED Produce","Sent",w.sent,"done",w.done)
 		return false, w.done, nil
 	}
 
