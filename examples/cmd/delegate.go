@@ -12,6 +12,7 @@ import (
         "crypto/x509"
         "encoding/asn1"
         "encoding/pem"
+        "io/ioutil"
         _ "encoding/hex"
         "errors"
         "flag"
@@ -21,6 +22,9 @@ import (
         "strings"
         "encoding/hex"
         "encoding/base64"
+        "math/big"
+        "crypto/sha512"
+        "context"
 	"path/filepath"
 	_ "maps"
 
@@ -209,12 +213,93 @@ func doListDelegateChains(state *sqlite.DB,args []string) error {
         return nil
 }
 
+type ECDSASignature struct {
+	R *big.Int
+	S *big.Int
+}
+func doAttestPayload(state *sqlite.DB,args []string) error {
+	pemData, err := ioutil.ReadFile(filepath.Clean(args[0]))
+	if err != nil {
+		return fmt.Errorf("failed to read PEM file: %w", err)
+	}
+
+	//var blocks []*pem.Block
+    voucherError := fmt.Errorf("NoVoucher")
+    var payload []byte
+    var ownerKey *crypto.PublicKey
+    var sigbytes []byte
+	for {
+		block, rest := pem.Decode(pemData)
+		if block == nil {
+			break // No more PEM blocks found
+		}
+        fmt.Printf("Block \"%s\"  -  %d bytes\n",block.Type,len(block.Bytes))
+        switch (block.Type) {
+                case "OWNERSHIP VOUCHER":
+                ownerKey,voucherError = InspectVoucher(state,block.Bytes)
+                break
+
+                case "PAYLOAD":
+                payload = block.Bytes
+                break
+
+                case "SIGNATURE":
+                    sigbytes = block.Bytes
+                    break
+        default:
+                fmt.Printf("Unknown Block %s\n",block.Type)
+                break
+        }
+        pemData = rest
+	}
+    fmt.Printf("VoucherError: %v\n",voucherError)
+    fmt.Printf("OwnerKey: %v\n",*ownerKey)
+    if (voucherError != nil)  {
+            return voucherError
+    }
+    fmt.Printf("Payload: \"%s\"\n",string(payload))
+    if (ownerKey == nil) {
+        return fmt.Errorf("No Owner Key")
+    }
+    hashed := sha512.Sum384(payload)
+    switch pub := (*ownerKey).(type) {
+        case *ecdsa.PublicKey:
+            sig := new(ECDSASignature)
+            _, err := asn1.Unmarshal(sigbytes, sig)
+            if err != nil {
+                return fmt.Errorf("failed to unmarshal ASN.1 ECDSA signature: %w", err)
+            }
+            fmt.Printf("Signature is %v+\n",sig)
+		    verified := ecdsa.Verify(pub, hashed[:], sig.R, sig.S)
+            fmt.Printf("ECDSA Verify returned %v\n",verified)
+       default:
+               return fmt.Errorf("Bad Signature format")
+    }
+    /*
+	switch pub := (*ownerKey).(type) {
+	case *ecdsa.PublicKey:
+		// Decode signature following RFC8152 8.1.
+		n := (pub.Params().N.BitLen() + 7) / 8
+		r := new(big.Int).SetBytes(s1.Signature[:n])
+		s := new(big.Int).SetBytes(s1.Signature[n:])
+		return ecdsa.Verify(pub, h.Sum(nil), r, s), nil
+
+	case *rsa.PublicKey:
+		digest := h.Sum(nil)
+		return verifyRSA(pub, hash, digest, s1.Signature, alg)
+default:
+        return fmt.Errorf("Invalid Owner Key Type")
+    }
+
+    */
+
+	return  nil
+}
 
 func doInspectVoucher(state *sqlite.DB,args []string) error {
-	// Parse voucher
-        if (len(args) < 1) {
-                return fmt.Errorf("No filename specified")
-        }
+    if (len(args) < 1) {
+        return fmt.Errorf("No filename specified")
+    }
 	pemVoucher, err := os.ReadFile(filepath.Clean(args[0]))
 	if err != nil {
 		return err
@@ -226,9 +311,14 @@ func doInspectVoucher(state *sqlite.DB,args []string) error {
 	if blk.Type != "OWNERSHIP VOUCHER" {
 		return fmt.Errorf("expected PEM block of ownership voucher type, found %s", blk.Type)
 	}
+    _,err =  InspectVoucher(state,blk.Bytes)
+    return err
+}
+
+func InspectVoucher(state *sqlite.DB,voucherData []byte) (*crypto.PublicKey, error) {
 	var ov fdo.Voucher
-	if err := cbor.Unmarshal(blk.Bytes, &ov); err != nil {
-		return fmt.Errorf("error parsing voucher: %w", err)
+	if err := cbor.Unmarshal(voucherData, &ov); err != nil {
+		return nil,fmt.Errorf("error parsing voucher: %w", err)
 	}
 	//fmt.Printf("RAW BYES: %s\n",hex.EncodeToString(blk.Bytes))
 	fmt.Printf("Version         :    %d\n",ov.Version)
@@ -294,8 +384,30 @@ func doInspectVoucher(state *sqlite.DB,args []string) error {
 		}
 	}
 	
+
+    // TODO Lets try to verify?
+    ownerKey, _, err := state.OwnerKey(header.Val.ManufacturerKey.Type)
+    var info fdo.OvhValidationContext =
+		fdo.OvhValidationContext{
+			PublicKeyToValidate:    ownerKey.Public(),
+		}
+	dc, hmacSha256, hmacSha384, privateKey, cleanup, err := readCred()
+	if err == nil && cleanup != nil {
+		defer func() { _ = cleanup() }()
+	}
+    c:= fdo.TO2Config{
+		Cred:       *dc,
+		HmacSha256: hmacSha256,
+		HmacSha384: hmacSha384,
+		Key:        privateKey,
+	}
+    err = fdo.VerifyVoucherMem(context.Background(), ov, nil, &info, &c) 
+    if (err != nil) {
+            fmt.Errorf("Failed to validate voucher:%s ",err)
+    }
 	//fmt.Printf("%+v\n",ov)
-	return nil
+    ownerPublic := ownerKey.Public()
+	return &ownerPublic,err
 }
 func doPrintDelegatePrivKey(state *sqlite.DB,args []string) error {
         if (len(args) < 1) {
@@ -382,6 +494,8 @@ func delegate(args []string) error {
                         return createDelegateCertificate(state,args[1:])
                 case "inspectVoucher":
                         return doInspectVoucher(state,args[1:])
+                case "attestPayload":
+                        return doAttestPayload(state,args[1:])
                 case "help":
                         return doDelegateHelp(state,args[1:])
                 default:

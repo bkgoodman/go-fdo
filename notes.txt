@@ -52,3 +52,32 @@ GUID=`sqlite3 test.db 'select hex(guid) from owner_vouchers;'`
 go run ./examples/cmd server -debug --reuse-cred -db test.db -to0 http://127.0.0.1:8080 -rvDelegate test2 -to0-guid $GUID 
 go run ./examples/cmd client  -rv-only -debug
 go run ./examples/cmd client  -debug
+
+
+# Voucher Multi-Party
+openssl ecparam -name secp384r1 -genkey -noout -out ecdsa_private.pem
+openssl ec -in ecdsa_private.pem -pubout -out ecdsa_public.pem
+go run ./examples/cmd client  -di http://127.0.0.1:9999
+sqlite3 test.db 'select hex(guid) from owner_vouchers;'
+xxd -r -p | base64
+go run ./examples/cmd server -resale-guid 8E9EE8D6E48FF75B6915A53E4F751C96 -resale-key ecdsa_public.pem -db ./test.db > testvoucher.ov
+go run ./examples/cmd delegate -db test.db inspectVoucher testvoucher.ov
+
+# Quick Voucher Export
+
+echo '-----BEGIN OWNERSHIP VOUCHER-----' ; sqlite3 test.db 'select hex(cbor) from owner_vouchers;' |  xxd -r -p | base64 ; echo '-----END OWNERSHIP VOUCHER-----'
+
+# Export & Convert Private Keys
+sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=11;' | xxd -r -p | base64 > ownerkey.key
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=11;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > ownerkey.key
+openssl pkey -in ownerkey.key -pubout
+
+# Sign and Verify
+echo "Hi" | openssl dgst -sha384 -sign ownerkey.key -out sig.bin
+openssl asn1parse -in sig.bin -inform DER
+(sig bin is the same output as "-binary". For EC keys will be ASN1 of r and s output params, for RSA it is a hash)
+echo "Hi" | openssl dgst -sha384 -verify ownerkey.pub -signature sig.bin
+
+
+# Payload
+echo '-----BEGIN PAYLOAD-----' ; echo "This is a test of the emergency boardcasting system. In the event of an actual emergency, you would be required to...." | base64 ; echo '-----END PAYLOAD-----'

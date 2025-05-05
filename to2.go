@@ -290,7 +290,8 @@ func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[prot
 	return proveDeviceNonce, info.PublicKeyToValidate, info.OriginalOwnerKey, &info.OVH, sess, nil
 }
 
-func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], info *ovhValidationContext, c *TO2Config) error {
+// Verify Voucher - using Transport to get entries
+func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], info *OvhValidationContext, c *TO2Config) error {
 	// Construct ownership voucher from parts received from the owner service
 	var entries []cose.Sign1Tag[VoucherEntryPayload, []byte]
 	for i := 0; i < info.NumVoucherEntries; i++ {
@@ -305,7 +306,11 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 		Hmac:    info.OVHHmac,
 		Entries: entries,
 	}
+    return VerifyVoucherMem(ctx,ov,to1d,info,c)
+}
 
+// Verify Voucher already in-memory
+func VerifyVoucherMem(ctx context.Context, ov Voucher, to1d *cose.Sign1[protocol.To1d, []byte], info *OvhValidationContext, c *TO2Config) error {
 	// Verify ownership voucher header
 	if err := ov.VerifyHeader(c.HmacSha256, c.HmacSha384); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
@@ -460,7 +465,7 @@ type helloDeviceMsg struct {
 	CapabilityFlags
 }
 
-type ovhValidationContext struct {
+type OvhValidationContext struct {
 	OVH                 VoucherHeader
 	OVHHmac             protocol.Hmac
 	NumVoucherEntries   int
@@ -472,7 +477,7 @@ type ovhValidationContext struct {
 // HelloDevice(60) -> ProveOVHdr(61)
 //
 //nolint:gocyclo // This is very complex validation that is better understood linearly
-func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (protocol.Nonce, *ovhValidationContext, kex.Session, error) {
+func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (protocol.Nonce, *OvhValidationContext, kex.Session, error) {
 	// Generate a new nonce
 	var proveOVNonce protocol.Nonce
 	if _, err := rand.Read(proveOVNonce[:]); err != nil {
@@ -617,7 +622,7 @@ func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (pr
 	}
 
 	return cuphNonce,
-		&ovhValidationContext{
+		&OvhValidationContext{
 			OVH:                 proveOVHdr.Payload.Val.OVH.Val,
 			OVHHmac:             proveOVHdr.Payload.Val.OVHHmac,
 			NumVoucherEntries:   int(proveOVHdr.Payload.Val.NumOVEntries),
