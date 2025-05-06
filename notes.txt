@@ -94,3 +94,4 @@ go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
 echo -n "Hi" | openssl dgst -sha384 -sign delegatekey.key | base64
 
 go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
+
