@@ -228,6 +228,7 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
     var payload []byte
     var ownerKey *crypto.PublicKey
     var sigbytes []byte
+    var delegateChain []*x509.Certificate
 	for {
 		block, rest := pem.Decode(pemData)
 		if block == nil {
@@ -236,7 +237,12 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
         fmt.Printf("Block \"%s\"  -  %d bytes\n",block.Type,len(block.Bytes))
         switch (block.Type) {
                 case "OWNERSHIP VOUCHER":
-                ownerKey,voucherError = InspectVoucher(state,block.Bytes)
+                var oKey *crypto.PublicKey
+                oKey,voucherError = InspectVoucher(state,block.Bytes)
+                if (voucherError != nil) {
+                        return fmt.Errorf("InspectVoucher failed: %w",voucherError)
+                }
+                ownerKey = oKey
                 break
 
                 case "PAYLOAD":
@@ -246,6 +252,15 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
                 case "SIGNATURE":
                     sigbytes = block.Bytes
                     break
+
+                case "CERTIFICATE":
+                       cert, err := x509.ParseCertificate(block.Bytes)
+                       if err != nil {
+                              return fmt.Errorf("failed to parse certificate: %w", err)
+                       }
+                       fmt.Printf("DELEGATE CERT \"%s\"  -  %d bytes\n",block.Type,len(block.Bytes))
+                       delegateChain = append(delegateChain,cert)
+                    break
         default:
                 fmt.Printf("Unknown Block %s\n",block.Type)
                 break
@@ -253,7 +268,7 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
         pemData = rest
 	}
     fmt.Printf("VoucherError: %v\n",voucherError)
-    fmt.Printf("OwnerKey: %v\n",*ownerKey)
+    fmt.Printf("OwnerKey: %v\n",ownerKey)
     if (voucherError != nil)  {
             return voucherError
     }
@@ -262,6 +277,44 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
         return fmt.Errorf("No Owner Key")
     }
     hashed := sha512.Sum384(payload)
+
+
+    // Do we need to validate against delegate chain??
+    if (len(delegateChain) > 0) {
+            /* Delegates can only sign payloads when they have "Provision" permission */
+            err = fdo.VerifyDelegateChain(delegateChain, ownerKey, &fdo.OID_delegateProvision) 
+            if (err != nil) {
+                    return fmt.Errorf("VerifyDelegateChain failed: %w",err)
+            }
+            //ownerKey = delegagateLeaf....
+            fmt.Printf("Delegate Leaf is %T\n",delegateChain[0].PublicKey)
+            switch pub := delegateChain[0].PublicKey.(type) {
+                case *ecdsa.PublicKey:
+                       var temp crypto.PublicKey = *pub
+                       ownerKey = &temp
+                       fmt.Printf("New Owner is %T %v+",ownerKey,ownerKey)
+                       break
+               default:
+                       return fmt.Errorf("Invalid delegate leaf key type %T",pub)
+
+            }
+    }
+
+    /* TODO - supports sha384/ecdsa384 only */
+    fmt.Printf("OwnerKey type is %T\n",ownerKey)
+    /*
+    ecdsaKey, ok := ownerKey.(*ecdsa.PublicKey)
+    if (ok) {
+            sig := new(ECDSASignature)
+            _, err := asn1.Unmarshal(sigbytes, sig)
+            if err != nil {
+                return fmt.Errorf("failed to unmarshal ASN.1 ECDSA signature: %w", err)
+            }
+            fmt.Printf("Signature is %v+\n",sig)
+		    verified := ecdsa.Verify(ecdsaKey, hashed[:], sig.R, sig.S)
+            fmt.Printf("ECDSA Verify returned %v\n",verified)
+    }
+    */
     switch pub := (*ownerKey).(type) {
         case *ecdsa.PublicKey:
             sig := new(ECDSASignature)
@@ -271,27 +324,19 @@ func doAttestPayload(state *sqlite.DB,args []string) error {
             }
             fmt.Printf("Signature is %v+\n",sig)
 		    verified := ecdsa.Verify(pub, hashed[:], sig.R, sig.S)
+            fmt.Printf("ECDSA ptr Verify returned %v\n",verified)
+        case ecdsa.PublicKey:
+            sig := new(ECDSASignature)
+            _, err := asn1.Unmarshal(sigbytes, sig)
+            if err != nil {
+                return fmt.Errorf("failed to unmarshal ASN.1 ECDSA signature: %w", err)
+            }
+            fmt.Printf("Signature is %v+\n",sig)
+		    verified := ecdsa.Verify(&pub, hashed[:], sig.R, sig.S)
             fmt.Printf("ECDSA Verify returned %v\n",verified)
        default:
-               return fmt.Errorf("Bad Signature format")
+               return fmt.Errorf("Bad Owner Key Type %T",pub)
     }
-    /*
-	switch pub := (*ownerKey).(type) {
-	case *ecdsa.PublicKey:
-		// Decode signature following RFC8152 8.1.
-		n := (pub.Params().N.BitLen() + 7) / 8
-		r := new(big.Int).SetBytes(s1.Signature[:n])
-		s := new(big.Int).SetBytes(s1.Signature[n:])
-		return ecdsa.Verify(pub, h.Sum(nil), r, s), nil
-
-	case *rsa.PublicKey:
-		digest := h.Sum(nil)
-		return verifyRSA(pub, hash, digest, s1.Signature, alg)
-default:
-        return fmt.Errorf("Invalid Owner Key Type")
-    }
-
-    */
 
 	return  nil
 }

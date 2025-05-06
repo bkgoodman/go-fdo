@@ -46,7 +46,7 @@ rm test.db
 go run ./examples/cmd server -debug -owner-certs  -db test.db -onboardDelegate test2 -rvDelegate test2 -reuse-cred
 
 ## Server Side
-go run ./examples/cmd delegate -db test.db create test2 onboard,redirect SECP384R1 SECP384R1 SECP384R1
+go run ./examples/cmd delegate -db test.db create testDelegate onboard,redirect  SECP384R1 ec384 ec384
 go run ./examples/cmd/ client -debug -di http://127.0.0.1:8080
 GUID=`sqlite3 test.db 'select hex(guid) from owner_vouchers;'`
 go run ./examples/cmd server -debug --reuse-cred -db test.db -to0 http://127.0.0.1:8080 -rvDelegate test2 -to0-guid $GUID 
@@ -75,9 +75,22 @@ openssl pkey -in ownerkey.key -pubout
 # Sign and Verify
 echo "Hi" | openssl dgst -sha384 -sign ownerkey.key -out sig.bin
 openssl asn1parse -in sig.bin -inform DER
+base64 sig.bin
 (sig bin is the same output as "-binary". For EC keys will be ASN1 of r and s output params, for RSA it is a hash)
 echo "Hi" | openssl dgst -sha384 -verify ownerkey.pub -signature sig.bin
 
 
 # Payload
 echo '-----BEGIN PAYLOAD-----' ; echo "This is a test of the emergency boardcasting system. In the event of an actual emergency, you would be required to...." | base64 ; echo '-----END PAYLOAD-----'
+
+
+# Delegate Payload Signing
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > delegatekey.key
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') | base64
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') | xxd
+echo -n "Hi" | openssl dgst -sha384 -sign delegatekey.key | base64
+vi payload_delegate.fdo
+go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
+echo -n "Hi" | openssl dgst -sha384 -sign delegatekey.key | base64
+
+go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
