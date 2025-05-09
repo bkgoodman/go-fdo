@@ -68,6 +68,7 @@ go run ./examples/cmd delegate -db test.db inspectVoucher testvoucher.ov
 echo '-----BEGIN OWNERSHIP VOUCHER-----' ; sqlite3 test.db 'select hex(cbor) from owner_vouchers;' |  xxd -r -p | base64 ; echo '-----END OWNERSHIP VOUCHER-----'
 
 # Export & Convert Private Keys
+("11" is pkType SECP384R1, 1=RSA2048)
 sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=11;' | xxd -r -p | base64 > ownerkey.key
 (echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=11;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > ownerkey.key
 openssl pkey -in ownerkey.key -pubout
