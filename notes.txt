@@ -80,12 +80,12 @@ base64 sig.bin
 (sig bin is the same output as "-binary". For EC keys will be ASN1 of r and s output params, for RSA it is a hash)
 echo "Hi" | openssl dgst -sha384 -verify ownerkey.pub -signature sig.bin
 
-
-# Payload
+# Attested Payload
+## Payload
 echo '-----BEGIN PAYLOAD-----' ; echo "This is a test of the emergency boardcasting system. In the event of an actual emergency, you would be required to...." | base64 ; echo '-----END PAYLOAD-----'
 
 
-# Delegate Payload Signing
+## Delegate Payload Signing
 (echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > delegatekey.key
 (echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') | base64
 (echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from delegate_keys;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') | xxd
@@ -95,4 +95,17 @@ go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
 echo -n "Hi" | openssl dgst -sha384 -sign delegatekey.key | base64
 
 go run ./examples/cmd delegate -db test.db attestPayload payload_delegate.fdo
+
+
+## Generate Encrypted Payload
+KEY=$(openssl rand -hex 32)
+IV=$(openssl rand -hex 16)
+openssl enc -aes-256-ctr  -out ciphertext.bin -K "$KEY" -iv "$IV"
+echo "$KEY" | openssl pkeyutl -encrypt -pubin -inkey ownerkey_rsa.pub -out encrypted_key.bin -pkeyopt rsa_padding_mode:oaep
+
+(IV, encrypted_key and ciphertext can be transmitted in clear)
+
+## Decrypt Encrypted Payload
+KEYOUT=`openssl pkeyutl -decrypt -in encrypted_key.bin -inkey ownerkey_rsa.key    -pkeyopt rsa_padding_mode:oaep`
+openssl enc -aes-256-ctr -d -in ciphertext.bin -K "$KEYOUT" -iv "$IV"
 
