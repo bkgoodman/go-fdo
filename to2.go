@@ -306,150 +306,16 @@ func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 		Hmac:    info.OVHHmac,
 		Entries: entries,
 	}
-    return VerifyVoucherMem(ctx,ov,to1d,info,c)
-}
 
-// Verify Voucher already in-memory
-func VerifyVoucherMem(ctx context.Context, ov Voucher, to1d *cose.Sign1[protocol.To1d, []byte], info *OvhValidationContext, c *TO2Config) error {
-	// Verify ownership voucher header
-	if err := ov.VerifyHeader(c.HmacSha256, c.HmacSha384); err != nil {
+	if err := ov.VerifyCrypto(VerifyOptions{
+		HmacSha256:         c.HmacSha256,
+		HmacSha384:         c.HmacSha384,
+		MfgPubKeyHash:      c.Cred.PublicKeyHash,
+		OwnerPubToValidate: info.PublicKeyToValidate,
+		To1d:               to1d,
+	}); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return fmt.Errorf("bad ownership voucher header from TO2.ProveOVHdr: %w", err)
-	}
-
-	// Verify that the owner service corresponds to the most recent device
-	// initialization performed by checking that the voucher header has a GUID
-	// and/or manufacturer key corresponding to the stored device credentials.
-	if err := ov.VerifyManufacturerKey(c.Cred.PublicKeyHash); err != nil {
-		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return fmt.Errorf("bad ownership voucher header from TO2.ProveOVHdr: manufacturer key: %w", err)
-	}
-
-	// Verify each entry in the voucher's list by performing iterative
-	// signature and hash (header and GUID/devInfo) checks.
-	if err := ov.VerifyEntries(); err != nil {
-		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return fmt.Errorf("bad ownership voucher entries from TO2.ProveOVHdr: %w", err)
-	}
-
-	// Ensure that the voucher entry chain ends with given owner key.
-	//
-	// Note that this check is REQUIRED in this case, because the the owner public
-	// key from the ProveOVHdr message's unprotected headers is used to
-	// validate its COSE signature. If the public key were not to match the
-	// last entry of the voucher, then it would not be known that ProveOVHdr
-	// was signed by the intended owner service.
-	ownerPub := ov.Header.Val.ManufacturerKey
-	if len(ov.Entries) > 0 {
-		ownerPub = ov.Entries[len(ov.Entries)-1].Payload.Val.PublicKey
-	}
-	expectedOwnerPub, err := ownerPub.Public()
-
-	// expectedOwnerPub is expected owner as found at end of OV chain
-	// this means it will not be the one from the server if delegate is used
-	// In this case, we will need to get this fro the server-provided
-	// delegate cert, meaning we must validate that the delegate cert was
-	// signed by expectedOwnerPub
-
-	if err != nil {
-		return fmt.Errorf("error parsing last public key of ownership voucher: %w", err)
-	}
-
-	// We need to validate against Delgate Cert Chain
-	if (info.DelegateChain != nil) { 
-		// First see if owner (in OV) signed the delgate cert
-		chain,err :=info.DelegateChain.Chain()
-		if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Failed to get Delegate Chain: %v",err)
-		}
-		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateOnboard)
-		if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Delgate Chain Verify Failed: %v",err)
-		} 
-
-		// Then make sure the owner key in OVH matches Delegate
-		// Validate directly against owner (no delegate)
-		key, err := info.DelegateChain.Public()
-		if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Couldn't get public key from delegate chain")
-		}
-
-		// TODO I think we are checking the wrong thing here...
-		if !key.(interface{ Equal(crypto.PublicKey) bool }).Equal(info.PublicKeyToValidate) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("delegate public key did not match last entry in ownership voucher")
-		}
-		
-	} else {
-
-		// info.PublicKeyToValidate was the one that server has (signed proveOVHdr with)
-		// We need to make sure this was signed with delegate key
-		if !info.PublicKeyToValidate.(interface{ Equal(crypto.PublicKey) bool }).Equal(expectedOwnerPub) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("owner public key did not match last entry in ownership voucher")
-		}
-	}
-
-	// If no to1d blob was given, then immmediately return. This will be the
-	// case when RV bypass was used.
-	if to1d == nil {
-		return nil
-	}
-
-	// If the TO1.RVRedirect signature does not verify, the Device must assume
-	// that a man in the middle is monitoring its traffic, and fail TO2
-	// immediately with an error code message.
-	var ok bool
-
-	if (to1d.Header.Unprotected[to2DelegateClaim] != nil) {
-		var delegatePubKey protocol.PublicKey
-		var delegateFound bool
-		if delegateFound, err = to1d.Header.Unprotected.Parse(to2DelegateClaim, &delegatePubKey); err != nil {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("error parsing to1d delegate cerificate: %w", err)
-		}
-		if (!delegateFound) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("empty to1d delegate cerificate: %w", err)
-		}
-
-		chain, err := delegatePubKey.Chain()
-		if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Failed to unfurl Blob Delegate Chain: %w", err)
-		}
-		err = VerifyDelegateChain(chain,&expectedOwnerPub,&OID_delegateRedirect)
-		if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Failed to validate RV Blob Delegate Chain: %w", err)
-		}
-		 // to1d was signed by a delegate
-		 p,err := delegatePubKey.Public()
-		if  err != nil {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("Delegate Verify Failed: %w", err)
-		}
-
-		 ok, err = to1d.Verify(p, nil, nil)
-		 if (err != nil) {
-			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return fmt.Errorf("VERIFY to1d ok=%v with delegate error: %w\n",ok,err)
-		 }
-		 // TODO verify delegate was signed by owner
-	} else {
-	 // to1d was signed by a Owner
-	 ok, err = to1d.Verify(expectedOwnerPub, nil, nil)
-	}
-
-	if  err != nil {
-		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return fmt.Errorf("error verifying to1d signature: %w", err)
-	} else if !ok {
-		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return fmt.Errorf("%w: to1d signature verification failed", ErrCryptoVerifyFailed)
+		return err
 	}
 
 	return nil
