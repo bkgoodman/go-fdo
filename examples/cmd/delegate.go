@@ -4,7 +4,6 @@
 package main
 
 import (
-	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -446,13 +445,15 @@ func InspectVoucher(state *sqlite.DB, voucherData []byte) (*crypto.PublicKey, er
 	if err == nil && cleanup != nil {
 		defer func() { _ = cleanup() }()
 	}
-	c := fdo.TO2Config{
-		Cred:       *dc,
-		HmacSha256: hmacSha256,
-		HmacSha384: hmacSha384,
-		Key:        privateKey,
-	}
-	err = fdo.VerifyVoucherMem(context.Background(), ov, nil, &info, &c)
+
+    _ = privateKey // TODO BKG FIX We will need to decrypt attested Payload
+    err = ov.VerifyCrypto(fdo.VerifyOptions{
+		HmacSha256:         hmacSha256,
+		HmacSha384:         hmacSha384,
+		MfgPubKeyHash:      dc.PublicKeyHash,
+		OwnerPubToValidate: info.PublicKeyToValidate,
+		To1d:               nil,
+	})
 	if err != nil {
 		fmt.Errorf("Failed to validate voucher:%s ", err)
 	}
