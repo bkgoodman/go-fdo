@@ -9,7 +9,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+	//"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
 	"encoding/asn1"
@@ -314,8 +314,8 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 	*/
 	switch pub := (*ownerKey).(type) {
 	case *rsa.PublicKey:
-		h := sha256.Sum256(payload)
-		err := rsa.VerifyPKCS1v15(pub, crypto.SHA256, h[:], sigbytes)
+		//h := sha512.Sum384(payload)
+		err := rsa.VerifyPKCS1v15(pub, crypto.SHA384, hashed[:], sigbytes)
 		if err != nil {
 			return fmt.Errorf("RSA Signature verify failed %w", err)
 		}
@@ -505,6 +505,7 @@ delegate print {chainname} [ownerKeyType]
 delegate list
 delegate key {chainname} 
 delegate inspectVoucher {filename} 
+delegate attestPayload {filename} 
 delegate create {chainName} {Permission[,Permission...]} {ownerKeyType} {keyType} [keyType...]
 
 Permissions: onboard upload redirect claim provision

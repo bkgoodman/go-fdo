@@ -109,3 +109,29 @@ echo "$KEY" | openssl pkeyutl -encrypt -pubin -inkey ownerkey_rsa.pub -out encry
 KEYOUT=`openssl pkeyutl -decrypt -in encrypted_key.bin -inkey ownerkey_rsa.key    -pkeyopt rsa_padding_mode:oaep`
 openssl enc -aes-256-ctr -d -in ciphertext.bin -K "$KEYOUT" -iv "$IV"
 
+
+# Quick RSA Attested Payload
+This works ONLY if you created Ownership Voucher with RSA2048 key like with:
+go run ./examples/cmd client  -di http://127.0.0.1:9999 -di-key rsa2048
+
+These will BREAK if more than one OV in database. i.e. If unsure, start with clean DB
+
+PAYLOAD='This is a test of the emergency broacasting system'
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=1;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > owner_rsa_pvt.key
+openssl pkey -in owner_rsa_pvt.key -pubout > owner_rsa_pub.key
+echo $PAYLOAD | openssl dgst -sha384 -sign owner_rsa_pvt.key -out sig.bin
+(echo '-----BEGIN OWNERSHIP VOUCHER-----' ; sqlite3 test.db 'select hex(cbor) from owner_vouchers;' |  xxd -r -p | base64 ; echo '-----END OWNERSHIP VOUCHER-----') > payload_rsa3.fdo
+(echo -----BEGIN PAYLOAD----- ; echo $PAYLOAD |  base64 ; echo -----END PAYLOAD-----) >> payload_rsa3.fdo
+(echo -----BEGIN SIGNATURE----- ;  base64 sig.bin; echo -----END SIGNATURE-----) >> payload_rsa3.fdo
+go run ./examples/cmd  delegate -db test.db attestPayload payload_rsa3.fdo
+
+# Quick EC Attested Payload
+PAYLOAD='This is a test of the emergency broacasting system'
+(echo '-----BEGIN PRIVATE KEY-----' ; sqlite3 test.db 'select hex(pkcs8) from owner_keys where type=11;' | xxd -r -p | base64 ; echo '-----END PRIVATE KEY-----') > owner_ec_pvt.key
+openssl pkey -in owner_ec_pvt.key -pubout > owner_ec_pub.key
+echo $PAYLOAD | openssl dgst -sha384 -sign owner_ec_pvt.key -out sig.bin
+(echo '-----BEGIN OWNERSHIP VOUCHER-----' ; sqlite3 test.db 'select hex(cbor) from owner_vouchers;' |  xxd -r -p | base64 ; echo '-----END OWNERSHIP VOUCHER-----') > payload_ec3.fdo
+(echo -----BEGIN PAYLOAD----- ; echo $PAYLOAD |  base64 ; echo -----END PAYLOAD-----) >> payload_ec3.fdo
+(echo -----BEGIN SIGNATURE----- ;  base64 sig.bin; echo -----END SIGNATURE-----) >> payload_ec3.fdo
+go run ./examples/cmd  delegate -db test.db attestPayload payload_ec3.fdo
+
