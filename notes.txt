@@ -18,6 +18,12 @@ sqlite3 test.db 'select hex(guid) from owner_vouchers;'
 go run ./examples/cmd server -debug --reuse-cred -db test.db -to0 http://127.0.0.1:8080 -to0-guid 32F7F3CE7F029EE2C10074F4C1DCF565
 
 
+# Generate and print Delegate Certificate
+go run ./examples/cmd delegate -db test.db create testDelegate2 onboard,redirect  SECP384R1 ec384 ec384
+go run ./examples/cmd delegate -db test.db print testDelegate2
+# Pass Certificate from above command to...
+openssl x509 -text 
+
 
 
 Figure 7 is wrong? TO0.OwnerSign is not signed by Ownerkey (to1d is, though)
@@ -135,3 +141,13 @@ echo $PAYLOAD | openssl dgst -sha384 -sign owner_ec_pvt.key -out sig.bin
 (echo -----BEGIN SIGNATURE----- ;  base64 sig.bin; echo -----END SIGNATURE-----) >> payload_ec3.fdo
 go run ./examples/cmd  delegate -db test.db attestPayload payload_ec3.fdo
 
+
+# Quick RSA Key Encryption
+KEY=$(openssl rand -hex 32)
+IV=$(openssl rand -hex 16)
+CIPHERTEXT=`echo $PAYLOAD | openssl enc -aes-256-ctr  -K "$KEY" -iv "$IV" | base64`
+WEK=$(echo "$KEY" | openssl pkeyutl -encrypt -pubin -inkey owner_rsa_pub.key -pkeyopt rsa_padding_mode:oaep | base64)
+
+echo -e "-----BEGIN IV-----\n$IV\n-----END IV-----"
+echo -e "-----BEGIN WRAPPED ENCRYPTION KEY-----\n$WEK\n-----END WRAPPED ENCRYPTION KEY-----"
+echo -e "-----BEGIN CIPHERTEXT-----\n$CIPHERTEXT\n-----END CIPHERTEXT-----"

@@ -243,6 +243,13 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 			ownerKey = oKey
 			break
 
+		case "IV":
+            break
+		case "CIPHERTEXT":
+            break
+		case "WRAPPED ENCRYPTION KEY":
+            break
+
 		case "PAYLOAD":
 			payload = block.Bytes
 			break
@@ -299,19 +306,6 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 
 	/* TODO - supports sha384/ecdsa384 only */
 	fmt.Printf("OwnerKey type is %T\n", ownerKey)
-	/*
-	    ecdsaKey, ok := ownerKey.(*ecdsa.PublicKey)
-	    if (ok) {
-	            sig := new(ECDSASignature)
-	            _, err := asn1.Unmarshal(sigbytes, sig)
-	            if err != nil {
-	                return fmt.Errorf("failed to unmarshal ASN.1 ECDSA signature: %w", err)
-	            }
-	            fmt.Printf("Signature is %v+\n",sig)
-			    verified := ecdsa.Verify(ecdsaKey, hashed[:], sig.R, sig.S)
-	            fmt.Printf("ECDSA Verify returned %v\n",verified)
-	    }
-	*/
 	switch pub := (*ownerKey).(type) {
 	case *rsa.PublicKey:
 		//h := sha512.Sum384(payload)
@@ -330,6 +324,9 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 		fmt.Printf("Signature is %v+\n", sig)
 		verified := ecdsa.Verify(pub, hashed[:], sig.R, sig.S)
 		fmt.Printf("ECDSA ptr Verify returned %v\n", verified)
+        if (!verified) {
+                return fmt.Errorf("ECDSA Signature verification FAILED")
+        }
 		break
 	case ecdsa.PublicKey:
 		sig := new(ECDSASignature)
@@ -340,11 +337,15 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 		fmt.Printf("Signature is %v+\n", sig)
 		verified := ecdsa.Verify(&pub, hashed[:], sig.R, sig.S)
 		fmt.Printf("ECDSA Verify returned %v\n", verified)
+        if (!verified) {
+                return fmt.Errorf("ECDSA Signature verification FAILED")
+        }
 		break
 	default:
 		return fmt.Errorf("Bad Owner Key Type %T", pub)
 	}
 
+	fmt.Println(string(payload))
 	return nil
 }
 

@@ -49,7 +49,7 @@ func DelegateOIDtoString(oid asn1.ObjectIdentifier)string {
 	if (oid.Equal(OID_delegateRedirect)) { return "redirect" }
 	if (oid.Equal(OID_delegateClaim)) { return "claim" }
 	if (oid.Equal(OID_delegateProvision)) { return "provision" }
-	if (oid.Equal(OID_delegateProvision)) { return "ownershipCA" }
+	if (oid.Equal(OID_delegateProvision)) { return "ownershipCA" }  // TODO ??
 	return fmt.Sprintf("Unknown: %s\n",oid.String())
 }
 
@@ -71,6 +71,23 @@ func certMissingOID(c *x509.Certificate,oid asn1.ObjectIdentifier) bool {
                 }
         }
         return true
+}
+
+//  This helper function will REMOVE the onboarding OID from a permissions arrah,
+//  returning the fixed array, and a flag to indicate if the array had the
+//  onboarding OID to begin with 
+func removeOnboardingOID(permissions []asn1.ObjectIdentifier) ([]asn1.ObjectIdentifier, bool) {
+        var newList []asn1.ObjectIdentifier 
+        found := false
+        
+        for _,o := range permissions {
+                if (o.Equal(OID_delegateOnboard)) {
+                        found = true
+                } else {
+                        newList = append(newList,o)
+                }
+        }
+        return newList,found
 }
 
 func KeyUsageToString(keyUsage x509.KeyUsage) (s string) {
@@ -259,6 +276,18 @@ func DelegateChainSummary(chain []*x509.Certificate) (s string) {
 // This is a helper function, but also used in the verification process
 func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicKey,subject string,issuer string, 
         permissions []asn1.ObjectIdentifier, sigAlg x509.SignatureAlgorithm) (*x509.Certificate, error) {
+                var extraExt []pkix.Extension
+                // "onboarding" permissions has dispositions in text - handle separateley
+                permissions, hasOnboard := removeOnboardingOID(permissions)
+                if (hasOnboard) {
+                        onboardExtension := pkix.Extension{
+                                Id:       OID_delegateOnboard,
+                                Critical: true, 
+                                Value:    []byte("reuse,retain,disable"), // TODO BKG - Allow user to specify dispositions
+                            }
+                        extraExt = append(extraExt,onboardExtension) 
+                    }
+
                 parent := &x509.Certificate{
                         SerialNumber:          big.NewInt(2),
                         Subject:               pkix.Name{CommonName: issuer},
@@ -268,6 +297,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                         KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
                         IsCA:                  true,
                         UnknownExtKeyUsage:    permissions,
+                        ExtraExtensions:       extraExt,
                 }
                 template := &x509.Certificate{
                         SerialNumber:          big.NewInt(1),
@@ -278,6 +308,7 @@ func GenerateDelegate(key crypto.Signer, flags uint8, delegateKey crypto.PublicK
                         IsCA:                        false,
                         KeyUsage:                x509.KeyUsageDigitalSignature,
                         UnknownExtKeyUsage:    permissions,
+                        ExtraExtensions:       extraExt,
                 }
                 if (flags & (DelegateFlagIntermediate | DelegateFlagRoot))!= 0 {
                         template.KeyUsage |= x509.KeyUsageCertSign 
