@@ -9,6 +9,7 @@ import (
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
@@ -19,14 +20,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/ncruces/go-sqlite3/driver"    // Load database/sql driver
-	_ "github.com/ncruces/go-sqlite3/embed"   // Load sqlite WASM binary
-	_ "github.com/ncruces/go-sqlite3/vfs/xts" // Encryption VFS
 
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cbor"
@@ -34,6 +30,7 @@ import (
 	"github.com/fido-device-onboard/go-fdo/custom"
 	"github.com/fido-device-onboard/go-fdo/kex"
 	"github.com/fido-device-onboard/go-fdo/protocol"
+	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
 
 // DB implements FDO server state persistence.
@@ -44,27 +41,8 @@ type DB struct {
 	db *sql.DB
 }
 
-// Open creates or opens a SQLite database file using a single non-pooled
-// connection. If a password is specified, then the xts VFS will be used
-// with a text key.
-func Open(filename, password string) (*DB, error) {
-	var query string
-	if password != "" {
-		query += fmt.Sprintf("?vfs=xts&_pragma=textkey(%q)&_pragma=temp_store(memory)", password)
-	}
-	connector, err := (&driver.SQLite{}).OpenConnector("file:" + filepath.Clean(filename) + query)
-	if err != nil {
-		return nil, fmt.Errorf("error creating sqlite connector: %w", err)
-	}
-	db := sql.OpenDB(connector)
-	if err := Init(db); err != nil {
-		return nil, err
-	}
-	return New(db), nil
-}
-
-// New creates a DB. The expected tables must already be created and pragmas
-// must already be set, including foreign_keys=ON.
+// New creates a DB. The expected tables must be created and FOREIGN_KEYS must
+// be enabled before the database is used for FDO server state.
 func New(db *sql.DB) *DB { return &DB{db: db} }
 
 // Init ensures all tables are created and pragma are set. It does not
@@ -75,15 +53,16 @@ func New(db *sql.DB) *DB { return &DB{db: db} }
 // local file, such as Cloudflare D1.
 func Init(db *sql.DB) error {
 	stmts := []string{
-		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS secrets
 			( type TEXT NOT NULL
 			, secret BLOB NOT NULL
 			)`,
 		`CREATE TABLE IF NOT EXISTS mfg_keys
-			( type INTEGER UNIQUE NOT NULL
+			( type INTEGER NOT NULL
 			, pkcs8 BLOB NOT NULL
+			, rsa_bits INT
 			, x509_chain BLOB NOT NULL
+			, PRIMARY KEY(type, rsa_bits)
 			)`,
 		`CREATE TABLE IF NOT EXISTS delegate_keys
 			( name TEXT UNIQUE NOT NULL
@@ -91,9 +70,11 @@ func Init(db *sql.DB) error {
 			, x509_chain BLOB 
 			)`,
 		`CREATE TABLE IF NOT EXISTS owner_keys
-			( type INTEGER UNIQUE NOT NULL
+			( type INTEGER NOT NULL
 			, pkcs8 BLOB NOT NULL
+			, rsa_bits INT
 			, x509_chain BLOB
+			, PRIMARY KEY(type, rsa_bits)
 			)`,
 		`CREATE TABLE IF NOT EXISTS rv_blobs
 			( guid BLOB PRIMARY KEY
@@ -101,6 +82,8 @@ func Init(db *sql.DB) error {
 			, voucher BLOB NOT NULL
 			, exp INTEGER NOT NULL
 			)`,
+		`CREATE INDEX IF NOT EXISTS rv_blob_exp
+			ON rv_blobs(exp ASC)`,
 		`CREATE TABLE IF NOT EXISTS sessions
 			( id BLOB PRIMARY KEY
 			, protocol INTEGER NOT NULL
@@ -138,15 +121,17 @@ func Init(db *sql.DB) error {
 			, prove_device BLOB
 			, setup_device BLOB
 			, mtu INTEGER
+			, devmod BLOB
+			, modules BLOB
+			, devmod_complete BOOLEAN CHECK (devmod_complete IN (0, 1))
 			, FOREIGN KEY(session) REFERENCES sessions(id) ON DELETE CASCADE
 			)`,
-		`CREATE TABLE IF NOT EXISTS mfg_vouchers
+		`CREATE TABLE IF NOT EXISTS vouchers
 			( guid BLOB PRIMARY KEY
+			, device_info TEXT NOT NULL
 			, cbor BLOB NOT NULL
-			)`,
-		`CREATE TABLE IF NOT EXISTS owner_vouchers
-			( guid BLOB PRIMARY KEY
-			, cbor BLOB NOT NULL
+			, created_at INTEGER NOT NULL /* Unix timestamp in microseconds */
+			, updated_at INTEGER NOT NULL /* Unix timestamp in microseconds */
 			)`,
 		`CREATE TABLE IF NOT EXISTS replacement_vouchers
 			( session BLOB UNIQUE NOT NULL
@@ -160,6 +145,7 @@ func Init(db *sql.DB) error {
 			, cbor BLOB NOT NULL
 			, FOREIGN KEY(session) REFERENCES sessions(id) ON DELETE CASCADE
 			)`,
+		`PRAGMA foreign_keys = ON`,
 	}
 	for _, sql := range stmts {
 		if _, err := db.Exec(sql); err != nil {
@@ -206,12 +192,9 @@ var _ interface {
 	fdo.TO1SessionState
 	fdo.TO2SessionState
 	fdo.RendezvousBlobPersistentState
-	fdo.ManufacturerVoucherPersistentState
 	fdo.OwnerVoucherPersistentState
 	fdo.OwnerKeyPersistentState
 	fdo.DelegateKeyPersistentState
-	fdo.AutoExtend
-	fdo.AutoTO0
 } = (*DB)(nil)
 
 const sessionIDSize = 16
@@ -232,7 +215,7 @@ func (db *DB) NewToken(ctx context.Context, protocol protocol.Protocol) (string,
 	}
 
 	// Store session ID
-	if err := insert(ctx, db.db, "sessions", map[string]any{
+	if err := db.insert(ctx, "sessions", map[string]any{
 		"id":       id,
 		"protocol": int(protocol),
 	}, nil); err != nil {
@@ -246,32 +229,20 @@ func (db *DB) NewToken(ctx context.Context, protocol protocol.Protocol) (string,
 }
 
 func (db *DB) loadOrStoreSecret(ctx context.Context) ([]byte, error) {
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error starting transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var readSecret []byte
-	if err := query(db.debugCtx(ctx), tx, "secrets", []string{"secret"}, map[string]any{"type": "hmac"}, &readSecret); err != nil && !errors.Is(err, fdo.ErrNotFound) {
-		return nil, fmt.Errorf("error reading hmac secret: %w", err)
-	}
-	if len(readSecret) > 0 {
-		return readSecret, nil
-	}
-
-	// Insert new secret
-	var secret [64]byte
-	if _, err := rand.Read(secret[:]); err != nil {
+	// Insert (or ignore) a new HMAC secret
+	secret := make([]byte, 64)
+	if _, err := rand.Read(secret); err != nil {
 		return nil, err
 	}
-	if err := insert(db.debugCtx(ctx), tx, "secrets", map[string]any{"type": "hmac", "secret": secret[:]}, nil); err != nil {
+	if err := db.insertOrIgnore(ctx, "secrets", map[string]any{"type": "hmac", "secret": secret}); err != nil {
 		return nil, fmt.Errorf("error writing hmac secret: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+
+	// Read secret
+	if err := db.query(ctx, "secrets", []string{"secret"}, map[string]any{"type": "hmac"}, &secret); err != nil {
+		return nil, fmt.Errorf("error reading hmac secret: %w", err)
 	}
-	return secret[:], nil
+	return secret, nil
 }
 
 type contextKey struct{}
@@ -335,25 +306,12 @@ func (db *DB) sessionID(ctx context.Context) ([]byte, bool) {
 	return id, true
 }
 
-func (db *DB) insert(ctx context.Context, table string, kvs, upsertWhere map[string]any) error {
-	if len(upsertWhere) == 0 {
-		return insert(ctx, db.db, table, kvs, upsertWhere)
-	}
-
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("error starting transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := insert(ctx, tx, table, kvs, upsertWhere); err != nil {
-		return err
-	}
-	return tx.Commit()
+func (db *DB) insert(ctx context.Context, table string, kvs map[string]any, upsertOnConflict []string) error {
+	return insert(db.debugCtx(ctx), db.db, table, kvs, upsertOnConflict)
 }
 
 func (db *DB) insertOrIgnore(ctx context.Context, table string, kvs map[string]any) error {
-	return insert(db.debugCtx(ctx), db.db, table, kvs, map[string]any{})
+	return insert(db.debugCtx(ctx), db.db, table, kvs, []string{})
 }
 
 func (db *DB) update(ctx context.Context, table string, kvs, where map[string]any) error {
@@ -364,17 +322,26 @@ func (db *DB) query(ctx context.Context, table string, columns []string, where m
 	return query(db.debugCtx(ctx), db.db, table, columns, where, into...)
 }
 
+// Allows using *sql.DB or *sql.Tx
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// Allows using *sql.DB or *sql.Tx
 type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func insert(ctx context.Context, db execer, table string, kvs, upsertWhere map[string]any) error {
+// Allows using *sql.DB or *sql.Tx
+type queryexecer interface {
+	querier
+	execer
+}
+
+// If upsertOnConflict is an empty slice (non-nil), then do an INSERT OR IGNORE
+func insert(ctx context.Context, db execer, table string, kvs map[string]any, upsertOnConflict []string) error {
 	var orIgnore string
-	if upsertWhere != nil {
+	if upsertOnConflict != nil && len(upsertOnConflict) == 0 {
 		orIgnore = "OR IGNORE "
 	}
 
@@ -385,22 +352,35 @@ func insert(ctx context.Context, db execer, table string, kvs, upsertWhere map[s
 	}
 	markers := slices.Repeat([]string{"?"}, len(columns))
 
+	var upsert string
+	if len(upsertOnConflict) > 0 {
+		var updates, whereClauses []string
+		for _, key := range columns {
+			excluded := fmt.Sprintf("`%s` = excluded.`%s`", key, key)
+			if slices.Contains(upsertOnConflict, key) {
+				whereClauses = append(whereClauses, excluded)
+			} else {
+				updates = append(updates, excluded)
+			}
+		}
+
+		upsert = fmt.Sprintf(" ON CONFLICT(`%s`) DO UPDATE SET ", strings.Join(upsertOnConflict, "`, `"))
+		upsert += strings.Join(updates, ", ")
+		upsert += " WHERE "
+		upsert += strings.Join(whereClauses, " AND ")
+	}
+
 	query := fmt.Sprintf(
-		"INSERT %sINTO %s (%s) VALUES (%s)",
+		"INSERT %sINTO %s (%s) VALUES (%s)%s",
 		orIgnore,
 		table,
 		"`"+strings.Join(columns, "`, `")+"`",
 		strings.Join(markers, ", "),
+		upsert,
 	)
-	debug(ctx, "sqlite: %s\n%+v", query, kvs)
-	if _, err := db.ExecContext(ctx, query, args...); err != nil {
-		return err
-	}
-
-	if len(upsertWhere) > 0 {
-		return update(ctx, db, table, kvs, upsertWhere)
-	}
-	return nil
+	debug(ctx, "sqlite: %s\n%+v", query, args)
+	_, err := db.ExecContext(ctx, query, args...)
+	return err
 }
 
 func update(ctx context.Context, db execer, table string, kvs, where map[string]any) error {
@@ -468,7 +448,7 @@ func query(ctx context.Context, db querier, table string, columns []string, wher
 	return nil
 }
 
-func remove(ctx context.Context, db execer, table string, where map[string]any) error {
+func remove(ctx context.Context, db queryexecer, table string, where map[string]any, returning map[string]any) error {
 	whereKeys := slices.Collect(maps.Keys(where))
 	clauses := make([]string, len(whereKeys))
 	for i, key := range whereKeys {
@@ -479,12 +459,33 @@ func remove(ctx context.Context, db execer, table string, where map[string]any) 
 		whereVals[i] = where[key]
 	}
 
+	var returningQuery string
+	returningArgs := make([]any, len(returning))
+	if len(returning) > 0 {
+		returningKeys := slices.Collect(maps.Keys(returning))
+		returningQuery = " RETURNING `" + strings.Join(returningKeys, "`, `") + "`"
+		for i, key := range returningKeys {
+			returningArgs[i] = returning[key]
+		}
+	}
+
 	query := fmt.Sprintf(
-		`DELETE FROM %s WHERE %s`,
+		`DELETE FROM %s WHERE %s%s`,
 		table,
 		strings.Join(clauses, " AND "),
+		returningQuery,
 	)
-	debug(ctx, "sqlite: %s\n%+v", query, where)
+	debug(ctx, "sqlite: %s\n%+v", query, whereVals)
+
+	if returningQuery != "" {
+		row := db.QueryRowContext(ctx, query, whereVals...)
+		if err := row.Scan(returningArgs...); errors.Is(err, sql.ErrNoRows) {
+			return fdo.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		return nil
+	}
 
 	result, err := db.ExecContext(ctx, query, whereVals...)
 	if err != nil {
@@ -501,24 +502,51 @@ func remove(ctx context.Context, db execer, table string, where map[string]any) 
 // AddManufacturerKey for signing device certificate chains. Unlike
 // [DB.AddOwnerKey], chain is always required.
 func (db *DB) AddManufacturerKey(keyType protocol.KeyType, key crypto.PrivateKey, chain []*x509.Certificate) error {
+	if len(chain) == 0 {
+		return fmt.Errorf("required certificate chain is missing")
+	}
+
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
 		return err
 	}
-	return db.insertOrIgnore(context.Background(), "mfg_keys", map[string]any{
+
+	kvs := map[string]any{
 		"type":       int(keyType),
 		"pkcs8":      der,
 		"x509_chain": derEncode(chain),
-	})
+	}
+
+	switch keyType {
+	case protocol.Rsa2048RestrKeyType:
+		kvs["rsa_bits"] = 2048
+	case protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+		rsaKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return fmt.Errorf("expected key type to be *rsa.PrivateKey, got %T", key)
+		}
+		kvs["rsa_bits"] = rsaKey.Size() * 8
+	}
+
+	return db.insertOrIgnore(context.Background(), "mfg_keys", kvs)
 }
 
 // ManufacturerKey returns the signer of a given key type and its certificate
-// chain (required).
-func (db *DB) ManufacturerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certificate, error) {
-	var pkcs8, der []byte
-	if err := db.query(context.Background(), "mfg_keys", []string{"pkcs8", "x509_chain"}, map[string]any{
+// chain. If key type is not RSAPKCS or RSAPSS then rsaBits is ignored.
+// Otherwise it must be either 2048 or 3072.
+func (db *DB) ManufacturerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error) {
+	where := map[string]any{
 		"type": int(keyType),
-	}, &pkcs8, &der); err != nil {
+	}
+	switch keyType {
+	case protocol.Rsa2048RestrKeyType:
+		where["rsa_bits"] = 2048
+	case protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+		where["rsa_bits"] = rsaBits
+	}
+
+	var pkcs8, der []byte
+	if err := db.query(context.Background(), "mfg_keys", []string{"pkcs8", "x509_chain"}, where, &pkcs8, &der); err != nil {
 		return nil, nil, err
 	}
 	if pkcs8 == nil || der == nil {
@@ -652,14 +680,10 @@ func (db *DB) SetTO0SignNonce(ctx context.Context, nonce protocol.Nonce) error {
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to0_sessions",
-		map[string]any{
-			"session": sessID,
-			"nonce":   nonce[:],
-		},
-		map[string]any{
-			"session": sessID,
-		})
+	return db.insert(ctx, "to0_sessions", map[string]any{
+		"session": sessID,
+		"nonce":   nonce[:],
+	}, []string{"session"})
 }
 
 // TO0SignNonce returns the Nonce expected in TO0.OwnerSign.
@@ -690,14 +714,10 @@ func (db *DB) SetTO1ProofNonce(ctx context.Context, nonce protocol.Nonce) error 
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to1_sessions",
-		map[string]any{
-			"session": sessID,
-			"nonce":   nonce[:],
-		},
-		map[string]any{
-			"session": sessID,
-		})
+	return db.insert(ctx, "to1_sessions", map[string]any{
+		"session": sessID,
+		"nonce":   nonce[:],
+	}, []string{"session"})
 }
 
 // TO1ProofNonce returns the Nonce expected in TO1.ProveToRV.
@@ -728,14 +748,10 @@ func (db *DB) SetGUID(ctx context.Context, guid protocol.GUID) error {
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to2_sessions",
-		map[string]any{
-			"session": sessID,
-			"guid":    guid[:],
-		},
-		map[string]any{
-			"session": sessID,
-		})
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session": sessID,
+		"guid":    guid[:],
+	}, []string{"session"})
 }
 
 // GUID retrieves the GUID of the voucher associated with the session.
@@ -774,14 +790,10 @@ func (db *DB) SetRvInfo(ctx context.Context, rvInfo [][]protocol.RvInstruction) 
 	if err != nil {
 		return fmt.Errorf("error marshaling RV info: %w", err)
 	}
-	return db.insert(ctx, "to2_sessions",
-		map[string]any{
-			"session": sessID,
-			"rv_info": blob,
-		},
-		map[string]any{
-			"session": sessID,
-		})
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session": sessID,
+		"rv_info": blob,
+	}, []string{"session"})
 }
 
 // RvInfo retrieves the rendezvous instructions to store at the end of TO2.
@@ -808,68 +820,61 @@ func (db *DB) RvInfo(ctx context.Context) ([][]protocol.RvInstruction, error) {
 	return rvInfo, nil
 }
 
-// NewVoucher creates and stores a voucher for a newly initialized device.
-// Note that the voucher may have entries if the server was configured for
-// auto voucher extension.
-func (db *DB) NewVoucher(ctx context.Context, ov *fdo.Voucher) error {
-	data, err := cbor.Marshal(ov)
-	if err != nil {
-		return fmt.Errorf("error marshaling ownership voucher: %w", err)
-	}
-	table := "mfg_vouchers"
-	if len(ov.Entries) > 0 {
-		table = "owner_vouchers"
-	}
-	return db.insert(ctx, table, map[string]any{
-		"guid": ov.Header.Val.GUID[:],
-		"cbor": data,
-	}, nil)
-}
-
 // AddVoucher stores the voucher of a device owned by the service.
 func (db *DB) AddVoucher(ctx context.Context, ov *fdo.Voucher) error {
 	data, err := cbor.Marshal(ov)
 	if err != nil {
 		return fmt.Errorf("error marshaling ownership voucher: %w", err)
 	}
-	return db.insert(ctx, "owner_vouchers", map[string]any{
-		"guid": ov.Header.Val.GUID[:],
-		"cbor": data,
+	return db.insert(ctx, "vouchers", map[string]any{
+		"guid":        ov.Header.Val.GUID[:],
+		"device_info": ov.Header.Val.DeviceInfo,
+		"cbor":        data,
+		"created_at":  time.Now().Unix(),
+		"updated_at":  time.Now().Unix(),
 	}, nil)
 }
 
-// ReplaceVoucher stores a new voucher, deleting the previous voucher.
+// ReplaceVoucher stores a new voucher with zero extensions, possibly deleting
+// or marking the previous voucher as replaced.
 func (db *DB) ReplaceVoucher(ctx context.Context, guid protocol.GUID, ov *fdo.Voucher) error {
-	data, err := cbor.Marshal(ov)
-	if err != nil {
-		return fmt.Errorf("error marshaling ownership voucher: %w", err)
+	if len(ov.Entries) > 0 {
+		return fmt.Errorf("ReplaceVoucher must be called with a voucher having zero extensions")
 	}
-	return db.update(ctx, "owner_vouchers",
-		map[string]any{
-			"guid": ov.Header.Val.GUID[:],
-			"cbor": data,
-		},
-		map[string]any{
-			"guid": guid[:],
-		},
-	)
+
+	// NOTE: This should be a transaction, but that would break Cloudflare D1
+	// compatibility. Therefore, it is an allowed state to have both the
+	// replacement voucher and the previous voucher. An implementation that
+	// does not need to work with Cloudflare D1 should use a transaction.
+	if err := db.AddVoucher(ctx, ov); err != nil {
+		return err
+	}
+	removeErr := remove(db.debugCtx(ctx), db.db, "vouchers",
+		map[string]any{"guid": guid[:]}, nil)
+	if removeErr == nil {
+		return nil
+	}
+
+	// Use best effort to remove the replacement voucher that was added
+	// optimistically
+	if errors.Is(removeErr, context.Canceled) || errors.Is(removeErr, context.DeadlineExceeded) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+	}
+	if err := remove(db.debugCtx(ctx), db.db, "vouchers", map[string]any{"guid": ov.Header.Val.GUID[:]}, nil); err != nil {
+		// NOTE: This results in an invalid state. See note above.
+		debug(db.debugCtx(ctx), "error removing replacement voucher after failed original voucher removal: %v", err)
+	}
+	return removeErr
 }
 
-// RemoveVoucher untracks a voucher, deleting it, and returns it for extension.
+// RemoveVoucher untracks a voucher, whether extended or not, possibly by
+// deleting it or marking it as removed, and returns it for extension.
 func (db *DB) RemoveVoucher(ctx context.Context, guid protocol.GUID) (*fdo.Voucher, error) {
-	ctx = db.debugCtx(ctx)
-
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error starting transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	var data []byte
-	if err := query(ctx, tx, "owner_vouchers", []string{"cbor"},
-		map[string]any{"guid": guid[:]},
-		&data,
-	); err != nil {
+	if err := remove(db.debugCtx(ctx), db.db, "vouchers",
+		map[string]any{"guid": guid[:]}, map[string]any{"cbor": &data}); err != nil {
 		return nil, err
 	}
 	if data == nil {
@@ -880,22 +885,13 @@ func (db *DB) RemoveVoucher(ctx context.Context, guid protocol.GUID) (*fdo.Vouch
 	if err := cbor.Unmarshal(data, &ov); err != nil {
 		return nil, fmt.Errorf("error unmarshaling ownership voucher: %w", err)
 	}
-
-	if err := remove(ctx, tx, "owner_vouchers", map[string]any{"guid": guid[:]}); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
 	return &ov, nil
 }
 
 // Voucher retrieves a voucher by GUID.
 func (db *DB) Voucher(ctx context.Context, guid protocol.GUID) (*fdo.Voucher, error) {
 	var data []byte
-	if err := db.query(ctx, "owner_vouchers", []string{"cbor"},
+	if err := db.query(ctx, "vouchers", []string{"cbor"},
 		map[string]any{"guid": guid[:]},
 		&data,
 	); err != nil {
@@ -918,15 +914,10 @@ func (db *DB) SetReplacementGUID(ctx context.Context, guid protocol.GUID) error 
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "replacement_vouchers",
-		map[string]any{
-			"session": sessID,
-			"guid":    guid[:],
-		},
-		map[string]any{
-			"session": sessID,
-		},
-	)
+	return db.insert(ctx, "replacement_vouchers", map[string]any{
+		"session": sessID,
+		"guid":    guid[:],
+	}, []string{"session"})
 }
 
 // ReplacementGUID retrieves the device GUID to persist at the end of TO2.
@@ -961,15 +952,10 @@ func (db *DB) SetReplacementHmac(ctx context.Context, hmac protocol.Hmac) error 
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "replacement_vouchers",
-		map[string]any{
-			"session": sessID,
-			"hmac":    hmac.Value,
-		},
-		map[string]any{
-			"session": sessID,
-		},
-	)
+	return db.insert(ctx, "replacement_vouchers", map[string]any{
+		"session": sessID,
+		"hmac":    hmac.Value,
+	}, []string{"session"})
 }
 
 // ReplacementHmac retrieves the voucher HMAC to persist at the end of TO2.
@@ -1022,16 +1008,11 @@ func (db *DB) SetXSession(ctx context.Context, suite kex.Suite, sess kex.Session
 		return fmt.Errorf("error marshaling key exchange key exchange state: %w", err)
 	}
 
-	return db.insert(ctx, "key_exchanges",
-		map[string]any{
-			"session": sessID,
-			"suite":   string(suite),
-			"cbor":    state,
-		},
-		map[string]any{
-			"session": sessID,
-		},
-	)
+	return db.insert(ctx, "key_exchanges", map[string]any{
+		"session": sessID,
+		"suite":   string(suite),
+		"cbor":    state,
+	}, []string{"session"})
 }
 
 // XSession returns the current key exchange/encryption session based on an
@@ -1072,15 +1053,10 @@ func (db *DB) SetProveDeviceNonce(ctx context.Context, nonce protocol.Nonce) err
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to2_sessions",
-		map[string]any{
-			"session":      sessID,
-			"prove_device": nonce[:],
-		},
-		map[string]any{
-			"session": sessID,
-		},
-	)
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session":      sessID,
+		"prove_device": nonce[:],
+	}, []string{"session"})
 }
 
 // ProveDeviceNonce returns the Nonce used in TO2.ProveDevice and TO2.Done.
@@ -1115,15 +1091,10 @@ func (db *DB) SetSetupDeviceNonce(ctx context.Context, nonce protocol.Nonce) err
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to2_sessions",
-		map[string]any{
-			"session":      sessID,
-			"setup_device": nonce[:],
-		},
-		map[string]any{
-			"session": sessID,
-		},
-	)
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session":      sessID,
+		"setup_device": nonce[:],
+	}, []string{"session"})
 }
 
 // SetupDeviceNonce returns the Nonce used in TO2.SetupDevice and TO2.Done2.
@@ -1158,20 +1129,30 @@ func (db *DB) AddOwnerKey(keyType protocol.KeyType, key crypto.PrivateKey, chain
 	if err != nil {
 		return err
 	}
-	if chain == nil {
-		return db.insertOrIgnore(context.Background(), "owner_keys", map[string]any{
-			"type":  int(keyType),
-			"pkcs8": der,
-		})
+
+	kvs := map[string]any{
+		"type":  int(keyType),
+		"pkcs8": der,
 	}
-	return db.insertOrIgnore(context.Background(), "owner_keys", map[string]any{
-		"type":       int(keyType),
-		"pkcs8":      der,
-		"x509_chain": derEncode(chain),
-	})
+	if chain != nil {
+		kvs["x509_chain"] = derEncode(chain)
+	}
+
+	switch keyType {
+	case protocol.Rsa2048RestrKeyType:
+		kvs["rsa_bits"] = 2048
+	case protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+		rsaKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return fmt.Errorf("expected key type to be *rsa.PrivateKey, got %T", key)
+		}
+		kvs["rsa_bits"] = rsaKey.Size() * 8
+	}
+
+	return db.insertOrIgnore(context.Background(), "owner_keys", kvs)
 }
 
-// AddDelegateKey to retrieve with [DB.DelegateKey]. 
+// AddDelegateKey to retrieve with [DB.DelegateKey].
 func (db *DB) AddDelegateKey(name string, key crypto.PrivateKey, chain []*x509.Certificate) error {
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
@@ -1181,20 +1162,20 @@ func (db *DB) AddDelegateKey(name string, key crypto.PrivateKey, chain []*x509.C
 	return db.insert(context.Background(), "delegate_keys", map[string]any{
 		"pkcs8":      der,
 		"x509_chain": derEncode(chain),
-		"name": name,
+		"name":       name,
 	},
-		map[string]any {
-		"name": name,
+		map[string]any{
+			"name": name,
 		},
 	)
 }
 
 func (db *DB) ListDelegateKeys() (names []string, err error) {
-	rows,err := db.db.Query("SELECT name from delegate_keys;")
-        if (err != nil) {
-                return 
-        }
-        defer rows.Close()
+	rows, err := db.db.Query("SELECT name from delegate_keys;")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var name string
@@ -1207,13 +1188,25 @@ func (db *DB) ListDelegateKeys() (names []string, err error) {
 }
 
 // OwnerKey returns the private key matching a given key type and optionally
-// its certificate chain.
-func (db *DB) OwnerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certificate, error) {
-	var keyDer, certChainDer []byte
-	if err := db.query(context.Background(), "owner_keys", []string{"pkcs8", "x509_chain"}, map[string]any{
+// its certificate chain. If key type is not RSAPKCS or RSAPSS then rsaBits
+// is ignored. Otherwise it must be either 2048 or 3072.
+func (db *DB) OwnerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error) {
+	where := map[string]any{
 		"type": int(keyType),
-	}, &keyDer, &certChainDer); err != nil {
-		return nil, nil, fmt.Errorf("error querying owner key [type=%s]: %w", keyType, err)
+	}
+	switch keyType {
+	case protocol.Rsa2048RestrKeyType:
+		rsaBits = 2048
+		where["rsa_bits"] = rsaBits
+	case protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+		where["rsa_bits"] = rsaBits
+	default:
+		rsaBits = 0
+	}
+
+	var keyDer, certChainDer []byte
+	if err := db.query(context.Background(), "owner_keys", []string{"pkcs8", "x509_chain"}, where, &keyDer, &certChainDer); err != nil {
+		return nil, nil, fmt.Errorf("error querying owner key [type=%s,size=%d]: %w", keyType, rsaBits, err)
 	}
 	if keyDer == nil { // x509_chain may be NULL
 		return nil, nil, fdo.ErrNotFound
@@ -1232,7 +1225,6 @@ func (db *DB) OwnerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certifi
 	return key.(crypto.Signer), chain, nil
 }
 
-
 // Get a delegate cert by name
 func (db *DB) DelegateKey(keyName string) (crypto.Signer, []*x509.Certificate, error) {
 	var keyDer, certChainDer []byte
@@ -1244,11 +1236,11 @@ func (db *DB) DelegateKey(keyName string) (crypto.Signer, []*x509.Certificate, e
 	if keyDer == nil { // x509_chain may be NULL
 		return nil, nil, fdo.ErrNotFound
 	}
-	return returnDelegate(keyDer,certChainDer)
+	return returnDelegate(keyDer, certChainDer)
 }
 
 // Worker function for two functions above
-func returnDelegate(keyDer []byte, certChainDer []byte) (crypto.Signer, []*x509.Certificate, error){ 
+func returnDelegate(keyDer []byte, certChainDer []byte) (crypto.Signer, []*x509.Certificate, error) {
 	key, err := x509.ParsePKCS8PrivateKey(keyDer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing delegate key: %w", err)
@@ -1268,14 +1260,10 @@ func (db *DB) SetMTU(ctx context.Context, mtu uint16) error {
 	if !ok {
 		return fdo.ErrInvalidSession
 	}
-	return db.insert(ctx, "to2_sessions",
-		map[string]any{
-			"session": sessID,
-			"mtu":     int(mtu),
-		},
-		map[string]any{
-			"session": sessID,
-		})
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session": sessID,
+		"mtu":     int(mtu),
+	}, []string{"session"})
 }
 
 // MTU returns the max service info size the device may receive.
@@ -1298,6 +1286,66 @@ func (db *DB) MTU(ctx context.Context) (uint16, error) {
 	return mtu.V, nil
 }
 
+// SetDevmod sets the device info and module support.
+func (db *DB) SetDevmod(ctx context.Context, devmod serviceinfo.Devmod, modules []string, complete bool) error {
+	sessID, ok := db.sessionID(ctx)
+	if !ok {
+		return fdo.ErrInvalidSession
+	}
+	devmodBytes, err := cbor.Marshal(devmod)
+	if err != nil {
+		return err
+	}
+	modulesBytes, err := cbor.Marshal(modules)
+	if err != nil {
+		return err
+	}
+	return db.insert(ctx, "to2_sessions", map[string]any{
+		"session":         sessID,
+		"devmod":          devmodBytes,
+		"modules":         modulesBytes,
+		"devmod_complete": complete,
+	}, []string{"session"})
+}
+
+// Devmod returns the device info and module support.
+func (db *DB) Devmod(ctx context.Context) (devmod serviceinfo.Devmod, modules []string, complete bool, err error) {
+	sessID, ok := db.sessionID(ctx)
+	if !ok {
+		return devmod, nil, false, fdo.ErrInvalidSession
+	}
+
+	// Query encoded values
+	var (
+		devmodBytes  sql.Null[[]byte]
+		modulesBytes sql.Null[[]byte]
+		completeVal  sql.NullBool
+	)
+	if err := db.query(ctx, "to2_sessions", []string{
+		"devmod",
+		"modules",
+		"devmod_complete",
+	}, map[string]any{
+		"session": sessID,
+	}, &devmodBytes, &modulesBytes, &completeVal); err != nil {
+		return devmod, nil, false, err
+	}
+	if !devmodBytes.Valid || !modulesBytes.Valid || !completeVal.Valid {
+		return devmod, nil, false, fdo.ErrNotFound
+	}
+
+	// Parse values
+	if err := cbor.Unmarshal(devmodBytes.V, &devmod); err != nil {
+		return devmod, nil, false, fmt.Errorf("error unmarshaling CBOR devmod: %w", err)
+	}
+	if err := cbor.Unmarshal(modulesBytes.V, &modules); err != nil {
+		return devmod, nil, false, fmt.Errorf("error unmarshaling CBOR modules: %w", err)
+	}
+	complete = completeVal.Bool
+
+	return devmod, modules, complete, nil
+}
+
 // SetRVBlob sets the owner rendezvous blob for a device.
 func (db *DB) SetRVBlob(ctx context.Context, ov *fdo.Voucher, to1d *cose.Sign1[protocol.To1d, []byte], exp time.Time) error {
 	blob, err := cbor.Marshal(to1d)
@@ -1311,16 +1359,12 @@ func (db *DB) SetRVBlob(ctx context.Context, ov *fdo.Voucher, to1d *cose.Sign1[p
 	}
 
 	guid := ov.Header.Val.GUID[:]
-	return db.insert(ctx, "rv_blobs",
-		map[string]any{
-			"guid":    guid,
-			"rv":      blob,
-			"voucher": voucher,
-			"exp":     exp.Unix(),
-		},
-		map[string]any{
-			"guid": guid,
-		})
+	return db.insert(ctx, "rv_blobs", map[string]any{
+		"guid":    guid,
+		"rv":      blob,
+		"voucher": voucher,
+		"exp":     exp.Unix(),
+	}, []string{"guid"})
 }
 
 // RVBlob returns the owner rendezvous blob for a device.

@@ -6,17 +6,12 @@ package fdo
 import (
 	"context"
 	"crypto"
-	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"fmt"
 	"hash"
 	"io"
-	"time"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
-	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 )
 
@@ -140,7 +135,7 @@ func appStart(ctx context.Context, transport Transport, info any) (*VoucherHeade
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.DIAppStartMsgType, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error sending DI.AppStart: %w", err)
+		return nil, fmt.Errorf("DI.AppStart: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -207,20 +202,17 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 	}
 
 	// Get device info string and key info
-	deviceInfo, keyType, keyEncoding, err := s.DeviceInfo(ctx, info, chain)
+	deviceInfo, mfgPubKey, err := s.DeviceInfo(ctx, info, chain)
 	if err != nil {
 		return nil, fmt.Errorf("error getting device info: %w", err)
 	}
-
-	// Use issuer chain of device certificate to identify manufacturer pubkey
-	// and encode as the device requested
-	mfgPubKey, err := encodePublicKey(keyType, keyEncoding, chain[1:])
+	ownerPubKey, err := mfgPubKey.Public()
 	if err != nil {
-		return nil, fmt.Errorf("error constructing manufacturer public key from CA chain: %w", err)
+		return nil, fmt.Errorf("error getting manufacturer public key: %w", err)
 	}
 
 	// Compute the appropriate cert chain hash
-	alg, err := hashAlgFor(chain[0].PublicKey, chain[1].PublicKey)
+	alg, err := hashAlgFor(chain[0].PublicKey, ownerPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("error determining appropriate device cert chain hash algorithm: %w", err)
 	}
@@ -240,7 +232,7 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 		Version:         101,
 		GUID:            guid,
 		DeviceInfo:      deviceInfo,
-		ManufacturerKey: *mfgPubKey,
+		ManufacturerKey: mfgPubKey,
 		CertChainHash: &protocol.Hash{
 			Algorithm: alg,
 			Value:     certChainHash.Sum(nil),
@@ -265,24 +257,6 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 	}, nil
 }
 
-func encodePublicKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding, chain []*x509.Certificate) (*protocol.PublicKey, error) {
-	switch keyEncoding {
-	case protocol.X509KeyEnc, protocol.CoseKeyEnc:
-		switch keyType {
-		case protocol.Secp256r1KeyType, protocol.Secp384r1KeyType:
-			return protocol.NewPublicKey(keyType, chain[0].PublicKey.(*ecdsa.PublicKey), keyEncoding == protocol.CoseKeyEnc)
-		case protocol.Rsa2048RestrKeyType, protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
-			return protocol.NewPublicKey(keyType, chain[0].PublicKey.(*rsa.PublicKey), keyEncoding == protocol.CoseKeyEnc)
-		default:
-			return nil, fmt.Errorf("unsupported key type: %s", keyType)
-		}
-	case protocol.X5ChainKeyEnc:
-		return protocol.NewPublicKey(keyType, chain, false)
-	default:
-		return nil, fmt.Errorf("unsupported key encoding: %s", keyEncoding)
-	}
-}
-
 // SetHMAC(12) -> Done(13)
 func setHmac(ctx context.Context, transport Transport, hmac hash.Hash, ovh *VoucherHeader) (err error) {
 	// Compute HMAC
@@ -300,7 +274,7 @@ func setHmac(ctx context.Context, transport Transport, hmac hash.Hash, ovh *Vouc
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.DISetHmacMsgType, msg, nil)
 	if err != nil {
-		return fmt.Errorf("error sending DI.SetHMAC: %w", err)
+		return fmt.Errorf("DI.SetHMAC: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -351,112 +325,18 @@ func (s *DIServer[T]) diDone(ctx context.Context, msg io.Reader) (struct{}, erro
 		CertChain: &certChain,
 		Entries:   nil,
 	}
-	if err := s.maybeAutoExtend(ov); err != nil {
-		return struct{}{}, fmt.Errorf("error extending voucher: %w", err)
+	if s.BeforeVoucherPersist != nil {
+		if err := s.BeforeVoucherPersist(ctx, ov); err != nil {
+			return struct{}{}, fmt.Errorf("error in callback before new voucher is persisted: %w", err)
+		}
 	}
-	if err := s.Vouchers.NewVoucher(ctx, ov); err != nil {
+	if err := s.Vouchers.AddVoucher(ctx, ov); err != nil {
 		return struct{}{}, fmt.Errorf("error storing voucher: %w", err)
 	}
-	if err := s.maybeAutoTO0(ctx, ov); err != nil {
-		return struct{}{}, fmt.Errorf("error auto-registering device for rendezvous: %w", err)
+	if s.AfterVoucherPersist != nil {
+		if err := s.AfterVoucherPersist(ctx, *ov); err != nil {
+			return struct{}{}, fmt.Errorf("error in callback after new voucher is persisted: %w", err)
+		}
 	}
 	return struct{}{}, nil
-}
-
-func (s *DIServer[T]) maybeAutoExtend(ov *Voucher) error {
-	if s.AutoExtend == nil {
-		return nil
-	}
-
-	keyType := ov.Header.Val.ManufacturerKey.Type
-	owner, _, err := s.AutoExtend.ManufacturerKey(keyType)
-	if err != nil {
-		return fmt.Errorf("error getting %s manufacturer key: %w", keyType, err)
-	}
-	nextOwner, _, err := s.AutoExtend.OwnerKey(keyType)
-	if err != nil {
-		return fmt.Errorf("error getting %s owner key: %w", keyType, err)
-	}
-	switch owner.Public().(type) {
-	case *ecdsa.PublicKey:
-		nextOwner, ok := nextOwner.Public().(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("owner key must be %s", keyType)
-		}
-		extended, err := ExtendVoucher(ov, owner, nextOwner, nil)
-		if err != nil {
-			return err
-		}
-		*ov = *extended
-		return nil
-
-	case *rsa.PublicKey:
-		nextOwner, ok := nextOwner.Public().(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("owner key must be %s", keyType)
-		}
-		extended, err := ExtendVoucher(ov, owner, nextOwner, nil)
-		if err != nil {
-			return err
-		}
-		*ov = *extended
-		return nil
-
-	default:
-		return fmt.Errorf("invalid key type %T", owner)
-	}
-}
-
-func (s *DIServer[T]) maybeAutoTO0(ctx context.Context, ov *Voucher) error {
-	if s.AutoTO0 == nil {
-		return nil
-	}
-	if s.AutoExtend == nil {
-		return fmt.Errorf("voucher auto-extension must be enabled when auto-TO0 is enabled")
-	}
-	if len(s.AutoTO0Addrs) == 0 {
-		return fmt.Errorf("TO2 addrs cannot be empty when auto-TO0 is enabled")
-	}
-
-	keyType := ov.Header.Val.ManufacturerKey.Type
-	nextOwner, _, err := s.AutoTO0.OwnerKey(keyType)
-	if err != nil {
-		return fmt.Errorf("error getting %s owner key: %w", keyType, err)
-	}
-
-	var opts crypto.SignerOpts
-	switch keyType {
-	case protocol.Rsa2048RestrKeyType, protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
-		switch rsaPub := nextOwner.Public().(*rsa.PublicKey); rsaPub.Size() {
-		case 2048 / 8:
-			opts = crypto.SHA256
-		case 3072 / 8:
-			opts = crypto.SHA384
-		default:
-			return fmt.Errorf("unsupported RSA key size: %d bits", rsaPub.Size()*8)
-		}
-
-		if keyType == protocol.RsaPssKeyType {
-			opts = &rsa.PSSOptions{
-				SaltLength: rsa.PSSSaltLengthEqualsHash,
-				Hash:       opts.(crypto.Hash),
-			}
-		}
-	}
-
-	sign1 := cose.Sign1[protocol.To1d, []byte]{
-		Payload: cbor.NewByteWrap(protocol.To1d{
-			RV:       s.AutoTO0Addrs,
-			To0dHash: protocol.Hash{Algorithm: protocol.Sha256Hash},
-		}),
-	}
-	if err := sign1.Sign(nextOwner, nil, nil, opts); err != nil {
-		return fmt.Errorf("error signing to1d: %w", err)
-	}
-	exp := time.Now().AddDate(30, 0, 0) // Expire in 30 years
-	if err := s.AutoTO0.SetRVBlob(ctx, ov, &sign1, exp); err != nil {
-		return fmt.Errorf("error storing to1d: %w", err)
-	}
-
-	return nil
 }

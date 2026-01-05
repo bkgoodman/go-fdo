@@ -1,0 +1,37 @@
+
+=== NAME  TestClientWithMockModuleAndAutoUnchunking
+    transport.go:56: Request 60: [65535, h'29b4cf1752c32e9a8572dde5ca73b1b4', h'4c2aff3b90ee8381db36e4a66b2903e5', "ECDH384", 1, [-35, h''], h'']
+Onboard Delegate to use ""
+** NO Delegate Key
+*** SIGN OVHPROOF with key ECDSA NIST P-384 / secp384r1 Fingerprint: bcd24b19c0126b2fe74834439b099546b9acaac4f6cea9292c8cbc141820e717
+    transport.go:90: Response 61: 18([h'a1013822', {256: h'2ab0d62cd49f7787c525fa6d41b6a0b6', 257: [11, 1, h'3076301006072a8648ce3d020106052b8104002203620004adc085e35b697d23ebc47c111f4d8193bee48234c77da7603dbf8ff291625534bcfb85cc06615a65ede1601d5bf81968f27bae1cc3346bd4c2410dac46ffa508d98257ff23e14928fd405b316132322c351a05f7e89e5a45b229400b990f0705']}, h'8958d38618655029b4cf1752c32e9a8572dde5ca73b1b4806b746573745f646576696365830b0158783076301006072a8648ce3d020106052b8104002203620004adc085e35b697d23ebc47c111f4d8193bee48234c77da7603dbf8ff291625534bcfb85cc06615a65ede1601d5bf81968f27bae1cc3346bd4c2410dac46ffa508d98257ff23e14928fd405b316132322c351a05f7e89e5a45b229400b990f070582382a583044e9994ff6f6d76cbcc5c27c93e3fd13393b48a26449846dcbf3c182c6b8ef939ed77d1e312167e90a295b8111bbdeac008206583090e2f47f52c2099fb1d38656ad3821e0e926a4b407d65dbcbc3c7bf471c0ecb4686d6ca5561e718bac6650845d0b32f1504c2aff3b90ee8381db36e4a66b2903e58238224058960030936b3c2c8fb79e24c9ada033ae9ef09701eda18f156a61b60e8f7ff9cd2f2ac9831f9654461a9cdd497990084da508a10030d4a477835b6fb831b966825662ce77a896a1293d72bf5c4366b5428d46130a89f01f7e21fe1fad78214b917fe97c652800305a77f912bfbf48e318996f0465dcfe336da61ca959311630009171b2e8182f0c123c58bafc8da5f70c616fba2d6745de82382a5830433229bf5936ffc9f16024dffdff05d7a0f6617f58b0b2fa64d575d6193a6c28eec9338ddc9a8f60ccb1b3bb3f11780c19ffff40', h'0f8b65788249e9478e52e10be1ed8f98754821a221692ce3c0765fe961d117a72a20588fbdbf9c291f68b02df3467010c5098ec215f7b4f0bd80ad21229e0d46e0d06fd45133b944c85ba0c21a2d57f8032e64ea8cd59d9168541012c2e45c7d'])
+*** DELEGATE proveOVHdr NO CERT
+*** DELEGATE Key proveOVHdr Err: %!w(*errors.errorString=&{unsupported key encoding: Intel EPID/non-standard})
+*** Use OWNER Key: &{0x92a010 26742887006871793442587704448317651008258544805602906465373354077893302559272878663504995902384841249615714723567976 37321568801652127958320740625003396989351696860218320280999452018240214287441488724278138707816974419321904455157509}
+*** VERIFY OVHPROOF with key ECDSA NIST P-384 / secp384r1 Fingerprint: bcd24b19c0126b2fe74834439b099546b9acaac4f6cea9292c8cbc141820e717
+    transport.go:56: Request 255: [101, 61, "TO2.ProveOVHdr payload signature verification failed: cryptographic verification failed", 1732976779, null]
+=== NAME  TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Transfer_Ownership_2_w/_Modules
+    fdo_test.go:102: expected err to refer to device module not reading full message body
+--- FAIL: TestClientWithMockModuleAndAutoUnchunking (0.62s)
+    --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM" (0.02s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM"/Device_Initialization (0.00s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM"/Transfer_Ownership_0 (0.00s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM"/Transfer_Ownership_1_and_Transfer_Ownership_2 (0.01s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM"/Transfer_Ownership_2_Only (0.01s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp256r1_=_NIST-P-256_=_prime256v1"_Encoding_"COSE_x5chain"_Exchange_"ECDH256"_Cipher_"A128GCM"/Transfer_Ownership_2_w/_Modules (0.00s)
+    --- FAIL: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM" (0.05s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Device_Initialization (0.01s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Transfer_Ownership_0 (0.01s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Transfer_Ownership_1_and_Transfer_Ownership_2 (0.02s)
+        --- PASS: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Transfer_Ownership_2_Only (0.01s)
+        --- FAIL: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"/Transfer_Ownership_2_w/_Modules (0.01s)
+
+
+
+--- FAIL: TestClientWithMockModule/Key_"RSA_2048_with_restricted_key/exponent_(PKCS1_1.5_encoding)"_Encoding_"x.509_DER_encoding"_Exchange_"ASYMKEX2048"_Cipher_"A128GCM"_w/Delegate/Transfer_Ownership_2_w/_Modules (0.17s)
+
+
+--- FAIL: TestClientWithPluginModule/Key_"RSA_key,_PSS"_Encoding_"x.509_DER_encoding"_Exchange_"DHKEXid15"_Cipher_"A128GCM"_w/Delegate/Transfer_Ownership_2_Only (0.13s)
+
+
+--- FAIL: TestClientWithMockModuleAndAutoUnchunking/Key_"ECDSA_secp384r1_=_NIST-P-384"_Encoding_"x.509_DER_encoding"_Exchange_"ECDH384"_Cipher_"A128GCM"_w/Delegate/Transfer_Ownership_1_and_Transfer_Ownership_2 (0.01s)

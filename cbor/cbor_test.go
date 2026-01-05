@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"testing"
@@ -774,7 +775,7 @@ func TestDecodeAny(t *testing.T) {
 			var tag any
 			if err := cbor.Unmarshal(test.input, &tag); err != nil {
 				t.Errorf("error unmarshaling % x: %v", test.input, err)
-			} else if n := tag.(cbor.TagData).Number(); n != test.expectNum {
+			} else if n := tag.(cbor.Tag[cbor.RawBytes]).Num; n != test.expectNum {
 				t.Errorf("unmarshaling % x; expected tag number %d, got %d", test.input, test.expectNum, n)
 				continue
 			}
@@ -829,7 +830,7 @@ func TestDecodeAny(t *testing.T) {
 		var got any
 		var (
 			input  = []byte{0xf6}
-			expect interface{}
+			expect any
 		)
 		if err := cbor.Unmarshal(input, &got); err != nil {
 			t.Errorf("error unmarshaling % x: %v", input, err)
@@ -1271,6 +1272,20 @@ func TestDecodeMap(t *testing.T) {
 			t.Errorf("error unmarshaling % x: %v", input, err)
 		} else if !reflect.DeepEqual(got, expect) {
 			t.Errorf("unmarshaling % x; expected %v, got %v", input, expect, got)
+		}
+	})
+
+	t.Run("any->any (uncomparable error)", func(t *testing.T) {
+		var (
+			input = []byte{0xa2,
+				0x45, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x02,
+				0x03, 0x65, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
+			}
+			got       = make(map[any]any)
+			expectErr = "map key type ([]uint8) not comparable"
+		)
+		if err := cbor.Unmarshal(input, &got); err == nil || err.Error() != expectErr {
+			t.Errorf("expected error %q, got %q", expectErr, err)
 		}
 	})
 
@@ -2060,25 +2075,47 @@ type Flatten struct {
 	C []byte
 }
 
-var _ cbor.FlatMarshaler = (*Flatten)(nil)
-var _ cbor.FlatUnmarshaler = (*Flatten)(nil)
+var _ cbor.StreamMarshaler = (*Flatten)(nil)
+var _ cbor.StreamUnmarshaler = (*Flatten)(nil)
 
-func (f Flatten) FlatMarshalCBOR(w io.Writer) error {
+func (f Flatten) MarshalCBORStream(w io.Writer, o cbor.EncoderOptions, flattened int) error {
+	if flattened == 0 {
+		return cbor.ErrSkip
+	}
+
+	enc := cbor.NewEncoder(w)
+	enc.EncoderOptions = o
+
+	if flattened != 2 {
+		return fmt.Errorf("only flat2 tag supported")
+	}
+
 	// Note the extra rune!
-	if err := cbor.NewEncoder(w).Encode(f.B + "!"); err != nil {
+	if err := enc.Encode(f.B + "!"); err != nil {
 		return err
 	}
-	return cbor.NewEncoder(w).Encode(f.C)
+	return enc.Encode(f.C)
 }
 
-func (f *Flatten) FlatUnmarshalCBOR(r io.Reader) error {
-	if err := cbor.NewDecoder(r).Decode(&f.B); err != nil {
+func (f *Flatten) UnmarshalCBORStream(r io.Reader, o cbor.DecoderOptions, flattened int) error {
+	if flattened == 0 {
+		return cbor.ErrSkip
+	}
+
+	dec := cbor.NewDecoder(r)
+	dec.DecoderOptions = o
+
+	if flattened != 2 {
+		return fmt.Errorf("only flat2 tag supported")
+	}
+
+	if err := dec.Decode(&f.B); err != nil {
 		return err
 	}
-	return cbor.NewDecoder(r).Decode(&f.C)
+	return dec.Decode(&f.C)
 }
 
-func TestFlatMarshal(t *testing.T) {
+func TestStreamMarshal(t *testing.T) {
 	type st struct {
 		A int
 		Z Flatten `cbor:",flat2"`
@@ -2099,7 +2136,7 @@ func TestFlatMarshal(t *testing.T) {
 	}
 
 	expectS := s
-	expectS.Z.B += "!" // added in FlatMarshalCBOR
+	expectS.Z.B += "!" // added in MarshalCBORStream
 
 	var gotS st
 	if err := cbor.Unmarshal(got, &gotS); err != nil {
@@ -2110,7 +2147,7 @@ func TestFlatMarshal(t *testing.T) {
 	}
 }
 
-func TestFlatMarshalEmbedded(t *testing.T) {
+func TestStreamMarshalEmbedded(t *testing.T) {
 	type st struct {
 		A       int
 		Flatten `cbor:",flat2"`
@@ -2131,7 +2168,7 @@ func TestFlatMarshalEmbedded(t *testing.T) {
 	}
 
 	expectS := s
-	expectS.B += "!" // added in FlatMarshalCBOR
+	expectS.B += "!" // added in MarshalCBORStream
 
 	var gotS st
 	if err := cbor.Unmarshal(got, &gotS); err != nil {
@@ -2241,26 +2278,6 @@ func TestEmbeddedOmitEmptyTag(t *testing.T) {
 		}
 		if !reflect.DeepEqual(d, expectData) {
 			t.Fatalf("expected %+v, got %+v", expectData, d)
-		}
-	})
-}
-
-func TestOmitEmptyType(t *testing.T) {
-	t.Run("Marshal", func(t *testing.T) {
-		v := cbor.OmitEmpty[int]{Val: 0}
-		data, err := cbor.Marshal(&v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(data) > 0 {
-			t.Fatal("expected zero bytes")
-		}
-	})
-
-	t.Run("Unmarshal", func(t *testing.T) {
-		var v cbor.OmitEmpty[*int]
-		if err := cbor.Unmarshal([]byte{}, &v); err != nil {
-			t.Fatal(err)
 		}
 	})
 }

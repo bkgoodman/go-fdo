@@ -1,0 +1,925 @@
+  dump: POST /fdo/101/msg/60 HTTP/1.1
+Host: 127.0.0.1:9999
+User-Agent: Go-http-client/1.1
+Content-Length: 71
+Content-Type: application/cbor
+Accept-Encoding: gzip
+  body: [65535, h'39b79d0b45698090dd4b60cd64627807', h'603c3775ad33813949d15562907f9eb5', "ECDH384", 1, [-35, h''], h'01', ["com.example.test"]]
+  bodyRaw: 8819ffff5039b79d0b45698090dd4b60cd6462780750603c3775ad33813949d15562907f9eb56745434448333834018238224041018170636f6d2e6578616d706c652e74657374
+[2024-10-25 20:01:36] DEBUG: response
+  dump: HTTP/1.1 200 OK
+Content-Length: 786
+Authorization: Bearer AojSu2As5han699Bkb92n78hOjKz3pTkbhMBPg5KbcosSdAiQAV2u_lrDTPNjGV5
+Content-Type: application/cbor
+Date: Fri, 25 Oct 2024 20:01:36 GMT
+Message-Type: 61
+  body: 18([h'a1013822', {256: h'e7c80846e12a9e9772d181a79d9fe046', 257: [11, 1, h'3076301006072a8648ce3d020106052b81040022036200045503bfcad56f98bc7d3ae49bbfd171da0bbdf25d03e3dc5862d296f863d87f53d38bfdb3f9c166e9dcb090d33aa45d1d4c6c991578257c9920d445ea4be4d21e99bae00761a0160aaef8183d99713d920e43588db45e34e286b937b09095777a']}, h'8a58f28618655039b79d0b45698090dd4b60cd646278078281820d410083820c41018202515000000000000000000000ffff7f00000182034319270f66676f74657374830b0158783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb82382a5830bfb97ed5ceb89636f0579b64e86dfde44787fbfb1e5467b4dec9c28d8fdce5aebf5923a38f623aa175a7e6bce250763c0182065830581fa2a8c7c7158a0454e564cff8290dcd5fb3e6682ffc251df827ff01d1355a18473b9d9568b40f8d3caa3a9a2ab32850603c3775ad33813949d15562907f9eb582382240589600304fa30c20444cd010b33c092f40aa8739f8c7c712d92a25c619f7212f4a6a6683db33dffbe39805e237c13c4fd3d2f1ad00302d9b7738f30545f551b1b24838ca6af9f6345bb2d38782a933595021a7fe9e16a2bcc60b2a11e2ded005848e29588b08003049f2e476d0cab2151bc7b221c3713b6289616ef2c6f16840ccac4e96420e9bf1a71901f9a3aa96334cc9adeb2b1d03ae82382a5830b7c753ab25472938b8923d1f5fb2aba64c74a23052ee68fb69ef8cd56b01c327a42fabc709b2904f90e9a0ddb1740bc519ffff4101', h'643b77cddc7ffe1c46a8ccc32f384de83c7cfe6884422bb52da0deeb58fa602edf40a3c1a517feabedacaaea4fef22353da8a549c1d850b57d80f5060b767ccd067e69471341c7f948f601f1fce9663841e7975c04c703ddc80923e390bde90f'])
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Header  cose.Header cbor:",flat2" 0 [0] true} rv {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: Calling flat2
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Payload  *cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.ovhProof]  16 [1] false} rv {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {Signature  []uint8  24 [2] false} rv {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 20:01:36] INFO: decodeStructField {{map[] map[]} <nil> []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: Calling flat2
+[2024-10-25 20:01:36] INFO: decodeStructField {{map[1:-35] map[256:[231 200 8 70 225 42 158 151 114 209 129 167 157 159 224 70] 257:[11 1 [48 118 48 16 6 7 42 134 72 206 61 2 1 6 5 43 129 4 0 34 3 98 0 4 85 3 191 202 213 111 152 188 125 58 228 155 191 209 113 218 11 189 242 93 3 227 220 88 98 210 150 248 99 216 127 83 211 139 253 179 249 193 102 233 220 176 144 211 58 164 93 29 76 108 153 21 120 37 124 153 32 212 69 234 75 228 210 30 153 186 224 7 97 160 22 10 174 248 24 61 153 113 61 146 14 67 88 141 180 94 52 226 134 185 55 176 144 149 119 122]]]} <nil> []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {OVH  cbor.Bstr[github.com/fido-device-onboard/go-fdo.VoucherHeader]  0 [0] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {NumOVEntries  uint8  160 [1] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {OVHHmac  protocol.Hash  168 [2] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {NonceTO2ProveOV  protocol.Nonce  200 [3] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {SigInfoB  fdo.sigInfo  216 [4] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {KeyExchangeA  []uint8  248 [5] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 6 field {HelloDeviceHash  protocol.Hash  272 [6] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 7 field {MaxOwnerMessageSize  uint16  304 [7] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 8 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} rv {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} reflect.Value {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: {{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: 0
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] INFO: decodeStructField {{{0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Version  uint16  0 [0] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {GUID  protocol.GUID  2 [1] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {RvInfo  [][]protocol.RvInstruction  24 [2] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {DeviceInfo  string  48 [3] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {ManufacturerKey  protocol.PublicKey  64 [4] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {CertChainHash  *protocol.Hash  152 [5] false} rv {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {101 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] []  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>} [2]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [2]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {13 []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {12 []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {2 []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {3 []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]]  Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>} [3]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [3]
+[2024-10-25 20:01:36] INFO: decodeStructField {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ <nil>} [4]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [4]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  protocol.KeyType  0 [0] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Encoding  protocol.KeyEncoding  1 [1] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {Body  cbor.RawBytes  8 [2] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {key github.com/fido-device-onboard/go-fdo/protocol crypto.PublicKey  32 [3] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {chain github.com/fido-device-onboard/go-fdo/protocol []*x509.Certificate  48 [4] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {err github.com/fido-device-onboard/go-fdo/protocol error  72 [5] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: decodeStructField Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField Type      ECDSA secp384r1 = NIST-P-384
+Encoding  Intel EPID/non-standard
+Body      
+ [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      
+ [2]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [2]
+[2024-10-25 20:01:36] INFO: decodeStructField {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ <nil>} [5]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [5]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: decodeStructField {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {Sha384Hash []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 0 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [2]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [2]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: decodeStructField {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {HmacSha384Hash []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [3]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [3]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {0 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [4]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [4]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {0 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 20:01:36] INFO: decodeStructField {0 []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {-35 []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [5]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [5]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {%!v(PANIC=String method: HashAlg missing switch case(s)) []} 0 {[] []}} [6]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [6]
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 20:01:36] INFO: decodeStructField {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField {Sha384Hash []} [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 0 {[] []}} [7]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [7]
+[2024-10-25 20:01:36] INFO: decodeStructField {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[] []}} [8]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [8]
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} reflect.Value {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[] []}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: {{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: 1
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] INFO: decodeStructField {{map[1:-35] map[256:[231 200 8 70 225 42 158 151 114 209 129 167 157 159 224 70] 257:[11 1 [48 118 48 16 6 7 42 134 72 206 61 2 1 6 5 43 129 4 0 34 3 98 0 4 85 3 191 202 213 111 152 188 125 58 228 155 191 209 113 218 11 189 242 93 3 227 220 88 98 210 150 248 99 216 127 83 211 139 253 179 249 193 102 233 220 176 144 211 58 164 93 29 76 108 153 21 120 37 124 153 32 212 69 234 75 228 210 30 153 186 224 7 97 160 22 10 174 248 24 61 153 113 61 146 14 67 88 141 180 94 52 226 134 185 55 176 144 149 119 122]]]} 0xc0003b0180 []} [2]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [2]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {MaxDeviceMessageSize  uint16  0 [0] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {GUID  protocol.GUID  2 [1] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {KexSuiteName  kex.Suite  40 [3] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {SigInfoA  fdo.sigInfo  64 [5] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 6 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} reflect.Value {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: 65535
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {MaxDeviceMessageSize  uint16  0 [0] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {MaxDeviceMessageSize  uint16  0 [0] false} rv 65535
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {KexSuiteName  kex.Suite  40 [3] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {KexSuiteName  kex.Suite  40 [3] false} rv ECDH384
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 4 idx 4 Field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 4 idx 4 Field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv A128GCM
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 5 idx 5 Field {SigInfoA  fdo.sigInfo  64 [5] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 5 idx 5 Field {SigInfoA  fdo.sigInfo  64 [5] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {-35 []}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv -35
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv []
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 6 idx 6 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] ECDH384 A128GCM {-35 []} {[1] [com.example.test]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 6 idx 6 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {[1] [com.example.test]}
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} reflect.Value {[1] [com.example.test]}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: [1]
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: [com.example.test]
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  protocol.KeyType  0 [0] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Encoding  protocol.KeyEncoding  1 [1] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {Body  cbor.RawBytes  8 [2] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {key github.com/fido-device-onboard/go-fdo/protocol crypto.PublicKey  32 [3] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {chain github.com/fido-device-onboard/go-fdo/protocol []*x509.Certificate  48 [4] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {err github.com/fido-device-onboard/go-fdo/protocol error  72 [5] false} rv Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+
+[2024-10-25 20:01:36] INFO: decodeStructField Type      unknown
+Encoding  Intel EPID/non-standard
+Body      
+ [0]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [0]
+[2024-10-25 20:01:36] INFO: decodeStructField Type      ECDSA secp384r1 = NIST-P-384
+Encoding  Intel EPID/non-standard
+Body      
+ [1]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [1]
+[2024-10-25 20:01:36] INFO: decodeStructField Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      
+ [2]
+[2024-10-25 20:01:36] INFO: decodeStruct IDX [2]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Context  string  0 [0] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.ovhProof]  48 [3] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Context  string  0 [0] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Context  string  0 [0] false} rv Signature1
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {{map[1:[56 34]]}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {[]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.ovhProof]  48 [3] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.ovhProof]  48 [3] false} rv {{{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {OVH  cbor.Bstr[github.com/fido-device-onboard/go-fdo.VoucherHeader]  0 [0] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {NumOVEntries  uint8  160 [1] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {OVHHmac  protocol.Hash  168 [2] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {NonceTO2ProveOV  protocol.Nonce  200 [3] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {SigInfoB  fdo.sigInfo  216 [4] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {KeyExchangeA  []uint8  248 [5] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 6 field {HelloDeviceHash  protocol.Hash  272 [6] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 7 field {MaxOwnerMessageSize  uint16  304 [7] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 8 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} reflect.Value {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: {{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: 1
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {OVH  cbor.Bstr[github.com/fido-device-onboard/go-fdo.VoucherHeader]  0 [0] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {OVH  cbor.Bstr[github.com/fido-device-onboard/go-fdo.VoucherHeader]  0 [0] false} rv {{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Version  uint16  0 [0] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {GUID  protocol.GUID  2 [1] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {RvInfo  [][]protocol.RvInstruction  24 [2] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {DeviceInfo  string  48 [3] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {ManufacturerKey  protocol.PublicKey  64 [4] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {CertChainHash  *protocol.Hash  152 [5] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Version  uint16  0 [0] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Version  uint16  0 [0] false} rv 101
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {RvInfo  [][]protocol.RvInstruction  24 [2] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {RvInfo  [][]protocol.RvInstruction  24 [2] false} rv [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {13 [0]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {13 [0]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {13 [0]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {13 [0]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {13 [0]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv {13 [0]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv 13
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {13 [0]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv [0]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {12 [1]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {12 [1]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {12 [1]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {12 [1]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {12 [1]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv {12 [1]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv 12
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {12 [1]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv [1]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv 2
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Variable  protocol.RvVar  0 [0] false} rv 3
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {3 [25 39 15]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv [25 39 15]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {DeviceInfo  string  48 [3] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {DeviceInfo  string  48 [3] false} rv gotest
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 4 idx 4 Field {ManufacturerKey  protocol.PublicKey  64 [4] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 4 idx 4 Field {ManufacturerKey  protocol.PublicKey  64 [4] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: encodeStruct call rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  protocol.KeyType  0 [0] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Encoding  protocol.KeyEncoding  1 [1] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 2 field {Body  cbor.RawBytes  8 [2] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 3 field {key github.com/fido-device-onboard/go-fdo/protocol crypto.PublicKey  32 [3] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 4 field {chain github.com/fido-device-onboard/go-fdo/protocol []*x509.Certificate  48 [4] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 5 field {err github.com/fido-device-onboard/go-fdo/protocol error  72 [5] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Type  protocol.KeyType  0 [0] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Type  protocol.KeyType  0 [0] false} rv ECDSA secp384r1 = NIST-P-384
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Encoding  protocol.KeyEncoding  1 [1] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Encoding  protocol.KeyEncoding  1 [1] false} rv x.509 DER encoding
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {Body  cbor.RawBytes  8 [2] false} rv Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {Body  cbor.RawBytes  8 [2] false} rv [88 120 48 118 48 16 6 7 42 134 72 206 61 2 1 6 5 43 129 4 0 34 3 98 0 4 18 32 157 157 123 2 242 186 215 200 52 33 181 166 235 201 148 37 249 62 96 254 224 62 109 86 239 35 54 31 108 4 77 129 198 100 123 119 166 158 201 31 187 133 104 168 190 133 210 37 239 174 135 26 91 244 52 196 179 8 10 225 133 25 233 218 226 211 84 162 45 228 102 160 113 123 177 159 96 31 44 227 240 251 0 25 234 191 42 184 113 202 77 105 162 251]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 5 idx 5 Field {CertChainHash  *protocol.Hash  152 [5] false} rv {101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 5 idx 5 Field {CertChainHash  *protocol.Hash  152 [5] false} rv &{Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv Sha384Hash
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv {Sha384Hash [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv [191 185 126 213 206 184 150 54 240 87 155 100 232 109 253 228 71 135 251 251 30 84 103 180 222 201 194 141 143 220 229 174 191 89 35 163 143 98 58 161 117 167 230 188 226 80 118 60]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {NumOVEntries  uint8  160 [1] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {NumOVEntries  uint8  160 [1] false} rv 1
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {OVHHmac  protocol.Hash  168 [2] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {OVHHmac  protocol.Hash  168 [2] false} rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv HmacSha384Hash
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {NonceTO2ProveOV  protocol.Nonce  200 [3] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {NonceTO2ProveOV  protocol.Nonce  200 [3] false} rv [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 4 idx 4 Field {SigInfoB  fdo.sigInfo  216 [4] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 4 idx 4 Field {SigInfoB  fdo.sigInfo  216 [4] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {-35 []}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv -35
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv []
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 5 idx 5 Field {KeyExchangeA  []uint8  248 [5] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 5 idx 5 Field {KeyExchangeA  []uint8  248 [5] false} rv [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 6 idx 6 Field {HelloDeviceHash  protocol.Hash  272 [6] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 6 idx 6 Field {HelloDeviceHash  protocol.Hash  272 [6] false} rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Algorithm  protocol.HashAlg  0 [0] false} rv Sha384Hash
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Value  []uint8  8 [1] false} rv [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 7 idx 7 Field {MaxOwnerMessageSize  uint16  304 [7] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 7 idx 7 Field {MaxOwnerMessageSize  uint16  304 [7] false} rv 65535
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 8 idx 8 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} rv {{{101 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [[{13 [0]}] [{12 [1]} {2 [80 0 0 0 0 0 0 0 0 0 0 255 255 127 0 0 1]} {3 [25 39 15]}]] gotest Type      ECDSA secp384r1 = NIST-P-384
+Encoding  x.509 DER encoding
+Body      58783076301006072a8648ce3d020106052b810400220362000412209d9d7b02f2bad7c83421b5a6ebc99425f93e60fee03e6d56ef23361f6c044d81c6647b77a69ec91fbb8568a8be85d225efae871a5bf434c4b3080ae18519e9dae2d354a22de466a0717bb19f601f2ce3f0fb0019eabf2ab871ca4d69a2fb
+ 0xc0001d1540}} 1 {HmacSha384Hash [88 31 162 168 199 199 21 138 4 84 229 100 207 248 41 13 205 95 179 230 104 47 252 37 29 248 39 255 1 209 53 90 24 71 59 157 149 104 180 15 141 60 170 58 154 42 179 40]} [96 60 55 117 173 51 129 57 73 209 85 98 144 127 158 181] {-35 []} [0 48 79 163 12 32 68 76 208 16 179 60 9 47 64 170 135 57 248 199 199 18 217 42 37 198 25 247 33 47 74 106 102 131 219 51 223 251 227 152 5 226 55 193 60 79 211 210 241 173 0 48 45 155 119 56 243 5 69 245 81 177 178 72 56 202 106 249 246 52 91 178 211 135 130 169 51 89 80 33 167 254 158 22 162 188 198 11 42 17 226 222 208 5 132 142 41 88 139 8 0 48 73 242 228 118 208 202 178 21 27 199 178 33 195 113 59 98 137 97 110 242 198 241 104 64 204 172 78 150 66 14 155 241 167 25 1 249 163 170 150 51 76 201 173 235 43 29 3 174] {Sha384Hash [183 199 83 171 37 71 41 56 184 146 61 31 95 178 171 166 76 116 162 48 82 238 104 251 105 239 140 213 107 1 195 39 164 47 171 199 9 178 144 79 144 233 160 221 177 116 11 197]} 65535 {[1] []}}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 8 idx 8 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} rv {[1] []}
+[2024-10-25 20:01:36] INFO: Calling flatx
+[2024-10-25 20:01:36] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 312 [8] false} reflect.Value {[1] []}
+[2024-10-25 20:01:36] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: [1]
+[2024-10-25 20:01:36] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: []
+[2024-10-25 20:01:36] INFO: FLATX Return field count: 2
+[2024-10-25 20:01:36] DEBUG: BKG
+  to2: verifyVoucher
+[2024-10-25 20:01:36] DEBUG: BKG
+  to2: sendNextOVEntry
+[2024-10-25 20:01:36] INFO: encodeStruct call rv {0}
+[2024-10-25 20:01:36] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 20:01:36] INFO: CollectFieldWeights for index 0 field {OVEntryNum  int  0 [0] false} rv {0}
+[2024-10-25 20:01:36] INFO: collectFieldWeights calling flatN {0}
+[2024-10-25 20:01:36] INFO: [End fieldOrder]
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {OVEntryNum  int  0 [0] false} rv {0}
+[2024-10-25 20:01:36] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {OVEntryNum  int  0 [0] false} rv 0
+[2024-10-25 20:01:36] DEBUG: request

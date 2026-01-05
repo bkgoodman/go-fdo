@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: gomod
+    directory: /examples
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /fsim
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /sqlite
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /tpm
+    schedule:
+      interval: weekly

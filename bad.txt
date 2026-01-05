@@ -1,0 +1,675 @@
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Active  bool  0 [0] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {DeviceCredential  fdo.DeviceCredential  8 [1] true} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Version  uint16  0 [0] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {DeviceInfo  string  8 [1] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {GUID  protocol.GUID  24 [2] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {RvInfo  [][]protocol.RvInstruction  40 [3] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 4 field {PublicKeyHash  protocol.Hash  64 [4] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {HmacSecret  []uint8  104 [2] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {PrivateKey  blob.Pkcs8Key  128 [3] false} rv blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        false
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+] [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       0
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+] [1 0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1 0]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   ""
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+] [1 1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1 1]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   "gotest"
+  GUID          00000000000000000000000000000000
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+] [1 2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1 2]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   "gotest"
+  GUID          39b79d0b45698090dd4b60cd64627807
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+] [1 3]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1 3]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: decodeStructField {0 []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {13 []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: decodeStructField {0 []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {12 []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: decodeStructField {0 []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {2 []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Variable  protocol.RvVar  0 [0] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8 cbor:",omitempty" 8 [1] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: decodeStructField {0 []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {3 []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   "gotest"
+  GUID          39b79d0b45698090dd4b60cd64627807
+  PublicKeyHash
+    Algorithm   %!s(PANIC=String method: HashAlg missing switch case(s))
+    Value       
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+    >
+      13 = 00
+    >
+      12 = 01
+      2 = 5000000000000000000000ffff7f000001
+      3 = 19270f
+] [1 4]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1 4]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: decodeStructField {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {Sha384Hash []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   "gotest"
+  GUID          39b79d0b45698090dd4b60cd64627807
+  PublicKeyHash
+    Algorithm   Sha384Hash
+    Value       c22d60c75a1f3241ff02ab147f526ab6208eceb7faec9b7e2c9f0abf488c515b5af25fc3900474ccea78122d08d736dd
+  HmacSecret    
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+    >
+      13 = 00
+    >
+      12 = 01
+      2 = 5000000000000000000000ffff7f000001
+      3 = 19270f
+] [2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [2]
+[2024-10-25 14:36:46] INFO: decodeStructField blobcred[
+  Active        true
+  Version       101
+  DeviceInfo   "gotest"
+  GUID          39b79d0b45698090dd4b60cd64627807
+  PublicKeyHash
+    Algorithm   Sha384Hash
+    Value       c22d60c75a1f3241ff02ab147f526ab6208eceb7faec9b7e2c9f0abf488c515b5af25fc3900474ccea78122d08d736dd
+  HmacSecret    0b8321cce56559a6f250bef783eca29ec88e3ec104f9cc44a2dac2de4707f42a
+  PrivateKey    <nil>
+    <nil>
+  RvInfo
+    >
+      13 = 00
+    >
+      12 = 01
+      2 = 5000000000000000000000ffff7f000001
+      3 = 19270f
+] [3]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [3]
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {GUID  protocol.GUID  0 [0] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {ASigInfo  fdo.sigInfo  16 [1] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flat2" 48 [2] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {GUID  protocol.GUID  0 [0] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {GUID  protocol.GUID  0 [0] false} rv [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {ASigInfo  fdo.sigInfo  16 [1] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {ASigInfo  fdo.sigInfo  16 [1] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {-35 []}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv -35
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv []
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flat2" 48 [2] false} rv {[57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flat2" 48 [2] false} rv {[1] []}
+[2024-10-25 14:36:46] DEBUG: request
+  dump: POST /fdo/101/msg/30 HTTP/1.1
+Host: 127.0.0.1:9999
+User-Agent: Go-http-client/1.1
+Content-Length: 24
+Content-Type: application/cbor
+Accept-Encoding: gzip
+  body: 845039b79d0b45698090dd4b60cd64627807823822404101
+  bodyRaw: 845039b79d0b45698090dd4b60cd64627807823822404101
+[2024-10-25 14:36:46] DEBUG: response
+  dump: HTTP/1.1 200 OK
+Content-Length: 24
+Authorization: Bearer f7bbAoSNQYT_TuXpaLsbXMsjUGpG4uMuhk76s92UHFWadgGBbvOMPlpMf8PzEyGA
+Content-Type: application/cbor
+Date: Fri, 25 Oct 2024 14:36:46 GMT
+Message-Type: 31
+  body: 845032e2ca1430aa1d11bffc0aa08c79298d823822404101
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {NonceTO1Proof  protocol.Nonce  0 [0] false} rv {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {BSigInfo  fdo.sigInfo  16 [1] false} rv {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flat2" 48 [2] false} rv {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}}
+[2024-10-25 14:36:46] INFO: decodeStructField {[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] {0 []} {[] []}} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] {0 []} {[] []}} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {0 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {0 []}
+[2024-10-25 14:36:46] INFO: decodeStructField {0 []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {-35 []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField {[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] {-35 []} {[] []}} [2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [2]
+[2024-10-25 14:36:46] INFO: proveToRv 
+[2024-10-25 14:36:46] INFO: proveToRv Token {{map[] map[]} 0xc0001c2008 []}
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Context  string  0 [0] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  48 [3] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Context  string  0 [0] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Context  string  0 [0] false} rv Signature1
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {BodyProtected  cbor.Bstr[github.com/fido-device-onboard/go-fdo/cbor.OmitEmpty[github.com/fido-device-onboard/go-fdo/cose.rawHeaderMap]]  16 [1] false} rv {{map[1:[56 34]]}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {ExternalAad  cbor.ByteWrap[[]uint8]  24 [2] false} rv {[]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  48 [3] false} rv {Signature1 {{map[1:[56 34]]}} {[]} {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {Payload  cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  48 [3] false} rv {map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}
+[2024-10-25 14:36:46] INFO: proveToRv WE DONT GET HERE TokenTag &{{{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}}
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Header  cose.Header cbor:",flat2" 0 [0] true} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Payload  *cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  16 [1] false} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {Signature  []uint8  24 [2] false} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Header  cose.Header cbor:",flat2" 0 [0] true} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Header  cose.Header cbor:",flat2" 0 [0] true} rv {map[1:-35] map[]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 1 Field {Payload  *cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  16 [1] false} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 2 idx 1 Field {Payload  *cbor.ByteWrap[github.com/fido-device-onboard/go-fdo.eatoken]  16 [1] false} rv &{map[10:[50 226 202 20 48 170 29 17 191 252 10 160 140 121 41 141] 256:[1 57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 2 Field {Signature  []uint8  24 [2] false} rv {{map[1:-35] map[]} 0xc0001c2008 [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 3 idx 2 Field {Signature  []uint8  24 [2] false} rv [87 41 47 5 116 5 135 89 44 206 228 226 163 227 17 218 78 192 100 94 38 221 135 157 174 156 217 212 172 177 119 31 240 139 225 82 217 51 236 219 85 9 184 56 226 100 62 250 167 150 1 31 253 22 155 54 71 146 76 126 143 223 227 241 187 93 75 191 2 46 60 57 63 66 110 117 64 1 1 117 253 104 105 135 27 65 56 107 23 71 248 19 44 171 114 122]
+[2024-10-25 14:36:46] DEBUG: request
+  dump: POST /fdo/101/msg/32 HTTP/1.1
+Host: 127.0.0.1:9999
+User-Agent: Go-http-client/1.1
+Content-Length: 148
+Authorization: Bearer f7bbAoSNQYT_TuXpaLsbXMsjUGpG4uMuhk76s92UHFWadgGBbvOMPlpMf8PzEyGA
+Content-Type: application/cbor
+Accept-Encoding: gzip
+  body: 18([h'a1013822', {}, h'a20a5032e2ca1430aa1d11bffc0aa08c79298d190100510139b79d0b45698090dd4b60cd64627807', h'57292f05740587592ccee4e2a3e311da4ec0645e26dd879dae9cd9d4acb1771ff08be152d933ecdb5509b838e2643efaa796011ffd169b3647924c7e8fdfe3f1bb5d4bbf022e3c393f426e7540010175fd6869871b41386b1747f8132cab727a'])
+  bodyRaw: d28444a1013822a05828a20a5032e2ca1430aa1d11bffc0aa08c79298d190100510139b79d0b45698090dd4b60cd64627807586057292f05740587592ccee4e2a3e311da4ec0645e26dd879dae9cd9d4acb1771ff08be152d933ecdb5509b838e2643efaa796011ffd169b3647924c7e8fdfe3f1bb5d4bbf022e3c393f426e7540010175fd6869871b41386b1747f8132cab727a
+[2024-10-25 14:36:46] DEBUG: response
+  dump: HTTP/1.1 200 OK
+Content-Length: 128
+Authorization: Bearer f7bbAoSNQYT_TuXpaLsbXMsjUGpG4uMuhk76s92UHFWadgGBbvOMPlpMf8PzEyGA
+Content-Type: application/cbor
+Date: Fri, 25 Oct 2024 14:36:46 GMT
+Message-Type: 33
+  body: 18([h'a1013822', {}, h'828184f6693132372e302e302e3119270f03822f40', h'c2bd4a43010e52f644b282d882597bf85e4f2cf38454f61ffe8c7235aa358396bcd2b3f273cfcd2c4c692b3d430e6d178c96cc7dd80eec1b8f7967ba701bfe15f2c2c7e1059371839daed07c4e8363548fa1a7c2a92058b6fe25cd3c3d14ca32'])
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Header  cose.Header cbor:",flat2" 0 [0] true} rv {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Payload  *cbor.ByteWrap[github.com/fido-device-onboard/go-fdo/protocol.To1d]  16 [1] false} rv {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {Signature  []uint8  24 [2] false} rv {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {{map[] map[]} <nil> []}
+[2024-10-25 14:36:46] INFO: decodeStructField {{map[] map[]} <nil> []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {{map[1:-35] map[]} <nil> []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {RV  []protocol.RvTO2Addr  0 [0] false} rv %!v(PANIC=String method: HashAlg missing switch case(s))
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN %!v(PANIC=String method: HashAlg missing switch case(s))
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {To0dHash  protocol.Hash  24 [1] false} rv %!v(PANIC=String method: HashAlg missing switch case(s))
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN %!v(PANIC=String method: HashAlg missing switch case(s))
+[2024-10-25 14:36:46] INFO: decodeStructField %!v(PANIC=String method: HashAlg missing switch case(s)) [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {IPAddress  *net.IP  0 [0] false} rv unknown://
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN unknown://
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {DNSAddress  *string  8 [1] false} rv unknown://
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN unknown://
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {Port  uint16  16 [2] false} rv unknown://
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN unknown://
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {TransportProtocol  protocol.TransportProtocol  18 [3] false} rv unknown://
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN unknown://
+[2024-10-25 14:36:46] INFO: decodeStructField unknown:// [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField unknown:// [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField unknown://127.0.0.1 [2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [2]
+[2024-10-25 14:36:46] INFO: decodeStructField unknown://127.0.0.1:9999 [3]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [3]
+[2024-10-25 14:36:46] INFO: decodeStructField %!v(PANIC=String method: HashAlg missing switch case(s)) [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Algorithm  protocol.HashAlg  0 [0] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Value  []uint8  8 [1] false} rv {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {%!v(PANIC=String method: HashAlg missing switch case(s)) []}
+[2024-10-25 14:36:46] INFO: decodeStructField {%!v(PANIC=String method: HashAlg missing switch case(s)) []} [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField {Sha256Hash []} [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField {{map[1:-35] map[]} 0xc000025280 []} [2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [2]
+[2024-10-25 14:36:46] DEBUG: BKG
+  to2: TO2
+[2024-10-25 14:36:46] DEBUG: BKG
+  to2: verifyOwner
+[2024-10-25 14:36:46] DEBUG: BKG
+  to2: sendHelloDevice
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {MaxDeviceMessageSize  uint16  0 [0] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {GUID  protocol.GUID  2 [1] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {KexSuiteName  kex.Suite  40 [3] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 4 field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 5 field {SigInfoA  fdo.sigInfo  64 [5] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 6 field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} reflect.Value {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: 65535
+[2024-10-25 14:36:46] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 14:36:46] INFO: FLATX Return field count: 2
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {MaxDeviceMessageSize  uint16  0 [0] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {MaxDeviceMessageSize  uint16  0 [0] false} rv 65535
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {GUID  protocol.GUID  2 [1] false} rv [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 2 idx 2 Field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 2 idx 2 Field {NonceTO2ProveOV  protocol.Nonce  18 [2] false} rv [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 3 idx 3 Field {KexSuiteName  kex.Suite  40 [3] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 3 idx 3 Field {KexSuiteName  kex.Suite  40 [3] false} rv ECDH384
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 4 idx 4 Field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 4 idx 4 Field {CipherSuite  kex.CipherSuiteID  56 [4] false} rv A128GCM
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 5 idx 5 Field {SigInfoA  fdo.sigInfo  64 [5] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 5 idx 5 Field {SigInfoA  fdo.sigInfo  64 [5] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct call rv {-35 []}
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN {-35 []}
+[2024-10-25 14:36:46] INFO: [End fieldOrder]
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 0 idx 0 Field {Type  cose.SignatureAlgorithm  0 [0] false} rv -35
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv {-35 []}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 1 idx 1 Field {Info  []uint8  8 [1] false} rv []
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX ALL  call flatN i 6 idx 6 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {65535 [57 183 157 11 69 105 128 144 221 75 96 205 100 98 120 7] [248 201 163 207 126 87 146 205 126 176 10 144 236 151 91 112] ECDH384 A128GCM {-35 []} {[1] []}}
+[2024-10-25 14:36:46] INFO: encodeStruct INDEX THIS call flatN i 6 idx 6 Field {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} rv {[1] []}
+[2024-10-25 14:36:46] INFO: FLATX PROCESS reflect.StructField {CapabilityFlags  fdo.capabilityFlags cbor:",omitempty,flatx" 96 [6] false} reflect.Value {[1] []}
+[2024-10-25 14:36:46] INFO: FLATX Field Name: Flags, Field Type: []uint8, Tag: , FIELD: [1]
+[2024-10-25 14:36:46] INFO: FLATX Field Name: VendorUnique, Field Type: []string, Tag: cbor:",omitempty", FIELD: []
+[2024-10-25 14:36:46] INFO: FLATX Return field count: 2
+[2024-10-25 14:36:46] DEBUG: request
+  dump: POST /fdo/101/msg/60 HTTP/1.1
+Host: 127.0.0.1:9999
+User-Agent: Go-http-client/1.1
+Content-Length: 53
+Content-Type: application/cbor
+Accept-Encoding: gzip
+  body: 8819ffff5039b79d0b45698090dd4b60cd6462780750f8c9a3cf7e5792cd7eb00a90ec975b70674543444833383401823822404101
+  bodyRaw: 8819ffff5039b79d0b45698090dd4b60cd6462780750f8c9a3cf7e5792cd7eb00a90ec975b70674543444833383401823822404101
+[2024-10-25 14:36:46] DEBUG: response
+  dump: HTTP/1.1 200 OK
+Content-Length: 93
+Authorization: Bearer lUa3UWsN5PI62do4oJnbDQSch7ZqK5RyO2_whu82x_1LPJRXua0o97UDC8nATJEq
+Content-Type: application/cbor
+Date: Fri, 25 Oct 2024 14:36:46 GMT
+Message-Type: 255
+  body: [500, 60, "error decoding TO2.HelloDevice request: error decoding array/map at item 7: EOF", 1729867006, null]
+[2024-10-25 14:36:46] INFO: fieldOrder calling collectFieldWeights
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 0 field {Code  uint16  0 [0] false} rv 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 1 field {PrevMsgType  uint8  2 [1] false} rv 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 2 field {ErrString  string  8 [2] false} rv 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 3 field {Timestamp  int64  24 [3] false} rv 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: CollectFieldWeights for index 4 field {CorrelationID  *uint  32 [4] false} rv 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: collectFieldWeights calling flatN 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0] 
+[2024-10-25 14:36:46] INFO: decodeStructField 1970-01-01 00:00:00 +0000 UTC [code=0,prevMsgType=0,id=0]  [0]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [0]
+[2024-10-25 14:36:46] INFO: decodeStructField 1970-01-01 00:00:00 +0000 UTC [code=500,prevMsgType=0,id=0]  [1]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [1]
+[2024-10-25 14:36:46] INFO: decodeStructField 1970-01-01 00:00:00 +0000 UTC [code=500,prevMsgType=60,id=0]  [2]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [2]
+[2024-10-25 14:36:46] INFO: decodeStructField 1970-01-01 00:00:00 +0000 UTC [code=500,prevMsgType=60,id=0] error decoding TO2.HelloDevice request: error decoding array/map at item 7: EOF [3]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [3]
+[2024-10-25 14:36:46] INFO: decodeStructField 2024-10-25 14:36:46 +0000 UTC [code=500,prevMsgType=60,id=0] error decoding TO2.HelloDevice request: error decoding array/map at item 7: EOF [4]
+[2024-10-25 14:36:46] INFO: decodeStruct IDX [4]
+[2024-10-25 14:36:46] ERROR: TO2 failed
+  error: error received from TO2.HelloDevice request: 2024-10-25 14:36:46 +0000 UTC [code=500,prevMsgType=60,id=0] error decoding TO2.HelloDevice request: error decoding array/map at item 7: EOF
+Credential not updated (either due to failure of TO2 or the Credential Reuse Protocol

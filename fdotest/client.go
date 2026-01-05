@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,27 +43,52 @@ import (
 
 const timeout = 10 * time.Second
 
-// OwnerModulesFunc creates an iterator of service info modules for a given
-// device.
-type OwnerModulesFunc func(ctx context.Context, replacementGUID protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, supportedMods []string) iter.Seq2[string, serviceinfo.OwnerModule]
-
-// Config provides options to
+// Config provides options to modify how the test suite runs.
 type Config struct {
 	// If state is nil, then an in-memory implementation will be used. This is
 	// useful for only testing service info modules.
 	State AllServerState
 
+	// If both key and chain are given, DeviceCAKey and DeviceCAChain will be
+	// used to sign all CSRs in the DI protocol.
+	DeviceCAKey   crypto.Signer
+	DeviceCAChain []*x509.Certificate
+
+	// Explicit disable for cases such as TPM simulators
+	UnsupportedRSA3072 bool
+
 	// If NewCredential is non-nil, then it will be used to create and format
 	// the device credential. Otherwise the blob package will be used.
 	NewCredential func(protocol.KeyType) (hmacSha256, hmacSha384 hash.Hash, key crypto.Signer, toDeviceCred func(fdo.DeviceCredential) any)
 
+	// If NewTransport is non-nil, then it will be used in place of
+	// fdo.Transport.
+	NewTransport func(t *testing.T, tokens protocol.TokenService, di, to0, to1, to2 protocol.Responder) fdo.Transport
+
 	// Use the Credential Reuse Protocol
 	Reuse bool
 
-	DeviceModules map[string]serviceinfo.DeviceModule
-	OwnerModules  OwnerModulesFunc
+	// If true, set the log level to info
+	NoDebug bool
 
+	// If DeviceModules is non-nil, then they will be reported as supported in
+	// devmod and called if any owner modules are executed.
+	DeviceModules map[string]serviceinfo.DeviceModule
+
+	// If OwnerModules is non-nil, then it will be used to initialize owner
+	// module state and owner services will be executed in order for each
+	// module supported by the device (as reported in devmod).
+	OwnerModules func(ctx context.Context, replacementGUID protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, supportedMods []string) iter.Seq2[string, serviceinfo.OwnerModule]
+
+	// If CustomExpect is non-nil, then it is used to validate the result of
+	// TO2 with modules enabled
 	CustomExpect func(*testing.T, error)
+}
+
+var internalStateOnce sync.Once
+var internalState struct {
+	*token.Service
+	*memory.State
 }
 
 // RunClientTestSuite is used to test different implementations of server state
@@ -70,114 +96,121 @@ type Config struct {
 //
 //nolint:gocyclo
 func RunClientTestSuite(t *testing.T, conf Config) {
-	slog.SetDefault(slog.New(slog.NewTextHandler(TestingLog(t), &slog.HandlerOptions{Level: slog.LevelDebug})))
+	level := slog.LevelDebug
+	if conf.NoDebug {
+		level = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(TestingLog(t), &slog.HandlerOptions{Level: level})))
 
 	if conf.State == nil {
-		stateless, err := token.NewService()
-		if err != nil {
-			t.Fatal(err)
-		}
+		internalStateOnce.Do(func() {
+			stateless, err := token.NewService()
+			if err != nil {
+				t.Fatal(err)
+			}
+			internalState.Service = stateless
 
-		inMemory, err := memory.NewState()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		conf.State = struct {
-			*token.Service
-			*memory.State
-		}{stateless, inMemory}
+			inMemory, err := memory.NewState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			internalState.State = inMemory
+		})
+		conf.State = internalState
 	}
 
-	for _, delegateOpts := range []struct {
-		rvDelegate      string
-		onboardDelegate string
-	}{
-		{
-			rvDelegate:     "",
-			onboardDelegate: "",
-		},
-		{
-			rvDelegate:     "=",
-			onboardDelegate: "=",
-		},
-	} {
+	startModules := conf.OwnerModules
+	if conf.OwnerModules == nil {
+		startModules = func(context.Context, protocol.GUID, string, []*x509.Certificate, serviceinfo.Devmod, []string) iter.Seq2[string, serviceinfo.OwnerModule] {
+			return func(yield func(string, serviceinfo.OwnerModule) bool) {}
+		}
+	}
 
+	// Generate Device Certificate Authority if not given in config
+	deviceCAKey, deviceCAChain := conf.DeviceCAKey, conf.DeviceCAChain
+	if deviceCAKey == nil || len(deviceCAChain) == 0 {
+		var err error
+		deviceCAKey, err = rsa.GenerateKey(rand.Reader, 3072)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := &x509.Certificate{
+			SerialNumber:          big.NewInt(1),
+			Subject:               pkix.Name{CommonName: "Test CA"},
+			NotBefore:             time.Now(),
+			NotAfter:              time.Now().Add(30 * 365 * 24 * time.Hour),
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, deviceCAKey.Public(), deviceCAKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deviceCAChain = []*x509.Certificate{cert}
+	}
 
-	transport := &Transport{
-		Tokens: conf.State,
-		DIResponder: &fdo.DIServer[custom.DeviceMfgInfo]{
+	diResponder := &fdo.DIServer[custom.DeviceMfgInfo]{
+		Session:               conf.State,
+		Vouchers:              conf.State,
+		SignDeviceCertificate: custom.SignDeviceCertificate(deviceCAKey, deviceCAChain),
+		DeviceInfo: func(ctx context.Context, info *custom.DeviceMfgInfo, devChain []*x509.Certificate) (string, protocol.PublicKey, error) {
+			rsaBits := 3072
+			if conf.UnsupportedRSA3072 {
+				rsaBits = 2048
+			}
+			mfgKey, mfgChain, err := conf.State.ManufacturerKey(ctx, info.KeyType, rsaBits)
+			if err != nil {
+				return "", protocol.PublicKey{}, fmt.Errorf("error getting manufacturer key [type=%s]: %w", info.KeyType, err)
+			}
+
+			var mfgPubKey *protocol.PublicKey
+			switch info.KeyEncoding {
+			case protocol.X509KeyEnc, protocol.CoseKeyEnc:
+				// Intentionally panic if pub is not the correct key type
+				switch info.KeyType {
+				case protocol.Secp256r1KeyType, protocol.Secp384r1KeyType:
+					mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgKey.Public().(*ecdsa.PublicKey), info.KeyEncoding == protocol.CoseKeyEnc)
+				case protocol.Rsa2048RestrKeyType, protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+					mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgKey.Public().(*rsa.PublicKey), info.KeyEncoding == protocol.CoseKeyEnc)
+				default:
+					err = fmt.Errorf("unsupported key type: %s", info.KeyType)
+				}
+			case protocol.X5ChainKeyEnc:
+				mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgChain, false)
+			default:
+				err = fmt.Errorf("unsupported key encoding: %s", info.KeyEncoding)
+			}
+			if err != nil {
+				return "", protocol.PublicKey{}, err
+			}
+
+			return "test_device", *mfgPubKey, nil
+		},
+		RvInfo: func(context.Context, *fdo.Voucher) ([][]protocol.RvInstruction, error) {
+			return [][]protocol.RvInstruction{}, nil
+		},
+	}
+	to0Responder := &fdo.TO0Server{
+		Session: conf.State,
+		RVBlobs: conf.State,
+	}
+	to1Responder := &fdo.TO1Server{
+		Session: conf.State,
+		RVBlobs: conf.State,
+	}
+	to2Responder := &fdo.TO2Server{
+		Session: conf.State,
+		Modules: &to2ModuleStateMachine{
 			Session:  conf.State,
 			Vouchers: conf.State,
-			SignDeviceCertificate: func(info *custom.DeviceMfgInfo) ([]*x509.Certificate, error) {
-				// Validate device info
-				csr := x509.CertificateRequest(info.CertInfo)
-				if err := csr.CheckSignature(); err != nil {
-					return nil, fmt.Errorf("invalid CSR: %w", err)
-				}
-
-				// Sign CSR
-				key, chain, err := conf.State.ManufacturerKey(info.KeyType)
-				if err != nil {
-					var unsupportedErr fdo.ErrUnsupportedKeyType
-					if errors.As(err, &unsupportedErr) {
-						return nil, unsupportedErr
-					}
-					return nil, fmt.Errorf("error retrieving manufacturer key [type=%s]: %w", info.KeyType, err)
-				}
-				serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-				serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-				if err != nil {
-					return nil, fmt.Errorf("error generating certificate serial number: %w", err)
-				}
-				template := &x509.Certificate{
-					SerialNumber: serialNumber,
-					Issuer:       chain[0].Subject,
-					Subject:      csr.Subject,
-					NotBefore:    time.Now(),
-					NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour), // Matches Java impl
-					KeyUsage:     x509.KeyUsageDigitalSignature,
-				}
-				der, err := x509.CreateCertificate(rand.Reader, template, chain[0], csr.PublicKey, key)
-				if err != nil {
-					return nil, fmt.Errorf("error signing CSR: %w", err)
-				}
-				cert, err := x509.ParseCertificate(der)
-				if err != nil {
-					return nil, fmt.Errorf("error parsing signed device cert: %w", err)
-				}
-				chain = append([]*x509.Certificate{cert}, chain...)
-				return chain, nil
-			},
-			AutoExtend: conf.State,
-			RvInfo: func(context.Context, *fdo.Voucher) ([][]protocol.RvInstruction, error) {
-				return [][]protocol.RvInstruction{}, nil
-			},
-		},
-		TO0Responder: &fdo.TO0Server{
-			Session: conf.State,
-			RVBlobs: conf.State,
-		},
-		TO1Responder: &fdo.TO1Server{
-			Session: conf.State,
-			RVBlobs: conf.State,
-		},
-		TO2Responder: &fdo.TO2Server{
-			Session:   conf.State,
-			Vouchers:  conf.State,
-			OwnerKeys: conf.State,
-			DelegateKeys: conf.State,
-			OnboardDelegate: delegateOpts.onboardDelegate,
-			RvDelegate: delegateOpts.rvDelegate,
-			RvInfo: func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) {
-				return [][]protocol.RvInstruction{}, nil
-			},
 			OwnerModules: func(ctx context.Context, replacementGUID protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, supportedMods []string) iter.Seq2[string, serviceinfo.OwnerModule] {
-				if conf.OwnerModules == nil {
-					return func(yield func(string, serviceinfo.OwnerModule) bool) {}
-				}
+				mods := startModules(ctx, replacementGUID, info, chain, devmod, supportedMods)
 
-				mods := conf.OwnerModules(ctx, replacementGUID, info, chain, devmod, supportedMods)
+				// Filter out modules not in supportedMods
 				return func(yield func(string, serviceinfo.OwnerModule) bool) {
 					for modName, mod := range mods {
 						if slices.Contains(supportedMods, modName) {
@@ -188,10 +221,28 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 					}
 				}
 			},
-			ReuseCredential: func(context.Context, fdo.Voucher) bool { return conf.Reuse },
-			VerifyVoucher:   func(context.Context, fdo.Voucher) error { return nil },
 		},
-		T: t,
+		Vouchers:             conf.State,
+		OwnerKeys:            conf.State,
+		DelegateKeys:         conf.State,
+		VouchersForExtension: conf.State,
+		RvInfo: func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) {
+			return [][]protocol.RvInstruction{}, nil
+		},
+		ReuseCredential: func(context.Context, fdo.Voucher) (bool, error) { return conf.Reuse, nil },
+		VerifyVoucher:   func(context.Context, fdo.Voucher) error { return nil },
+	}
+
+	var transport fdo.Transport = &Transport{
+		Tokens:       conf.State,
+		DIResponder:  diResponder,
+		TO0Responder: to0Responder,
+		TO1Responder: to1Responder,
+		TO2Responder: to2Responder,
+		T:            t,
+	}
+	if conf.NewTransport != nil {
+		transport = conf.NewTransport(t, conf.State, diResponder, to0Responder, to1Responder, to2Responder)
 	}
 
 	to0 := &fdo.TO0Client{
@@ -230,14 +281,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 			cipherSuite: kex.A128GcmCipher,
 		},
 	} {
-
-		withDelegate := ""
-		if ((delegateOpts.onboardDelegate != "") || (delegateOpts.rvDelegate != "")) { withDelegate = " w/Delegate" }
-		t.Run(fmt.Sprintf("Key %q Encoding %q Exchange %q Cipher %q%s", table.keyType, table.keyEncoding, table.keyExchange, table.cipherSuite, withDelegate), func(t *testing.T) {
-			transport.DIResponder.DeviceInfo = func(context.Context, *custom.DeviceMfgInfo, []*x509.Certificate) (string, protocol.KeyType, protocol.KeyEncoding, error) {
-				return "test_device", table.keyType, table.keyEncoding, nil
-			}
-
+		t.Run(fmt.Sprintf("Key %q Encoding %q Exchange %q Cipher %q", table.keyType, table.keyEncoding, table.keyExchange, table.cipherSuite), func(t *testing.T) {
 			newCredential := func(keyType protocol.KeyType) (hmacSha256, hmacSha384 hash.Hash, key crypto.Signer, toDeviceCred func(fdo.DeviceCredential) any) {
 				secret := make([]byte, 32)
 				if _, err := rand.Read(secret); err != nil {
@@ -300,40 +344,46 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 			var cred *fdo.DeviceCredential
 
 			t.Run("Device Initialization", func(t *testing.T) {
-				// Generate Java implementation-compatible mfg string
-				csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-					Subject:            pkix.Name{CommonName: "device.go-fdo"},
-					SignatureAlgorithm: sigAlg,
-				}, key)
-				if err != nil {
-					t.Fatalf("error creating CSR for device certificate chain: %v", err)
-				}
-				csr, err := x509.ParseCertificateRequest(csrDER)
-				if err != nil {
-					t.Fatalf("error parsing CSR for device certificate chain: %v", err)
+				test := func(t *testing.T) {
+					// Generate Java implementation-compatible mfg string
+					csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+						Subject:            pkix.Name{CommonName: "device.go-fdo"},
+						SignatureAlgorithm: sigAlg,
+					}, key)
+					if err != nil {
+						t.Fatalf("error creating CSR for device certificate chain: %v", err)
+					}
+					csr, err := x509.ParseCertificateRequest(csrDER)
+					if err != nil {
+						t.Fatalf("error parsing CSR for device certificate chain: %v", err)
+					}
+
+					// Call the DI server
+					serial := make([]byte, 10)
+					if _, err := rand.Read(serial); err != nil {
+						t.Fatalf("error generating serial: %v", err)
+					}
+					cred, err = fdo.DI(context.TODO(), transport, custom.DeviceMfgInfo{
+						KeyType:      table.keyType,
+						KeyEncoding:  table.keyEncoding,
+						SerialNumber: hex.EncodeToString(serial),
+						DeviceInfo:   "gotest",
+						CertInfo:     cbor.X509CertificateRequest(*csr),
+					}, fdo.DIConfig{
+						HmacSha256: hmacSha256,
+						HmacSha384: hmacSha384,
+						Key:        key,
+						PSS:        table.keyType == protocol.RsaPssKeyType,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("Credential: %s", toDeviceCred(*cred))
 				}
 
-				// Call the DI server
-				serial := make([]byte, 10)
-				if _, err := rand.Read(serial); err != nil {
-					t.Fatalf("error generating serial: %v", err)
-				}
-				cred, err = fdo.DI(context.TODO(), transport, custom.DeviceMfgInfo{
-					KeyType:      table.keyType,
-					KeyEncoding:  table.keyEncoding,
-					SerialNumber: hex.EncodeToString(serial),
-					DeviceInfo:   "gotest",
-					CertInfo:     cbor.X509CertificateRequest(*csr),
-				}, fdo.DIConfig{
-					HmacSha256: hmacSha256,
-					HmacSha384: hmacSha384,
-					Key:        key,
-					PSS:        table.keyType == protocol.RsaPssKeyType,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Logf("Credential: %s", toDeviceCred(*cred))
+				t.Run("without auto-extend", test)
+				diResponder.BeforeVoucherPersist = fdo.AllInOne{DIAndOwner: conf.State}.Extend
+				t.Run("with auto-extend", test)
 			})
 
 			t.Run("Transfer Ownership 0", func(t *testing.T) {
@@ -345,7 +395,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				defer cancel()
 				if _, err := fdo.TO1(ctx, transport, *cred, key, &fdo.TO1Options{
 					PSS: table.keyType == protocol.RsaPssKeyType,
-				}); !strings.HasSuffix(err.Error(), fdo.ErrNotFound.Error()) {
+				}); err == nil || !strings.HasSuffix(err.Error(), fdo.ErrNotFound.Error()) {
 					t.Fatalf("expected TO1 to fail with no resource found, got %v", err)
 				}
 				dnsAddr := "owner.fidoalliance.org"
@@ -355,7 +405,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						Port:              8080,
 						TransportProtocol: protocol.HTTPTransport,
 					},
-				},"")
+				}, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -405,10 +455,24 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				if cred == nil {
 					t.Fatal("cred not set due to previous failure")
 				}
+				rsaBits := 3072
+				if conf.UnsupportedRSA3072 {
+					rsaBits = 2048
+				}
+				nextOwner, _, err := to2Responder.OwnerKeys.OwnerKey(t.Context(), table.keyType, rsaBits)
+				if err != nil {
+					t.Fatalf("could not get owner key for voucher extension: %v", err)
+				}
+				ov, err := to2Responder.Resell(t.Context(), cred.GUID, nextOwner.Public(), nil)
+				if err != nil {
+					t.Fatalf("could not extend voucher from previous onboarding: %v", err)
+				}
+				if err := to2Responder.Vouchers.AddVoucher(t.Context(), ov); err != nil {
+					t.Fatalf("could not add voucher for TO2: %v", err)
+				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
-				var err error
 				cred, err = fdo.TO2(ctx, transport, nil, fdo.TO2Config{
 					Cred:       *cred,
 					HmacSha256: hmacSha256,
@@ -436,6 +500,21 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 			t.Run("Transfer Ownership 2 w/ Modules", func(t *testing.T) {
 				if cred == nil {
 					t.Fatal("cred not set due to previous failure")
+				}
+				rsaBits := 3072
+				if conf.UnsupportedRSA3072 {
+					rsaBits = 2048
+				}
+				nextOwner, _, err := to2Responder.OwnerKeys.OwnerKey(t.Context(), table.keyType, rsaBits)
+				if err != nil {
+					t.Fatalf("could not get owner key for voucher extension: %v", err)
+				}
+				ov, err := to2Responder.Resell(t.Context(), cred.GUID, nextOwner.Public(), nil)
+				if err != nil {
+					t.Fatalf("could not extend voucher from previous onboarding: %v", err)
+				}
+				if err := to2Responder.Vouchers.AddVoucher(t.Context(), ov); err != nil {
+					t.Fatalf("could not add voucher for TO2: %v", err)
 				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -473,4 +552,95 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 		})
 	}
 }
+
+// Store a single module state at a time, initializing it with OwnerModules and
+// relying on CleanupModules to be called to clear the state before the next
+// usage.
+type to2ModuleStateMachine struct {
+	Session  fdo.TO2SessionState
+	Vouchers interface {
+		fdo.VoucherPersistentState
+		fdo.OwnerVoucherPersistentState
+	}
+	OwnerModules func(ctx context.Context, guid protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, modules []string) iter.Seq2[string, serviceinfo.OwnerModule]
+
+	module *moduleStateMachineState
+}
+
+type moduleStateMachineState struct {
+	Name string
+	Impl serviceinfo.OwnerModule
+	Next func() (string, serviceinfo.OwnerModule, bool)
+	Stop func()
+}
+
+func (s *to2ModuleStateMachine) Module(ctx context.Context) (string, serviceinfo.OwnerModule, error) {
+	if s.module == nil {
+		return "", nil, fmt.Errorf("NextModule never called")
+	}
+	if s.module.Impl == nil {
+		return "", nil, fmt.Errorf("NextModule already returned false")
+	}
+	return s.module.Name, s.module.Impl, nil
+}
+
+func (s *to2ModuleStateMachine) NextModule(ctx context.Context) (bool, error) {
+	if s.module != nil {
+		var valid bool
+		s.module.Name, s.module.Impl, valid = s.module.Next()
+		return valid, nil
+	}
+
+	guid, err := s.Session.GUID(ctx)
+	if err != nil {
+		return false, fmt.Errorf("error retrieving associated device GUID of TO2 session: %w", err)
+	}
+
+	ov, err := s.Vouchers.Voucher(ctx, guid)
+	if err != nil {
+		return false, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
+	}
+	info := ov.Header.Val.DeviceInfo
+
+	replacementGUID, err := s.Session.ReplacementGUID(ctx)
+	if errors.Is(err, fdo.ErrNotFound) {
+		// replacement GUID is not found when using the Credential Reuse Protocol
+		replacementGUID = guid
+	} else if err != nil {
+		return false, fmt.Errorf("error retrieving replacement GUID for device: %w", err)
+	}
+
+	devmod, modules, devmodComplete, err := s.Session.Devmod(ctx)
+	if err == nil && !devmodComplete {
+		return false, fmt.Errorf("devmod did not complete")
+	}
+	if err != nil {
+		return false, fmt.Errorf("error retrieving devmod info for device %x: %w", guid, err)
+	}
+
+	var deviceCertChain []*x509.Certificate
+	if ov.CertChain != nil {
+		deviceCertChain = make([]*x509.Certificate, len(*ov.CertChain))
+		for i, cert := range *ov.CertChain {
+			deviceCertChain[i] = (*x509.Certificate)(cert)
+		}
+	}
+
+	// Start iterator
+	nextModule, stopIter := iter.Pull2(s.OwnerModules(ctx, replacementGUID, info, deviceCertChain, devmod, modules))
+	name, impl, valid := nextModule()
+	s.module = &moduleStateMachineState{
+		Name: name,
+		Impl: impl,
+		Next: nextModule,
+		Stop: stopIter,
+	}
+	return valid, nil
+}
+
+func (s *to2ModuleStateMachine) CleanupModules(ctx context.Context) {
+	if s.module != nil {
+		s.module.Stop()
+		s.module = nil
+	}
 }

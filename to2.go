@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"iter"
 	"log/slog"
 	"math"
 	"reflect"
@@ -38,7 +37,7 @@ import (
 var (
 	to2NonceClaim       = cose.Label{Int64: 256}
 	to2OwnerPubKeyClaim = cose.Label{Int64: 257}
-	to2DelegateClaim = cose.Label{Int64: 258}
+	to2DelegateClaim    = cose.Label{Int64: 258}
 )
 
 // TO2Config contains the device credential, including secrets and keys,
@@ -231,8 +230,22 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 	}, nil
 }
 
+func stopOwnerPlugin(ctx context.Context, name string, module plugin.Module) {
+	// Try a graceful stop for up to five seconds
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := module.GracefulStop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("plugin graceful stop failed", "module", name, "error", err)
+	}
+
+	if err := module.Stop(); err != nil {
+		slog.Warn("plugin forceful stop failed", "module", name, "error", err)
+	}
+}
+
 // Stop any plugin device modules
-func stopPlugins(modules *deviceModuleMap) {
+func stopDevicePlugins(modules *deviceModuleMap) {
 	pluginStopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var pluginStopWg sync.WaitGroup
@@ -294,7 +307,7 @@ func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[prot
 func verifyVoucher(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], info *OvhValidationContext, c *TO2Config) error {
 	// Construct ownership voucher from parts received from the owner service
 	var entries []cose.Sign1Tag[VoucherEntryPayload, []byte]
-	for i := 0; i < info.NumVoucherEntries; i++ {
+	for i := range info.NumVoucherEntries {
 		entry, err := sendNextOVEntry(ctx, transport, i)
 		if err != nil {
 			return err
@@ -336,8 +349,8 @@ type OvhValidationContext struct {
 	OVHHmac             protocol.Hmac
 	NumVoucherEntries   int
 	PublicKeyToValidate crypto.PublicKey
-	OriginalOwnerKey     crypto.PublicKey
-	DelegateChain	    *protocol.PublicKey
+	OriginalOwnerKey    crypto.PublicKey
+	DelegateChain       *protocol.PublicKey
 }
 
 // HelloDevice(60) -> ProveOVHdr(61)
@@ -422,7 +435,7 @@ func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (pr
 
 	if delegateFound, err = proveOVHdr.Unprotected.Parse(to2DelegateClaim, &delegatePubKey); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("delegate pubkey unprotected header missing from TO2.ProveOVHdr response message: %w",err)
+		return protocol.Nonce{}, nil, nil, fmt.Errorf("delegate pubkey unprotected header missing from TO2.ProveOVHdr response message: %w", err)
 	}
 
 	// Validate response signature and nonce. While the payload signature
@@ -432,7 +445,7 @@ func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (pr
 	// verified.
 
 	var key crypto.PublicKey
-	if (delegateFound) {
+	if delegateFound {
 		key, err = delegatePubKey.Public()
 
 	} else {
@@ -476,13 +489,13 @@ func sendHelloDevice(ctx context.Context, transport Transport, c *TO2Config) (pr
 	}
 
 	var DelegateChain *protocol.PublicKey
-	originalOwnerKey, err :=    ownerPubKey.Public()
+	originalOwnerKey, err := ownerPubKey.Public()
 	if err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
 		return protocol.Nonce{}, nil, nil, fmt.Errorf("error re-parsing owner public key to verify TO2.ProveOVHdr payload signature: %w", err)
 	}
 
-	if (delegateFound) { 
+	if delegateFound {
 		//PublicKeyToValidate needs to be real "owner", not delegate
 		DelegateChain = &delegatePubKey
 	}
@@ -538,7 +551,7 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 		return nil, fmt.Errorf("error associating device GUID to proof session: %w", err)
 	}
 	ov, err := s.Vouchers.Voucher(ctx, hello.GUID)
-	if err != nil {
+	if err != nil || len(ov.Entries) == 0 {
 		captureErr(ctx, protocol.ResourceNotFound, "")
 		return nil, fmt.Errorf("error retrieving voucher for device %x: %w", hello.GUID, err)
 	}
@@ -556,7 +569,16 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	if err != nil {
 		return nil, fmt.Errorf("error getting key type from device sig info: %w", err)
 	}
-	ownerKey, ownerPublicKey, err := s.ownerKey(keyType, ov.Header.Val.ManufacturerKey.Encoding)
+	var rsaBits int
+	if keyType == protocol.Rsa2048RestrKeyType || keyType == protocol.RsaPkcsKeyType || keyType == protocol.RsaPssKeyType {
+		switch hello.SigInfoA.Type.HashFunc() {
+		case crypto.SHA256:
+			rsaBits = 2048
+		case crypto.SHA384:
+			rsaBits = 3072
+		}
+	}
+	ownerKey, ownerPublicKey, err := s.ownerKey(ctx, keyType, ov.Header.Val.ManufacturerKey.Encoding, rsaBits)
 	if err != nil {
 		return nil, err
 	}
@@ -568,24 +590,24 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	var delegateKey crypto.Signer
 	var delegateChain *protocol.PublicKey = nil
 
-	if (s.OnboardDelegate != "") {
-		OnboardDelegateName := strings.Replace(s.OnboardDelegate,"=",(*ownerPublicKey).Type.KeyString(),-1)
+	if s.OnboardDelegate != "" {
+		OnboardDelegateName := strings.Replace(s.OnboardDelegate, "=", (*ownerPublicKey).Type.KeyString(), -1)
 		dk, chain, err := s.DelegateKeys.DelegateKey(OnboardDelegateName)
-		if (err != nil) {
-			return nil, fmt.Errorf("Delegate chain \"%s\" not found: %w", OnboardDelegateName,err)
+		if err != nil {
+			return nil, fmt.Errorf("Delegate chain \"%s\" not found: %w", OnboardDelegateName, err)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("Delegate Chain Unavailable: %w", err)
 		}
 		// TODO keyType here is probably wrong...?
-		delegateChain,err = protocol.NewPublicKey(keyType,chain,false)
-		if (err != nil) {
+		delegateChain, err = protocol.NewPublicKey(keyType, chain, false)
+		if err != nil {
 			return nil, fmt.Errorf("Failed to marshall delegate chain in proveOVHdr: %w", err)
 		}
 		//chain,err1 := delegatePublicKey.Chain()
 
-		err = VerifyDelegateChain(chain,&expectedCUPHOwnerKey,&OID_delegateOnboard)
-		if (err != nil) {
+		err = VerifyDelegateChain(chain, &expectedCUPHOwnerKey, &OID_delegateOnboard)
+		if err != nil {
 			return nil, fmt.Errorf("Cert Chain Verification Failed: %w", err)
 		}
 
@@ -653,13 +675,13 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	}
 
 	var header = cose.Header{
-			Unprotected: map[cose.Label]any{
-				to2NonceClaim:       proveDeviceNonce,
-				to2OwnerPubKeyClaim: ownerPublicKey,
-			},
-		}
+		Unprotected: map[cose.Label]any{
+			to2NonceClaim:       proveDeviceNonce,
+			to2OwnerPubKeyClaim: ownerPublicKey,
+		},
+	}
 
-	if (delegateKey != nil) {
+	if delegateKey != nil {
 		header.Unprotected[to2DelegateClaim] = delegateChain //delegatePublicKey
 	}
 	s1 := cose.Sign1[ovhProof, []byte]{
@@ -689,8 +711,8 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	return proof, nil
 }
 
-func (s *TO2Server) ownerKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding) (crypto.Signer, *protocol.PublicKey, error) {
-	key, chain, err := s.OwnerKeys.OwnerKey(keyType)
+func (s *TO2Server) ownerKey(ctx context.Context, keyType protocol.KeyType, keyEncoding protocol.KeyEncoding, rsaBits int) (crypto.Signer, *protocol.PublicKey, error) {
+	key, chain, err := s.OwnerKeys.OwnerKey(ctx, keyType, rsaBits)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil, fmt.Errorf("owner key type %s not supported", keyType)
 	} else if err != nil {
@@ -740,7 +762,7 @@ func sendNextOVEntry(ctx context.Context, transport Transport, i int) (*cose.Sig
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2GetOVNextEntryMsgType, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error sending TO2.GetOVNextEntry: %w", err)
+		return nil, fmt.Errorf("TO2.GetOVNextEntry: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -792,7 +814,7 @@ func (s *TO2Server) ovNextEntry(ctx context.Context, msg io.Reader) (*ovEntry, e
 		return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
 	}
 	ov, err := s.Vouchers.Voucher(ctx, guid)
-	if err != nil {
+	if err != nil || len(ov.Entries) == 0 {
 		return nil, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
 	}
 
@@ -845,7 +867,7 @@ func proveDevice(ctx context.Context, transport Transport, proveDeviceNonce prot
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2ProveDeviceMsgType, msg, kex.DecryptOnly{Session: sess})
 	if err != nil {
-		return protocol.Nonce{}, nil, fmt.Errorf("error sending TO2.ProveDevice: %w", err)
+		return protocol.Nonce{}, nil, fmt.Errorf("TO2.ProveDevice: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -868,8 +890,7 @@ func proveDevice(ctx context.Context, transport Transport, proveDeviceNonce prot
 			ManufacturerKey: setupDevice.Payload.Val.Owner2Key,
 		}
 
-
-		// If we are using Delgate, sinve ownerPublicKey is now the Delegate key, 
+		// If we are using Delgate, sinve ownerPublicKey is now the Delegate key,
 		// we need to reset it back to what was in the OV.
 		if credReuse, err := reuseCredentials(ctx, replacementOVH, originalOwnerKey, c); err != nil || credReuse {
 			return setupDeviceNonce, nil, err
@@ -948,7 +969,7 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 		return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
 	}
 	ov, err := s.Vouchers.Voucher(ctx, guid)
-	if err != nil {
+	if err != nil || len(ov.Entries) == 0 {
 		return nil, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
 	}
 
@@ -997,14 +1018,14 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 		return nil, fmt.Errorf("error getting associated key exchange session: %w", err)
 	}
 	defer sess.Destroy()
-	keyType := ov.Header.Val.ManufacturerKey.Type
-	ownerKey, ownerPublicKey, err := s.ownerKey(keyType, ov.Header.Val.ManufacturerKey.Encoding)
+	mfgKey := ov.Header.Val.ManufacturerKey
+	keyType, rsaBits := mfgKey.Type, mfgKey.RsaBits()
+	ownerKey, ownerPublicKey, err := s.ownerKey(ctx, keyType, ov.Header.Val.ManufacturerKey.Encoding, rsaBits)
 	sessionOwnerKey := ownerKey
-	if (s.OnboardDelegate != "") {
-		OnboardDelegateName := strings.Replace(s.OnboardDelegate,"=",keyType.KeyString(),-1)
+	if s.OnboardDelegate != "" {
+		OnboardDelegateName := strings.Replace(s.OnboardDelegate, "=", keyType.KeyString(), -1)
 		sessionOwnerKey, _, err = s.DelegateKeys.DelegateKey(OnboardDelegateName)
-	} 
-
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1020,24 +1041,9 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 	}
 
 	// Get replacement GUID and rendezvous directives
-	var replacementGUID protocol.GUID
-	var replacementRvInfo [][]protocol.RvInstruction
-	if s.ReuseCredential != nil && s.ReuseCredential(ctx, *ov) {
-		replacementGUID = ov.Header.Val.GUID
-		replacementRvInfo = ov.Header.Val.RvInfo
-	} else {
-		if _, err := rand.Read(replacementGUID[:]); err != nil {
-			return nil, fmt.Errorf("error generating replacement GUID for device: %w", err)
-		}
-		if err := s.Session.SetReplacementGUID(ctx, replacementGUID); err != nil {
-			return nil, fmt.Errorf("error storing replacement GUID for device: %w", err)
-		}
-		if replacementRvInfo, err = s.RvInfo(ctx, *ov); err != nil {
-			return nil, fmt.Errorf("error determining rendezvous info for device: %w", err)
-		}
-		if err := s.Session.SetRvInfo(ctx, replacementRvInfo); err != nil {
-			return nil, fmt.Errorf("error storing rendezvous info for device: %w", err)
-		}
+	replacementGUID, replacementRvInfo, err := s.replacementCredential(ctx, ov)
+	if err != nil {
+		return nil, err
 	}
 
 	// Respond with device setup
@@ -1057,6 +1063,34 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 		return nil, fmt.Errorf("error signing TO2.SetupDevice payload: %w", err)
 	}
 	return s1.Tag(), nil
+}
+
+func (s *TO2Server) replacementCredential(ctx context.Context, ov *Voucher) (protocol.GUID, [][]protocol.RvInstruction, error) {
+	if s.ReuseCredential != nil {
+		reuse, err := s.ReuseCredential(ctx, *ov)
+		if err != nil {
+			return protocol.GUID{}, nil, fmt.Errorf("error checking if credential reuse should be performed for device based on voucher: %w", err)
+		}
+		if reuse {
+			return ov.Header.Val.GUID, ov.Header.Val.RvInfo, nil
+		}
+	}
+
+	var replacementGUID protocol.GUID
+	if _, err := rand.Read(replacementGUID[:]); err != nil {
+		return protocol.GUID{}, nil, fmt.Errorf("error generating replacement GUID for device: %w", err)
+	}
+	if err := s.Session.SetReplacementGUID(ctx, replacementGUID); err != nil {
+		return protocol.GUID{}, nil, fmt.Errorf("error storing replacement GUID for device: %w", err)
+	}
+	replacementRvInfo, err := s.RvInfo(ctx, *ov)
+	if err != nil {
+		return protocol.GUID{}, nil, fmt.Errorf("error determining rendezvous info for device: %w", err)
+	}
+	if err := s.Session.SetRvInfo(ctx, replacementRvInfo); err != nil {
+		return protocol.GUID{}, nil, fmt.Errorf("error storing rendezvous info for device: %w", err)
+	}
+	return replacementGUID, replacementRvInfo, nil
 }
 
 type deviceServiceInfoReady struct {
@@ -1094,7 +1128,7 @@ func sendReadyServiceInfo(ctx context.Context, transport Transport, alg protocol
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceServiceInfoReadyMsgType, msg, sess)
 	if err != nil {
-		return 0, fmt.Errorf("error sending TO2.DeviceServiceInfoReady: %w", err)
+		return 0, fmt.Errorf("TO2.DeviceServiceInfoReady: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -1146,63 +1180,29 @@ func (s *TO2Server) ownerServiceInfoReady(ctx context.Context, msg io.Reader) (*
 		return nil, fmt.Errorf("error storing max service info size to send to device: %w", err)
 	}
 
-	// Get current voucher
-	guid, err := s.Session.GUID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
-	}
-	ov, err := s.Vouchers.Voucher(ctx, guid)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
-	}
-	info := ov.Header.Val.DeviceInfo
-	var deviceCertChain []*x509.Certificate
-	if ov.CertChain != nil {
-		deviceCertChain = make([]*x509.Certificate, len(*ov.CertChain))
-		for i, cert := range *ov.CertChain {
-			deviceCertChain[i] = (*x509.Certificate)(cert)
-		}
-	}
-
-	// If not using the Credential Reuse Protocol (i.e. device sends an HMAC),
-	// then store the HMAC and get the replacement GUID
+	// Store the new HMAC if not using the Credential Reuse Protocol
 	if deviceReady.Hmac != nil {
 		if err := s.Session.SetReplacementHmac(ctx, *deviceReady.Hmac); err != nil {
 			return nil, fmt.Errorf("error storing replacement voucher HMAC for device: %w", err)
 		}
-		if guid, err = s.Session.ReplacementGUID(ctx); err != nil {
-			return nil, fmt.Errorf("error retrieving replacement (2) GUID for device: %w", err)
-		}
 	}
-
-	// Initialize service info modules
-	s.plugins = make(map[string]plugin.Module)
-	s.nextModule, s.stop = iter.Pull2(func() iter.Seq2[string, serviceinfo.OwnerModule] {
-		var devmod devmodOwnerModule
-		var ownerModules iter.Seq2[string, serviceinfo.OwnerModule]
-
-		return func(yield func(string, serviceinfo.OwnerModule) bool) {
-			if ownerModules == nil {
-				if !yield("devmod", &devmod) {
-					return
-				}
-				ownerModules = s.OwnerModules(ctx, guid, info, deviceCertChain, devmod.Devmod, devmod.Modules)
-			}
-
-			ownerModules(func(moduleName string, mod serviceinfo.OwnerModule) bool {
-				if p, ok := mod.(plugin.Module); ok {
-					// Collect plugins before yielding the module
-					s.plugins[moduleName] = p
-				}
-				return yield(moduleName, mod)
-			})
-		}
-	}())
 
 	// Send response
 	ownerReady := new(ownerServiceInfoReady)
-	if s.MaxDeviceServiceInfoSize != 0 {
-		ownerReady.MaxDeviceServiceInfoSize = &s.MaxDeviceServiceInfoSize
+	if s.MaxDeviceServiceInfoSize != nil {
+		guid, err := s.Session.GUID(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
+		}
+		ov, err := s.Vouchers.Voucher(ctx, guid)
+		if err != nil || len(ov.Entries) == 0 {
+			return nil, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
+		}
+		size, err := s.MaxDeviceServiceInfoSize(ctx, *ov)
+		if err != nil {
+			return nil, fmt.Errorf("error getting service info size limit for device %x: %w", ov.Header.Val.GUID, err)
+		}
+		ownerReady.MaxDeviceServiceInfoSize = &size
 	}
 	return ownerReady, nil
 }
@@ -1257,7 +1257,7 @@ func exchangeServiceInfo(ctx context.Context,
 
 	// Track active modules
 	modules := deviceModuleMap{modules: c.DeviceModules, active: make(map[string]bool)}
-	defer stopPlugins(&modules)
+	defer stopDevicePlugins(&modules)
 
 	var prevModuleName string
 	for {
@@ -1356,7 +1356,7 @@ func sendDone(ctx context.Context, transport Transport, proveDvNonce, setupDvNon
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2DoneMsgType, msg, sess)
 	if err != nil {
-		return fmt.Errorf("error sending TO2.Done: %w", err)
+		return fmt.Errorf("TO2.Done: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -1467,7 +1467,7 @@ func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceS
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceServiceInfoMsgType, msg, sess)
 	if err != nil {
-		return nil, fmt.Errorf("error sending TO2.DeviceServiceInfo: %w", err)
+		return nil, fmt.Errorf("TO2.DeviceServiceInfo: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -1496,7 +1496,7 @@ func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceS
 }
 
 // DeviceServiceInfo(68) -> OwnerServiceInfo(69)
-func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*ownerServiceInfo, error) {
+func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*ownerServiceInfo, error) { //nolint:gocyclo
 	// Parse request
 	var deviceInfo deviceServiceInfo
 	if err := cbor.NewDecoder(msg).Decode(&deviceInfo); err != nil {
@@ -1504,13 +1504,39 @@ func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*owner
 	}
 
 	// Get next owner service info module
-	moduleName, mod, ok := s.nextModule()
-	if !ok {
-		return &ownerServiceInfo{
-			IsMoreServiceInfo: false,
-			IsDone:            true,
-			ServiceInfo:       nil,
-		}, nil
+	var moduleName string
+	var module serviceinfo.OwnerModule
+	if devmod, modules, complete, err := s.Session.Devmod(ctx); errors.Is(err, ErrNotFound) || (err == nil && !complete) {
+		moduleName, module = "devmod", &devmodOwnerModule{
+			Devmod:  devmod,
+			Modules: modules,
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("error getting devmod state: %w", err)
+	} else {
+		var err error
+		moduleName, module, err = s.Modules.Module(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting current service info module: %w", err)
+		}
+
+		// Set the context values that an FSIM expects
+		guid, err := s.Session.GUID(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
+		}
+		ov, err := s.Vouchers.Voucher(ctx, guid)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving voucher for device %x: %w", guid, err)
+		}
+		var deviceCertChain []*x509.Certificate
+		if ov.CertChain != nil {
+			deviceCertChain = make([]*x509.Certificate, len(*ov.CertChain))
+			for i, cert := range *ov.CertChain {
+				deviceCertChain[i] = (*x509.Certificate)(cert)
+			}
+		}
+		ctx = serviceinfo.Context(ctx, &devmod, deviceCertChain)
 	}
 
 	// Handle data with owner module
@@ -1529,7 +1555,7 @@ func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*owner
 			break
 		}
 		moduleName, messageName, _ := strings.Cut(key, ":")
-		if err := mod.HandleInfo(ctx, messageName, messageBody); err != nil {
+		if err := module.HandleInfo(ctx, messageName, messageBody); err != nil {
 			return nil, fmt.Errorf("error handling device service info %q: %w", key, err)
 		}
 		if n, err := io.Copy(io.Discard, messageBody); err != nil {
@@ -1544,55 +1570,94 @@ func (s *TO2Server) ownerServiceInfo(ctx context.Context, msg io.Reader) (*owner
 		}
 	}
 
-	if deviceInfo.IsMoreServiceInfo {
-		s.continueWithModule(moduleName, mod)
-
-		return &ownerServiceInfo{
-			IsMoreServiceInfo: false,
-			IsDone:            false,
-			ServiceInfo:       nil,
-		}, nil
+	// Save devmod state. All devmod messages are "sent by the Device in the
+	// first Device ServiceInfo" but IsMoreServiceInfo may allow it to be sent
+	// over multiple network roundtrips.
+	if devmod, ok := module.(*devmodOwnerModule); ok {
+		if err := s.Session.SetDevmod(ctx, devmod.Devmod, devmod.Modules, false); err != nil {
+			return nil, fmt.Errorf("error storing devmod state: %w", err)
+		}
 	}
 
-	return s.produceOwnerServiceInfo(ctx, moduleName, mod)
-}
-
-// Override nextModule so that the same module is used in the next round
-func (s *TO2Server) continueWithModule(moduleName string, mod serviceinfo.OwnerModule) {
-	nextModule := s.nextModule
-	s.nextModule = func() (string, serviceinfo.OwnerModule, bool) {
-		s.nextModule = nextModule
-		return moduleName, mod, true
+	// Allow owner module to produce data unless blocked by device
+	if !deviceInfo.IsMoreServiceInfo {
+		return s.produceOwnerServiceInfo(ctx, moduleName, module)
 	}
+
+	// Store the current module state
+	if devmod, ok := module.(*devmodOwnerModule); ok {
+		if err := s.Session.SetDevmod(ctx, devmod.Devmod, devmod.Modules, false); err != nil {
+			return nil, fmt.Errorf("error storing devmod state: %w", err)
+		}
+	}
+	if modules, ok := s.Modules.(serviceinfo.ModulePersister); ok {
+		if err := modules.PersistModule(ctx, moduleName, module); err != nil {
+			return nil, fmt.Errorf("error persisting service info module %q state: %w", moduleName, err)
+		}
+	}
+
+	return &ownerServiceInfo{
+		IsMoreServiceInfo: false,
+		IsDone:            false,
+		ServiceInfo:       nil,
+	}, nil
 }
 
 // Allow owner module to produce data
-func (s *TO2Server) produceOwnerServiceInfo(ctx context.Context, moduleName string, mod serviceinfo.OwnerModule) (*ownerServiceInfo, error) {
+func (s *TO2Server) produceOwnerServiceInfo(ctx context.Context, moduleName string, module serviceinfo.OwnerModule) (*ownerServiceInfo, error) {
 	mtu, err := s.Session.MTU(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting max device service info size: %w", err)
 	}
 
+	// Get service info produced by the module
 	producer := serviceinfo.NewProducer(moduleName, mtu)
-	explicitBlock, isComplete, err := mod.ProduceInfo(ctx, producer)
+	explicitBlock, complete, err := module.ProduceInfo(ctx, producer)
 	if err != nil {
 		return nil, fmt.Errorf("error producing owner service info from module: %w", err)
 	}
-
-	if size := serviceinfo.ArraySizeCBOR(producer.ServiceInfo()); size > int64(mtu) {
+	if explicitBlock && complete {
+		slog.Warn("service info module completed but indicated that it had more service info to send", "module", moduleName)
+		explicitBlock = false
+	}
+	serviceInfo := producer.ServiceInfo()
+	if size := serviceinfo.ArraySizeCBOR(serviceInfo); size > int64(mtu) {
 		return nil, fmt.Errorf("owner service info module produced service info exceeding the MTU=%d - 3 (message overhead), size=%d", mtu, size)
 	}
 
-	// If module is not yet complete, override nextModule to return it again
-	if !isComplete {
-		s.continueWithModule(moduleName, mod)
+	// Store the current module state
+	if devmod, ok := module.(*devmodOwnerModule); ok {
+		if err := s.Session.SetDevmod(ctx, devmod.Devmod, devmod.Modules, complete); err != nil {
+			return nil, fmt.Errorf("error storing devmod state: %w", err)
+		}
+	}
+	if modules, ok := s.Modules.(serviceinfo.ModulePersister); ok {
+		if err := modules.PersistModule(ctx, moduleName, module); err != nil {
+			return nil, fmt.Errorf("error persisting service info module %q state: %w", moduleName, err)
+		}
+	}
+
+	// Progress the module state machine when the module completes
+	allModulesDone := false
+	if complete {
+		// Cleanup current module
+		if plugin, ok := module.(plugin.Module); ok {
+			stopOwnerPlugin(ctx, moduleName, plugin)
+		}
+
+		// Find out if there will be more modules
+		moreModules, err := s.Modules.NextModule(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error progressing service info module %q state: %w", moduleName, err)
+		}
+		allModulesDone = !moreModules
 	}
 
 	// Return chunked data
 	return &ownerServiceInfo{
 		IsMoreServiceInfo: explicitBlock,
-		IsDone:            false,
-		ServiceInfo:       producer.ServiceInfo(),
+		IsDone:            allModulesDone,
+		ServiceInfo:       serviceInfo,
 	}, nil
 }
 
@@ -1634,7 +1699,7 @@ func (s *TO2Server) to2Done2(ctx context.Context, msg io.Reader) (*done2Msg, err
 		return nil, fmt.Errorf("error retrieving associated device GUID of proof session: %w", err)
 	}
 	currentOV, err := s.Vouchers.Voucher(ctx, currentGUID)
-	if err != nil {
+	if err != nil || len(currentOV.Entries) == 0 {
 		return nil, fmt.Errorf("error retrieving voucher for device %x: %w", currentGUID, err)
 	}
 	rvInfo, err := s.Session.RvInfo(ctx)
@@ -1647,9 +1712,11 @@ func (s *TO2Server) to2Done2(ctx context.Context, msg io.Reader) (*done2Msg, err
 	}
 
 	// Create and store a new voucher
-	keyType := currentOV.Header.Val.ManufacturerKey.Type
-	keyEncoding := currentOV.Header.Val.ManufacturerKey.Encoding
-	_, ownerPublicKey, err := s.ownerKey(keyType, keyEncoding)
+	mfgKey := currentOV.Header.Val.ManufacturerKey
+	keyType := mfgKey.Type
+	keyEncoding := mfgKey.Encoding
+	rsaBits := mfgKey.RsaBits()
+	_, ownerPublicKey, err := s.ownerKey(ctx, keyType, keyEncoding, rsaBits)
 	if err != nil {
 		return nil, err
 	}

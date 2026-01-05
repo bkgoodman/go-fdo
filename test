@@ -1,0 +1,30 @@
+Need one more byte:
+8819ffff50083007fe8964fbe29cc6356590cafbbf506ae4097accce72cec20c312fcf82f318674543444833383401823822404101
+
+Added zero on end manually
+8819ffff50083007fe8964fbe29cc6356590cafbbf506ae4097accce72cec20c312fcf82f31867454344483338340182382240410100
+
+
+CBOR app encode when I removed zero from end of struct
+8719ffff50083007fe8964fbe29cc6356590cafbbf506ae4097accce72cec20c312fcf82f318674543444833383401823822404101
+
+
+
+87                                     # array(7)
+   19 FFFF                             # unsigned(65535)
+   50                                  # bytes(16)
+      083007FE8964FBE29CC6356590CAFBBF # "\b0\a\xFE\x89d\xFB\xE2\x9C\xC65e\x90\xCA\xFB\xBF"
+   50                                  # bytes(16)
+      6AE4097ACCCE72CEC20C312FCF82F318 # "j\xE4\tz\xCC\xCEr\xCE\xC2\f1/ς\xF3\u0018"
+   67                                  # text(7)
+      45434448333834                   # "ECDH384"
+   01                                  # unsigned(1)
+   82                                  # array(2)
+      38 22                            # negative(34)
+      40                               # bytes(0)
+                                       # ""
+   41                                  # bytes(1)
+      01                               # "\u0001"
+
+8819ffff50083007fe8964fbe29cc6356590cafbbf506ae4097accce72cec20c312fcf82f318674543444833383401823822404101
+8719ffff50083007fe8964fbe29cc6356590cafbbf506ae4097accce72cec20c312fcf82f318674543444833383401823822404101

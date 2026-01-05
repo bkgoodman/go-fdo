@@ -8,21 +8,39 @@ import (
 	"io"
 )
 
-// OwnerModule implements a service info module.
+// OwnerModule implements the owner service role for a service info module.
 type OwnerModule interface {
 	// HandleInfo is called once for each service info KV received from the
 	// device.
+	//
+	// The "active" message is not automatically handled, so all owner modules
+	// must be able to handle such messages. By spec, if the device sends a
+	// false value for active, the owner service should send no further service
+	// info for this module. Whether the owner module then errors (failing TO2)
+	// or completes is up to the logic of the owner service's onboarding
+	// process.
+	//
+	// The ctx parameter contains the devmod and device certificate chain,
+	// which can be extracted with functions from the serviceinfo package named
+	// ___FromContext.
 	HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error
 
 	// ProduceInfo is called once for each TO2.DeviceServiceInfo, after
 	// HandleInfo is called for each service info KV, unless the device
 	// indicated IsMoreServiceInfo.
 	//
+	// The "active" message does not need to be sent as this is automatically
+	// handled.
+	//
 	// If `blockPeer` is true, the owner service will indicate
 	// IsMoreServiceInfo to keep the device from sending service info in the
 	// next exchange. If `moduleDone` is true, then IsMoreServiceInfo will not
 	// be set true, regardless of the value of `more`, and this module will no
 	// longer be used in the TO2 protocol.
+	//
+	// The ctx parameter contains the devmod and device certificate chain,
+	// which can be extracted with functions from the serviceinfo package named
+	// ___FromContext.
 	ProduceInfo(ctx context.Context, producer *Producer) (blockPeer, moduleDone bool, _ error)
 }
 

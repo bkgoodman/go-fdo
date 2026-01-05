@@ -30,3 +30,6 @@ test.db
 
 # Test artifacts
 fdo.download_*
+
+# Nix artifacts
+/result

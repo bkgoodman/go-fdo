@@ -10,14 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
-	"encoding/hex"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/kex"
@@ -55,8 +52,6 @@ type Transport struct {
 }
 
 // Send sends a single message and receives a single response message.
-//
-//nolint:gocyclo
 func (t *Transport) Send(ctx context.Context, msgType uint8, msg any, sess kex.Session) (respType uint8, _ io.ReadCloser, _ error) {
 	// Initialize default values
 	if t.Client == nil {
@@ -68,10 +63,7 @@ func (t *Transport) Send(ctx context.Context, msgType uint8, msg any, sess kex.S
 
 	// Encrypt if a key exchange session is provided
 	if sess != nil {
-		if debugEnabled() {
-			body, _ := cbor.Marshal(msg)
-			slog.Debug("unencrypted request", "msg", msgType, "cborBody", tryDebugNotation(body),"body",hex.EncodeToString(body))
-		}
+		debugUnencryptedMessage(msgType, msg)
 		var err error
 		msg, err = sess.Encrypt(rand.Reader, msg)
 		if err != nil {
@@ -80,7 +72,7 @@ func (t *Transport) Send(ctx context.Context, msgType uint8, msg any, sess kex.S
 	}
 
 	// Create request with URL and body
-	uri, err := url.JoinPath(t.BaseURL, "fdo", strconv.Itoa(t.FdoVersion),"msg", strconv.Itoa(int(msgType)))
+	uri, err := url.JoinPath(t.BaseURL, "fdo", strconv.Itoa(t.FdoVersion), "msg", strconv.Itoa(int(msgType)))
 	if err != nil {
 		return 0, nil, fmt.Errorf("error parsing base URL: %w", err)
 	}
@@ -109,25 +101,12 @@ func (t *Transport) Send(ctx context.Context, msgType uint8, msg any, sess kex.S
 	}
 
 	// Perform HTTP request
-	if debugEnabled() {
-		debugReq, _ := httputil.DumpRequestOut(req, false)
-		slog.Debug("request", "dump", string(bytes.TrimSpace(debugReq)),
-			"cborBody", tryDebugNotation(body.Bytes()),
-			"body",hex.EncodeToString(body.Bytes()))
-	}
+	debugRequestOut(req, body)
 	resp, err := t.Client.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("error making HTTP request for message %d: %w", msgType, err)
 	}
-	if debugEnabled() {
-		debugResp, _ := httputil.DumpResponse(resp, false)
-		var saveBody bytes.Buffer
-		if _, err := saveBody.ReadFrom(resp.Body); err == nil {
-			resp.Body = io.NopCloser(&saveBody)
-		}
-		slog.Debug("response", "dump", string(bytes.TrimSpace(debugResp)),
-			"body", tryDebugNotation(saveBody.Bytes()))
-	}
+	debugResponse(resp)
 
 	return t.handleResponse(resp, sess)
 }
@@ -154,6 +133,10 @@ func (t *Transport) handleResponse(resp *http.Response, sess kex.Session) (msgTy
 		}
 		msgType = uint8(typ)
 	case http.StatusInternalServerError:
+		if resp.Header.Get("Content-Type") != "application/cbor" {
+			_ = resp.Body.Close()
+			return 0, nil, fmt.Errorf("%s did not include an error message body", resp.Status)
+		}
 		msgType = 255
 	default:
 		_ = resp.Body.Close()
@@ -194,10 +177,7 @@ func (t *Transport) handleResponse(resp *http.Response, sess kex.Session) (msgTy
 		if err != nil {
 			return 0, nil, fmt.Errorf("error decrypting message %d: %w", msgType, err)
 		}
-
-		if debugEnabled() {
-			slog.Debug("decrypted response", "msg", msgType, "body", tryDebugNotation(decrypted))
-		}
+		debugDecryptedMessage(msgType, decrypted)
 
 		content = io.NopCloser(bytes.NewBuffer(decrypted))
 	}

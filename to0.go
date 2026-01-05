@@ -27,7 +27,7 @@ const DefaultRVBlobTTL = 4_294_967_295 // max uint32
 type TO0Client struct {
 	// Vouchers is used to lookup the ownership voucher for registering a
 	// rendezvous blob for a given device.
-	Vouchers OwnerVoucherPersistentState
+	Vouchers VoucherPersistentState
 
 	// OwnerKeys are used for signing the rendezvous blob.
 	OwnerKeys OwnerKeyPersistentState
@@ -70,7 +70,7 @@ func (c *TO0Client) hello(ctx context.Context, transport Transport) (protocol.No
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO0HelloMsgType, msg, nil)
 	if err != nil {
-		return protocol.Nonce{}, fmt.Errorf("error sending TO0.Hello: %w", err)
+		return protocol.Nonce{}, fmt.Errorf("TO0.Hello: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -157,8 +157,9 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 	}
 
 	// Sign to1d rendezvous blob
-	keyType := ov.Header.Val.ManufacturerKey.Type
-	ownerKey, _, err := c.OwnerKeys.OwnerKey(keyType)
+	mfgKey := ov.Header.Val.ManufacturerKey
+	keyType := mfgKey.Type
+	ownerKey, _, err := c.OwnerKeys.OwnerKey(ctx, keyType, mfgKey.RsaBits())
 	if errors.Is(err, ErrNotFound) {
 		return 0, fmt.Errorf("no available owner key for TO0.OwnerSign [type=%s]", keyType)
 	} else if err != nil {
@@ -236,7 +237,7 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO0OwnerSignMsgType, msg, nil)
 	if err != nil {
-		return 0, fmt.Errorf("error sending TO0.OwnerSign: %w", err)
+		return 0, fmt.Errorf("TO0.OwnerSign: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -297,29 +298,37 @@ func (s *TO0Server) acceptOwner(ctx context.Context, msg io.Reader) (*to0AcceptO
 		return nil, fmt.Errorf("voucher is not valid: %w", err)
 	}
 
-	// Use optional callback to decide whether to accept voucher
+	// Check owner sign nonce in to0d
+	signNonce, err := s.Session.TO0SignNonce(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting TO0 owner sign nonce: %w", err)
+	}
+	nonce := sig.To0d.Val.NonceTO0Sign
+	if !bytes.Equal(nonce[:], signNonce[:]) {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
+		return nil, fmt.Errorf("TO0 owner sign nonces not match")
+	}
+
+	// Use optional callback to decide whether to accept voucher and how long
+	// the rendezvous blob should be valid
+	ttl := sig.To0d.Val.WaitSeconds
 	if s.AcceptVoucher != nil {
-		if accept, err := s.AcceptVoucher(ctx, ov); err != nil {
+		if ttl, err = s.AcceptVoucher(ctx, ov, ttl); err != nil {
 			return nil, err
-		} else if !accept {
+		}
+		if ttl == 0 {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return nil, fmt.Errorf("voucher has been rejected")
 		}
 	}
 
-	// Allow adjusting rendezvous blob mapping validity period
-	negotiatedTTL := sig.To0d.Val.WaitSeconds
-	if s.NegotiateTTL != nil {
-		negotiatedTTL = s.NegotiateTTL(negotiatedTTL, ov)
-	}
-
 	// Store rendezvous blob
-	expiration := time.Now().Add(time.Duration(negotiatedTTL) * time.Second)
+	expiration := time.Now().Add(time.Duration(ttl) * time.Second)
 	if err := s.RVBlobs.SetRVBlob(ctx, &ov, sig.To1d.Untag(), expiration); err != nil {
 		return nil, fmt.Errorf("error storing rendezvous blob: %w", err)
 	}
 
 	return &to0AcceptOwner{
-		WaitSeconds: negotiatedTTL,
+		WaitSeconds: ttl,
 	}, nil
 }

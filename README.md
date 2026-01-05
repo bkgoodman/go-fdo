@@ -1,5 +1,6 @@
 # FIDO Device Onboard - Go Library
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/fido-device-onboard/go-fdo/badge)](https://scorecard.dev/viewer/?uri=github.com/fido-device-onboard/go-fdo)
 [![Lint](https://github.com/fido-device-onboard/go-fdo/actions/workflows/lint.yml/badge.svg)](https://github.com/fido-device-onboard/go-fdo/actions/workflows/lint.yml)
 [![Test](https://github.com/fido-device-onboard/go-fdo/actions/workflows/test.yml/badge.svg)](https://github.com/fido-device-onboard/go-fdo/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://raw.githubusercontent.com/fido-device-onboard/go-fdo/main/LICENSE)
@@ -353,15 +354,15 @@ The TPM simulator may be used with 3 caveats:
 
 1. RSA3072 keys are not supported
 2. OpenSSL libraries and headers must be installed
-3. The `tpmsim` build tag must be used
+3. The executable must be built with cgo enabled
 
 ```console
-$ go run -tags tpmsim ./examples/cmd client -di http://127.0.0.1:9999 -di-key rsa2048 -tpm simulator
+$ go run ./examples/cmd client -di http://127.0.0.1:9999 -di-key rsa2048 -tpm simulator
 [2024-09-01 00:00:00] INFO: tpm: max input buffer size undefined, using default
   size: 1024
 Success
 
-$ go run -tags tpmsim ./examples/cmd client -di-key rsa2048 -tpm simulator
+$ go run ./examples/cmd client -di-key rsa2048 -tpm simulator
 [2024-09-01 00:00:00] INFO: tpm: max input buffer size undefined, using default
   size: 1024
 Success

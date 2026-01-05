@@ -161,7 +161,6 @@ type PublicKey struct {
 
 	key   crypto.PublicKey
 	chain []*x509.Certificate
-	err   error
 }
 
 func Key2String(key any) string {
@@ -271,19 +270,34 @@ func NewPublicKey[T PublicKeyOrChain](typ KeyType, pub T, asCOSE bool) (*PublicK
 
 // Public returns the public key parsed from the X509 or X5CHAIN encoding.
 func (pub *PublicKey) Public() (crypto.PublicKey, error) {
-	if pub.key == nil && pub.err == nil {
-		pub.err = pub.parse()
+	var err error
+	if pub.key == nil {
+		err = pub.parse()
 	}
-	return pub.key, pub.err
+	return pub.key, err
 }
 
 // Chain returns the certificate chain of the public key. If the key encoding
 // is not X5CHAIN then the certificate slice will be nil.
 func (pub *PublicKey) Chain() ([]*x509.Certificate, error) {
-	if pub.key == nil && pub.err == nil {
-		pub.err = pub.parse()
+	var err error
+	if pub.key == nil {
+		err = pub.parse()
 	}
-	return pub.chain, pub.err
+	return pub.chain, err
+}
+
+// RsaBits returns the bit size of the underlying RSA key or zero.
+func (pub *PublicKey) RsaBits() int {
+	pubKey, err := pub.Public()
+	if err != nil {
+		return 0
+	}
+	rsaPub, ok := pubKey.(*rsa.PublicKey)
+	if !ok {
+		return 0
+	}
+	return rsaPub.Size() * 8
 }
 
 func (pub *PublicKey) parse() error {
@@ -342,7 +356,6 @@ func (pub *PublicKey) parseX5Chain() error {
 	}
 	pub.chain = make([]*x509.Certificate, len(certs))
 	for i, cert := range certs {
-		cert := cert
 		pub.chain[i] = (*x509.Certificate)(cert)
 	}
 

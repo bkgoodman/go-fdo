@@ -9,15 +9,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"io"
-	"iter"
-	"log/slog"
 	"time"
 
 	"github.com/fido-device-onboard/go-fdo/kex"
-	"github.com/fido-device-onboard/go-fdo/plugin"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
@@ -25,22 +21,33 @@ import (
 // DIServer implements the DI protocol.
 type DIServer[T any] struct {
 	Session  DISessionState
-	Vouchers ManufacturerVoucherPersistentState
+	Vouchers VoucherPersistentState
+
+	// FIXME: Should Reseller be used for a Resale method?
 
 	// SignDeviceCertChain creates a device certificate chain based on info
 	// provided in the DI.AppStart message.
 	SignDeviceCertificate func(*T) ([]*x509.Certificate, error)
 
 	// DeviceInfo returns the device info string to use for a given device,
-	// based on its self-reported info and certificate chain.
-	DeviceInfo func(context.Context, *T, []*x509.Certificate) (string, protocol.KeyType, protocol.KeyEncoding, error)
+	// based on its self-reported info and certificate chain (from
+	// SignDeviceCertificate). The PublicKey returned is for the DI server and
+	// must be the key that will be used for voucher extension.
+	DeviceInfo func(context.Context, *T, []*x509.Certificate) (info string, mfgPubKey protocol.PublicKey, _ error)
 
-	// When set, new vouchers will be extended using the appropriate owner key.
-	AutoExtend AutoExtend
+	// NOTE: BeforeVoucherPersist and AfterVoucherPersist are usability
+	// enhancements. The same functionality can be achieved by altering the
+	// implementation of `VoucherPersistentState.AddVoucher`.
 
-	// When set, new vouchers will be registered for rendezvous.
-	AutoTO0      AutoTO0
-	AutoTO0Addrs []protocol.RvTO2Addr
+	// Optional callback for before a new voucher is persisted. This
+	// modification only applies to vouchers created with DI. Vouchers created
+	// at the end of TO2 will be persisted unmodified.
+	BeforeVoucherPersist func(context.Context, *Voucher) error
+
+	// Optional callback for immediately after a new voucher is persisted.
+	// There is no guarantee that the device will receive and process the Done
+	// message (13) without error.
+	AfterVoucherPersist func(context.Context, Voucher) error
 
 	// Rendezvous directives
 	RvInfo func(context.Context, *Voucher) ([][]protocol.RvInstruction, error)
@@ -82,24 +89,24 @@ func (s *DIServer[T]) Respond(ctx context.Context, msgType uint8, msg io.Reader)
 	return protocol.ErrorMsgType, errMsg
 }
 
+// HandleError performs session cleanup before the token is invalidated.
+func (s *DIServer[T]) HandleError(ctx context.Context, errMsg protocol.ErrorMessage) {}
+
 // TO0Server implements the TO0 protocol.
 type TO0Server struct {
 	Session TO0SessionState
 	RVBlobs RendezvousBlobPersistentState
 
 	// AcceptVoucher is an optional function which, when given, is used to
-	// determine whether to accept a voucher from a client.
+	// determine whether to accept a voucher from a client and how long (TTL)
+	// to retain a rendezvous blob for the owner service for the given voucher.
 	//
-	// If AcceptVoucher is not set, then all vouchers will be accepted. It is
-	// expected that some other means of authorization is used in this case.
-	AcceptVoucher func(context.Context, Voucher) (accept bool, err error)
-
-	// NegotiateTTL is an optional function to select a validity period for a
-	// rendezvous blob based on the requested number of seconds and the
-	// ownership voucher contents.
+	// If the TTL is 0, the request is rejected.
 	//
-	// If NegotiateTTL is not set, the requested TTL will be used.
-	NegotiateTTL func(requestedSeconds uint32, ov Voucher) (waitSeconds uint32)
+	// If AcceptVoucher is not set, then all vouchers will be accepted and the
+	// requested TTL will be used. It is expected that some other means of
+	// authorization is used in this case.
+	AcceptVoucher func(ctx context.Context, ov Voucher, requestedTTLSecs uint32) (ttlSecs uint32, err error)
 }
 
 // Respond validates a request and returns the appropriate response message.
@@ -137,6 +144,9 @@ func (s *TO0Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 	}
 	return protocol.ErrorMsgType, errMsg
 }
+
+// HandleError performs session cleanup before the token is invalidated.
+func (s *TO0Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessage) {}
 
 // TO1Server implements the TO1 protocol.
 type TO1Server struct {
@@ -180,25 +190,29 @@ func (s *TO1Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 	return protocol.ErrorMsgType, errMsg
 }
 
+// HandleError performs session cleanup before the token is invalidated.
+func (s *TO1Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessage) {}
+
 // TO2Server implements the TO2 protocol.
 type TO2Server struct {
-	Session   TO2SessionState
-	Vouchers  OwnerVoucherPersistentState
-	OwnerKeys OwnerKeyPersistentState
+	Session      TO2SessionState
+	Modules      serviceinfo.ModuleStateMachine
+	Vouchers     OwnerVoucherPersistentState
+	OwnerKeys    OwnerKeyPersistentState
 	DelegateKeys DelegateKeyPersistentState
+
+	// This field must be non-nil in order to use the Resale Protocol (see
+	// [TO2Server.Resell]).
+	VouchersForExtension VoucherReseller
 
 	// Choose the replacement rendezvous directives based on the current
 	// voucher of the onboarding device.
 	RvInfo func(context.Context, Voucher) ([][]protocol.RvInstruction, error)
 
-	// Create an iterator of service info modules for a given device. The
-	// iterator returns the name of the module and its implementation.
-	OwnerModules func(ctx context.Context, replacementGUID protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, modules []string) iter.Seq2[string, serviceinfo.OwnerModule]
-
 	// ReuseCredential, if not nil, will be called to determine whether to
 	// apply the Credential Reuse Protocol based on the current voucher of an
 	// onboarding device.
-	ReuseCredential func(context.Context, Voucher) bool
+	ReuseCredential func(context.Context, Voucher) (bool, error)
 
 	// VerifyVoucher, if not nil, will be called before creating and responding
 	// with a TO2.ProveOVHdr message. Any error will cause TO2 to fail with a
@@ -208,17 +222,19 @@ type TO2Server struct {
 	// with zero extensions.
 	VerifyVoucher func(context.Context, Voucher) error
 
-	// Server affinity state
-	nextModule func() (string, serviceinfo.OwnerModule, bool)
-	stop       func()
-	plugins    map[string]plugin.Module
-
-	// Optional configuration
-	MaxDeviceServiceInfoSize uint16
+	// MaxDeviceServiceInfoSize configures the maximum size service info that
+	// Owner can receive and that the device should send. If left unset, then
+	// DefaultMTU is used.
+	//
+	// Setting this configuration does not actually enforce that the device
+	// does not send larger service info. The server transport should be
+	// configured to only read data of a maximum size. Choosing a lower value
+	// is useful when it can help a well-behaved device communicate faster over
+	// a well understood network.
+	MaxDeviceServiceInfoSize func(context.Context, Voucher) (uint16, error)
 
 	// Use this delegate cert for onboarding (or empty string)
 	OnboardDelegate string
-
 
 	// Use this delegate cert for rendezvous (or empty string)
 	RvDelegate string
@@ -227,9 +243,17 @@ type TO2Server struct {
 // Resell implements the FDO Resale Protocol by removing a voucher from
 // ownership, extending it to a new owner, and then returning it for
 // out-of-band transport.
+//
+// If an error occurs, the unextended voucher may be returned along with the
+// error. The caller should then retry extending the voucher or add it back to
+// persistent state to reverse the effects of the failed Resell call.
 func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner crypto.PublicKey, extra map[int][]byte) (*Voucher, error) {
+	if s.VouchersForExtension == nil {
+		return nil, fmt.Errorf("TO2 server is not configured for resale")
+	}
+
 	// Remove voucher from ownership of this service
-	ov, err := s.Vouchers.RemoveVoucher(ctx, guid)
+	ov, err := s.VouchersForExtension.RemoveVoucher(ctx, guid)
 	if err != nil {
 		return nil, fmt.Errorf("error untracking voucher for resale: %w", err)
 	}
@@ -239,10 +263,9 @@ func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner cr
 	if len(ov.Entries) > 0 {
 		ownerPubKey = ov.Entries[len(ov.Entries)-1].Payload.Val.PublicKey
 	}
-	ownerKey, _, err := s.OwnerKeys.OwnerKey(ownerPubKey.Type)
+	ownerKey, _, err := s.OwnerKeys.OwnerKey(ctx, ownerPubKey.Type, ownerPubKey.RsaBits())
 	if err != nil {
-		_ = s.Vouchers.AddVoucher(ctx, ov)
-		return nil, fmt.Errorf("error getting key used to sign voucher: %w", err)
+		return ov, fmt.Errorf("error getting key used to sign voucher: %w", err)
 	}
 
 	// Extend voucher
@@ -258,15 +281,14 @@ func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner cr
 		err = fmt.Errorf("unsupported key type: %T", nextOwner)
 	}
 	if err != nil {
-		_ = s.Vouchers.AddVoucher(ctx, ov)
-		return nil, fmt.Errorf("error extending voucher to new owner: %w", err)
+		return ov, fmt.Errorf("error extending voucher to new owner: %w", err)
 	}
 
 	return extended, nil
 }
 
 // Respond validates a request and returns the appropriate response message.
-func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (respType uint8, resp any) { //nolint:gocyclo
+func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (respType uint8, resp any) {
 	// Inject a mutable error into the context for error info capturing without
 	// complex error wrapping or overburdened method signatures.
 	ctx = contextWithErrMsg(ctx)
@@ -290,39 +312,13 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 	case protocol.TO2DeviceServiceInfoMsgType:
 		respType = protocol.TO2OwnerServiceInfoMsgType
 		resp, err = s.ownerServiceInfo(ctx, msg)
+		if err != nil {
+			s.Modules.CleanupModules(ctx)
+		}
 	case protocol.TO2DoneMsgType:
+		s.Modules.CleanupModules(ctx)
 		respType = protocol.TO2Done2MsgType
 		resp, err = s.to2Done2(ctx, msg)
-	}
-
-	// Stop any running plugins if TO2 ended (possibly by error)
-	if (msgType == protocol.TO2DeviceServiceInfoMsgType && err != nil) || msgType == protocol.TO2DoneMsgType {
-		// Close owner module iterator
-		s.stop()
-
-		// Start goroutines to gracefully/forcefully stop plugins. Stopping is
-		// given an absolute timeout not tied to the expiration of the request
-		// context.
-		pluginStopCtx, _ := context.WithTimeout(context.Background(), 5*time.Second) //nolint:govet
-		for name, p := range s.plugins {
-			pluginGracefulStopCtx, done := context.WithCancel(pluginStopCtx)
-
-			// Allow Graceful stop up to the original shared timeout
-			go func(p plugin.Module) {
-				defer done()
-				if err := p.GracefulStop(pluginGracefulStopCtx); err != nil && !errors.Is(err, context.Canceled) { //nolint:revive,staticcheck
-					slog.Warn("graceful stop failed", "module", name, "error", err)
-				}
-			}(p)
-
-			// Force stop after the shared timeout expires or graceful stop
-			// completes
-			go func(p plugin.Module) {
-				<-pluginGracefulStopCtx.Done()
-				_ = p.Stop()
-				// TODO: Track state for whether plugins are still stopping
-			}(p)
-		}
 	}
 
 	// Return response on success
@@ -349,4 +345,11 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 func (s *TO2Server) CryptSession(ctx context.Context) (kex.Session, error) {
 	_, sess, err := s.Session.XSession(ctx)
 	return sess, err
+}
+
+// HandleError performs session cleanup before the token is invalidated.
+func (s *TO2Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessage) {
+	// This should only be applicable if errMsg.PrevMsgType == 69, but the
+	// device reported error message cannot be completely trusted
+	s.Modules.CleanupModules(ctx)
 }

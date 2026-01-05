@@ -25,7 +25,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,26 +85,18 @@ func encodeValue(b *bytes.Buffer, v any) error { //nolint:gocyclo
 		_, _ = b.WriteString("'")
 
 	case string:
-		d, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		_, _ = b.WriteString(string(d))
+		_, _ = fmt.Fprintf(b, "%q", v)
 
 	case bool:
-		d, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		_, _ = b.WriteString(string(d))
+		_, _ = fmt.Fprintf(b, "%t", v)
 
 	case nil:
 		_, _ = b.WriteString("null")
 
 	case int64, uint64:
-		_, _ = b.WriteString(fmt.Sprintf("%d", v))
+		_, _ = fmt.Fprintf(b, "%d", v)
 
-	case []interface{}:
+	case []any:
 		_, _ = b.WriteString("[")
 		for index, element := range v {
 			if index > 0 {
@@ -117,7 +108,7 @@ func encodeValue(b *bytes.Buffer, v any) error { //nolint:gocyclo
 		}
 		_, _ = b.WriteString("]")
 
-	case map[interface{}]interface{}:
+	case map[any]any:
 		_, _ = b.WriteString("{")
 		c := 0
 		for key, value := range sortMap(v) {
@@ -370,7 +361,7 @@ func decodeArray(r *bufio.Reader) (any, error) {
 		return nil, err
 	}
 
-	a := []interface{}{}
+	a := []any{}
 	for {
 		v, err := decodeValue(r)
 		if err != nil {
@@ -404,7 +395,7 @@ func decodeMap(r *bufio.Reader) (any, error) { //nolint:gocyclo
 		return nil, err
 	}
 
-	m := make(map[interface{}]interface{})
+	m := make(map[any]any)
 	for {
 		k, err := decodeValue(r)
 		if err != nil {

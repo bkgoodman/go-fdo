@@ -13,6 +13,7 @@ import (
 	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/kex"
 	"github.com/fido-device-onboard/go-fdo/protocol"
+	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
 
 /*
@@ -41,7 +42,8 @@ func (err ErrUnsupportedKeyType) Error() string {
 	return "unsupported key type " + protocol.KeyType(err).String()
 }
 
-// DISessionState stores DI protocol state for a particular session.
+// DISessionState stores DI protocol state for a particular session. Any errors
+// will cause DI to fail.
 type DISessionState interface {
 	// SetDeviceCertChain sets the device certificate chain generated from
 	// DI.AppStart info.
@@ -60,7 +62,8 @@ type DISessionState interface {
 	IncompleteVoucherHeader(context.Context) (*VoucherHeader, error)
 }
 
-// TO0SessionState stores TO0 protocol state for a particular session.
+// TO0SessionState stores TO0 protocol state for a particular session. Any
+// errors will cause TO0 to fail.
 type TO0SessionState interface {
 	// SetTO0SignNonce sets the Nonce expected in TO0.OwnerSign.
 	SetTO0SignNonce(context.Context, protocol.Nonce) error
@@ -69,7 +72,8 @@ type TO0SessionState interface {
 	TO0SignNonce(context.Context) (protocol.Nonce, error)
 }
 
-// TO1SessionState stores TO1 protocol state for a particular session.
+// TO1SessionState stores TO1 protocol state for a particular session. Any
+// errors will cause TO1 to fail.
 type TO1SessionState interface {
 	// SetTO1ProofNonce sets the Nonce expected in TO1.ProveToRV.
 	SetTO1ProofNonce(context.Context, protocol.Nonce) error
@@ -78,7 +82,8 @@ type TO1SessionState interface {
 	TO1ProofNonce(context.Context) (protocol.Nonce, error)
 }
 
-// TO2SessionState stores TO2 protocol state for a particular session.
+// TO2SessionState stores TO2 protocol state for a particular session. Any
+// errors will cause TO2 to fail.
 type TO2SessionState interface {
 	// SetGUID associates a voucher GUID with a TO2 session.
 	SetGUID(context.Context, protocol.GUID) error
@@ -134,6 +139,12 @@ type TO2SessionState interface {
 
 	// MTU returns the max service info size the device may receive.
 	MTU(context.Context) (uint16, error)
+
+	// SetDevmod sets the device info and module support.
+	SetDevmod(_ context.Context, _ serviceinfo.Devmod, modules []string, complete bool) error
+
+	// Devmod returns the device info and module support.
+	Devmod(context.Context) (_ serviceinfo.Devmod, modules []string, complete bool, _ error)
 }
 
 // RendezvousBlobPersistentState maintains device to owner info state used in
@@ -149,64 +160,44 @@ type RendezvousBlobPersistentState interface {
 // OwnerKeyPersistentState maintains the owner service keys.
 type OwnerKeyPersistentState interface {
 	// OwnerKey returns the private key matching a given key type and optionally
-	// its certificate chain.
-	OwnerKey(protocol.KeyType) (crypto.Signer, []*x509.Certificate, error)
+	// its certificate chain. If key type is not RSAPKCS or RSAPSS then rsaBits
+	// is ignored. Otherwise it must be either 2048 or 3072.
+	//
+	// The context may hold additional data for selecting the key.
+	OwnerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error)
 }
 
 // DelegateKeyPersistentState maintains the delegate keys and certs.
 type DelegateKeyPersistentState interface {
-	// DelegateKey returns the private delegate key matching a given key type and 
+	// DelegateKey returns the private delegate key matching a given key type and
 	// its certificate chain.
 	DelegateKey(string) (crypto.Signer, []*x509.Certificate, error)
 }
 
-// ManufacturerVoucherPersistentState maintains vouchers created during DI
-// which have not yet been extended.
-type ManufacturerVoucherPersistentState interface {
-	// NewVoucher creates and stores a voucher for a newly initialized device.
-	// Note that the voucher may have entries if the server was configured for
-	// auto voucher extension.
-	NewVoucher(context.Context, *Voucher) error
-}
-
-// OwnerVoucherPersistentState maintains vouchers owned by the service.
-type OwnerVoucherPersistentState interface {
-	// AddVoucher stores the voucher of a device owned by the service.
-	AddVoucher(context.Context, *Voucher) error
-
-	// ReplaceVoucher stores a new voucher, possibly deleting or marking the
-	// previous voucher as replaced.
-	ReplaceVoucher(context.Context, protocol.GUID, *Voucher) error
-
-	// RemoveVoucher untracks a voucher, possibly by deleting it or marking it
-	// as removed, and returns it for extension.
-	RemoveVoucher(context.Context, protocol.GUID) (*Voucher, error)
+// VoucherPersistentState maintains vouchers.
+type VoucherPersistentState interface {
+	// AddVoucher stores a voucher with zero or more extensions.
+	AddVoucher(ctx context.Context, ov *Voucher) error
 
 	// Voucher retrieves a voucher by GUID.
 	Voucher(context.Context, protocol.GUID) (*Voucher, error)
 }
 
-// The following types are for optional server features.
+// OwnerVoucherPersistentState is a specialization for VoucherPersistentState
+// that adds the method for replacing a voucher atomically. Voucher replacement
+// is used for credential replacement at the end of onboarding.
+type OwnerVoucherPersistentState interface {
+	VoucherPersistentState
 
-// AutoExtend provides the necessary methods for automatically extending a
-// device voucher upon the completion of DI.
-type AutoExtend interface {
-	// ManufacturerKey returns the signer of a given key type and its certificate
-	// chain (required).
-	ManufacturerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certificate, error)
-
-	// OwnerKey returns the private key matching a given key type and optionally
-	// its certificate chain.
-	OwnerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certificate, error)
+	// ReplaceVoucher stores a new voucher with zero extensions, possibly
+	// deleting or marking the previous voucher as replaced.
+	ReplaceVoucher(context.Context, protocol.GUID, *Voucher) error
 }
 
-// AutoTO0 provides the necessary methods for setting a rendezvous blob upon
-// device voucher auto-extension.
-type AutoTO0 interface {
-	// OwnerKey returns the private key matching a given key type and optionally
-	// its certificate chain.
-	OwnerKey(keyType protocol.KeyType) (crypto.Signer, []*x509.Certificate, error)
-
-	// SetRVBlob sets the owner rendezvous blob for a device.
-	SetRVBlob(context.Context, *Voucher, *cose.Sign1[protocol.To1d, []byte], time.Time) error
+// VoucherReseller provides the method(s) necessary to extend a voucher for
+// resale.
+type VoucherReseller interface {
+	// RemoveVoucher untracks a voucher, whether extended or not, possibly by
+	// deleting it or marking it as removed, and returns it for extension.
+	RemoveVoucher(context.Context, protocol.GUID) (*Voucher, error)
 }
