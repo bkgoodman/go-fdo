@@ -244,10 +244,13 @@ func doAttestPayload(state *sqlite.DB, args []string) error {
 			break
 
 		case "IV":
+                fmt.Printf("IV Data %v\n",block.Bytes)
             break
 		case "CIPHERTEXT":
+                fmt.Printf("Cyphertext Data %v\n",block.Bytes)
             break
 		case "WRAPPED ENCRYPTION KEY":
+                fmt.Printf("Wrapped Encryption Key %v\n",block.Bytes)
             break
 
 		case "PAYLOAD":
