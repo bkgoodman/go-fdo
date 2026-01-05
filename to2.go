@@ -596,9 +596,6 @@ func (s *TO2Server) proveOVHdr(ctx context.Context, msg io.Reader) (*cose.Sign1T
 		if err != nil {
 			return nil, fmt.Errorf("Delegate chain \"%s\" not found: %w", OnboardDelegateName, err)
 		}
-		if err != nil {
-			return nil, fmt.Errorf("Delegate Chain Unavailable: %w", err)
-		}
 		// TODO keyType here is probably wrong...?
 		delegateChain, err = protocol.NewPublicKey(keyType, chain, false)
 		if err != nil {

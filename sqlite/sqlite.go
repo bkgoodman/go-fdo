@@ -1158,16 +1158,11 @@ func (db *DB) AddDelegateKey(name string, key crypto.PrivateKey, chain []*x509.C
 	if err != nil {
 		return err
 	}
-	//return db.insertOrIgnore(context.Background(), "delegate_keys", map[string]any{
 	return db.insert(context.Background(), "delegate_keys", map[string]any{
 		"pkcs8":      der,
 		"x509_chain": derEncode(chain),
 		"name":       name,
-	},
-		map[string]any{
-			"name": name,
-		},
-	)
+	}, []string{"name"})
 }
 
 func (db *DB) ListDelegateKeys() (names []string, err error) {
