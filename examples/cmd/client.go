@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -58,6 +57,7 @@ var (
 	echoCmds    bool
 	uploads     = make(fsVar)
 	wgetDir     string
+	fdoVersion  int
 )
 
 type fsVar map[string]string
@@ -74,7 +74,7 @@ func (files fsVar) String() string {
 }
 
 func (files fsVar) Set(paths string) error {
-	for _, path := range strings.Split(paths, ",") {
+	for path := range strings.SplitSeq(paths, ",") {
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return fmt.Errorf("[%q]: %w", path, err)
@@ -151,31 +151,17 @@ func init() {
 	clientFlags.Var(&uploads, "upload", "List of dirs and `files` to upload files from, "+
 		"comma-separated and/or flag provided multiple times (FSIM disabled if empty)")
 	clientFlags.StringVar(&wgetDir, "wget-dir", "", "A `dir` to wget files into (FSIM disabled if empty)")
+	clientFlags.IntVar(&fdoVersion, "fdo-version", 101, "FDO protocol version (101 or 200)")
 }
 
-func client() error {
+func client(ctx context.Context) error {
 	if debug {
 		level.Set(slog.LevelDebug)
 	}
 
-	// Catch interrupts
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt)
-	go func() {
-		defer signal.Stop(sigs)
-
-		select {
-		case <-ctx.Done():
-		case <-sigs:
-			cancel()
-		}
-	}()
-
 	// Perform DI if given a URL
 	if diURL != "" {
-		return di()
+		return di(ctx)
 	}
 
 	// Read device credential blob to configure client for TO1/TO2
@@ -222,7 +208,7 @@ func client() error {
 	return updateCred(*newDC)
 }
 
-func di() (err error) { //nolint:gocyclo
+func di(ctx context.Context) (err error) { //nolint:gocyclo
 	// Generate new key and secret
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
@@ -293,7 +279,7 @@ func di() (err error) { //nolint:gocyclo
 	default:
 		return fmt.Errorf("unsupported key encoding: %s", diKeyEnc)
 	}
-	cred, err := fdo.DI(context.TODO(), tlsTransport(diURL, nil), custom.DeviceMfgInfo{
+	cred, err := fdo.DI(ctx, tlsTransport(diURL, nil), custom.DeviceMfgInfo{
 		KeyType:      keyType,
 		KeyEncoding:  keyEncoding,
 		SerialNumber: strconv.FormatInt(sn.Int64(), 10),
@@ -344,7 +330,7 @@ TO1:
 
 		for _, url := range directive.URLs {
 			var err error
-			to1d, err = fdo.TO1(context.TODO(), tlsTransport(url.String(), nil), conf.Cred, conf.Key, nil)
+			to1d, err = fdo.TO1(ctx, tlsTransport(url.String(), nil), conf.Cred, conf.Key, nil)
 			if err != nil {
 				slog.Error("TO1 failed", "base URL", url.String(), "error", err)
 				continue
@@ -401,7 +387,10 @@ TO1:
 
 	// Try TO2 on each address only once
 	for _, baseURL := range to2URLs {
-		newDC := transferOwnership2(tlsTransport(baseURL, nil), to1d, conf)
+		// Use version-aware transport for TO2
+		version := protocol.Version(fdoVersion)
+		transport := tlsTransportWithVersion(baseURL, nil, version)
+		newDC := transferOwnership2(ctx, transport, to1d, conf)
 		if newDC != nil {
 			return newDC
 		}
@@ -410,7 +399,7 @@ TO1:
 	return nil
 }
 
-func transferOwnership2(transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], conf fdo.TO2Config) *fdo.DeviceCredential {
+func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], conf fdo.TO2Config) *fdo.DeviceCredential {
 	fsims := map[string]serviceinfo.DeviceModule{
 		"fido_alliance": &fsim.Interop{},
 	}
@@ -459,7 +448,14 @@ func transferOwnership2(transport fdo.Transport, to1d *cose.Sign1[protocol.To1d,
 	}
 	conf.DeviceModules = fsims
 
-	cred, err := fdo.TO2(context.TODO(), transport, to1d, conf)
+	// Call version-specific TO2 function
+	var cred *fdo.DeviceCredential
+	var err error
+	if fdoVersion == 200 {
+		cred, err = fdo.TO2v200(ctx, transport, to1d, conf)
+	} else {
+		cred, err = fdo.TO2(ctx, transport, to1d, conf)
+	}
 	if err != nil {
 		slog.Error("TO2 failed", "error", err)
 		return nil

@@ -15,6 +15,8 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -32,6 +34,10 @@ type State struct {
 		Key   crypto.Signer
 		Chain []*x509.Certificate
 	}
+	DelegateKeys map[string]struct {
+		Key   crypto.Signer
+		Chain []*x509.Certificate
+	}
 }
 
 // KeyTypeAndRsaBits identifies an owner/manufacturer key by its type and bit
@@ -41,8 +47,6 @@ type KeyTypeAndRsaBits struct {
 	RsaBits int
 }
 
-var _ fdo.RendezvousBlobPersistentState = (*State)(nil)
-var _ fdo.ManufacturerVoucherPersistentState = (*State)(nil)
 var _ fdo.OwnerVoucherPersistentState = (*State)(nil)
 var _ fdo.OwnerKeyPersistentState = (*State)(nil)
 
@@ -64,6 +68,10 @@ func NewState() (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	rsaDelegateKey, rsaDelegate, err := newDelegateChain(rsa2048Key, func() crypto.Signer { s, _ := rsa.GenerateKey(rand.Reader, 2048); return s })
+	if err != nil {
+		return nil, err
+	}
 	ec256Key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -72,11 +80,19 @@ func NewState() (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	ec256DelegateKey, ec256Delegate, err := newDelegateChain(ec256Key, func() crypto.Signer { s, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); return s })
+	if err != nil {
+		return nil, err
+	}
 	ec384Key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 	ec384Cert, err := newCA(ec384Key)
+	if err != nil {
+		return nil, err
+	}
+	ec384DelegateKey, ec384Delegate, err := newDelegateChain(ec384Key, func() crypto.Signer { s, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader); return s })
 	if err != nil {
 		return nil, err
 	}
@@ -95,15 +111,16 @@ func NewState() (*State, error) {
 			{protocol.Secp256r1KeyType, 0}:       {Key: ec256Key, Chain: []*x509.Certificate{ec256Cert}},
 			{protocol.Secp384r1KeyType, 0}:       {Key: ec384Key, Chain: []*x509.Certificate{ec384Cert}},
 		},
+		DelegateKeys: map[string]struct {
+			Key   crypto.Signer
+			Chain []*x509.Certificate
+		}{
+			"RSA2048RESTR": {Key: rsaDelegateKey, Chain: rsaDelegate},
+			"RSAPSS":       {Key: rsaDelegateKey, Chain: rsaDelegate},
+			"SECP256R1":    {Key: ec256DelegateKey, Chain: ec256Delegate},
+			"SECP384R1":    {Key: ec384DelegateKey, Chain: ec384Delegate},
+		},
 	}, nil
-}
-
-// NewVoucher creates and stores a voucher for a newly initialized device.
-// Note that the voucher may have entries if the server was configured for
-// auto voucher extension.
-func (s *State) NewVoucher(_ context.Context, ov *fdo.Voucher) error {
-	s.Vouchers[ov.Header.Val.GUID] = ov
-	return nil
 }
 
 // AddVoucher stores the voucher of a device owned by the service.
@@ -115,6 +132,9 @@ func (s *State) AddVoucher(_ context.Context, ov *fdo.Voucher) error {
 // ReplaceVoucher stores a new voucher, possibly deleting or marking the
 // previous voucher as replaced.
 func (s *State) ReplaceVoucher(_ context.Context, oldGUID protocol.GUID, ov *fdo.Voucher) error {
+	if len(ov.Entries) > 0 {
+		return fmt.Errorf("ReplaceVoucher must be called with a voucher having zero extensions")
+	}
 	delete(s.Vouchers, oldGUID)
 	s.Vouchers[ov.Header.Val.GUID] = ov
 	return nil
@@ -144,8 +164,13 @@ func (s *State) Voucher(_ context.Context, guid protocol.GUID) (*fdo.Voucher, er
 // its certificate chain. If key type is not RSAPKCS or RSAPSS then rsaBits
 // is ignored. Otherwise it must be either 2048 or 3072.
 func (s *State) OwnerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error) {
-	if keyType == protocol.Rsa2048RestrKeyType {
+	switch keyType {
+	case protocol.Secp256r1KeyType, protocol.Secp384r1KeyType:
+		rsaBits = 0
+	case protocol.Rsa2048RestrKeyType:
 		rsaBits = 2048
+	default:
+		// keep user selection
 	}
 	key, ok := s.OwnerKeys[KeyTypeAndRsaBits{keyType, rsaBits}]
 	if !ok {
@@ -154,6 +179,61 @@ func (s *State) OwnerKey(ctx context.Context, keyType protocol.KeyType, rsaBits 
 	return key.Key, key.Chain, nil
 }
 
+// DelegateKey returns the private key matching a given key type and
+// its certificate chain.
+func (s *State) DelegateKey(name string) (crypto.Signer, []*x509.Certificate, error) {
+	key, ok := s.DelegateKeys[name]
+	if !ok {
+		return nil, nil, fdo.ErrNotFound
+	}
+	return key.Key, key.Chain, nil
+}
+
+// TODO: Make things easier by using the same key for each cert in the chain
+func newDelegateChain(owner crypto.Signer, getNewKey func() crypto.Signer) (crypto.Signer, []*x509.Certificate, error) {
+	rootTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(111),
+		Issuer:                pkix.Name{CommonName: "DelegateRoot"},
+		Subject:               pkix.Name{CommonName: "DelegateRoot"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(30 * 360 * 24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_permitOnboardNewCred, fdo.OID_permitOnboardReuseCred, fdo.OID_permitOnboardFdoDisable, fdo.OID_permitRedirect},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, owner.Public(), owner)
+	rootCert, err := x509.ParseCertificate(der)
+
+	intermediateTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(222),
+		Subject:               pkix.Name{CommonName: "DelegateIntermediate"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(30 * 360 * 24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_permitOnboardNewCred, fdo.OID_permitOnboardReuseCred, fdo.OID_permitOnboardFdoDisable, fdo.OID_permitRedirect},
+	}
+	intermediateKey := getNewKey()
+	der, err = x509.CreateCertificate(rand.Reader, intermediateTemplate, rootTemplate, intermediateKey.Public(), owner)
+	intermediateCert, err := x509.ParseCertificate(der)
+
+	delegateTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(333),
+		Subject:      pkix.Name{CommonName: "DelegateCert"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour),
+
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OID_permitOnboardNewCred, fdo.OID_permitOnboardReuseCred, fdo.OID_permitOnboardFdoDisable, fdo.OID_permitRedirect},
+	}
+	delegateKey := getNewKey()
+	der, err = x509.CreateCertificate(rand.Reader, delegateTemplate, intermediateTemplate, delegateKey.Public(), intermediateKey)
+	delegateCert, err := x509.ParseCertificate(der)
+	return delegateKey, []*x509.Certificate{delegateCert, intermediateCert, rootCert}, err
+}
 func newCA(priv crypto.Signer) (*x509.Certificate, error) {
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
@@ -180,8 +260,8 @@ func newCA(priv crypto.Signer) (*x509.Certificate, error) {
 }
 
 // ManufacturerKey returns the signer of a given key type and its certificate
-// chain (required). If key type is not RSAPKCS or RSAPSS then rsaBits is
-// ignored. Otherwise it must be either 2048 or 3072.
+// chain. If key type is not RSAPKCS or RSAPSS then rsaBits is ignored.
+// Otherwise it must be either 2048 or 3072.
 func (s *State) ManufacturerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error) {
 	return s.OwnerKey(ctx, keyType, rsaBits)
 }

@@ -21,17 +21,27 @@ import (
 // DIServer implements the DI protocol.
 type DIServer[T any] struct {
 	Session  DISessionState
-	Vouchers ManufacturerVoucherPersistentState
+	Vouchers VoucherPersistentState
+
+	// FIXME: Should Reseller be used for a Resale method?
 
 	// SignDeviceCertChain creates a device certificate chain based on info
 	// provided in the DI.AppStart message.
 	SignDeviceCertificate func(*T) ([]*x509.Certificate, error)
 
 	// DeviceInfo returns the device info string to use for a given device,
-	// based on its self-reported info and certificate chain.
-	DeviceInfo func(context.Context, *T, []*x509.Certificate) (string, protocol.KeyType, protocol.KeyEncoding, error)
+	// based on its self-reported info and certificate chain (from
+	// SignDeviceCertificate). The PublicKey returned is for the DI server and
+	// must be the key that will be used for voucher extension.
+	DeviceInfo func(context.Context, *T, []*x509.Certificate) (info string, mfgPubKey protocol.PublicKey, _ error)
 
-	// Optional callback for before a new voucher is persisted.
+	// NOTE: BeforeVoucherPersist and AfterVoucherPersist are usability
+	// enhancements. The same functionality can be achieved by altering the
+	// implementation of `VoucherPersistentState.AddVoucher`.
+
+	// Optional callback for before a new voucher is persisted. This
+	// modification only applies to vouchers created with DI. Vouchers created
+	// at the end of TO2 will be persisted unmodified.
 	BeforeVoucherPersist func(context.Context, *Voucher) error
 
 	// Optional callback for immediately after a new voucher is persisted.
@@ -185,10 +195,15 @@ func (s *TO1Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessag
 
 // TO2Server implements the TO2 protocol.
 type TO2Server struct {
-	Session   TO2SessionState
-	Modules   serviceinfo.ModuleStateMachine
-	Vouchers  OwnerVoucherPersistentState
-	OwnerKeys OwnerKeyPersistentState
+	Session      TO2SessionState
+	Modules      serviceinfo.ModuleStateMachine
+	Vouchers     OwnerVoucherPersistentState
+	OwnerKeys    OwnerKeyPersistentState
+	DelegateKeys DelegateKeyPersistentState
+
+	// This field must be non-nil in order to use the Resale Protocol (see
+	// [TO2Server.Resell]).
+	VouchersForExtension VoucherReseller
 
 	// Choose the replacement rendezvous directives based on the current
 	// voucher of the onboarding device.
@@ -217,14 +232,28 @@ type TO2Server struct {
 	// is useful when it can help a well-behaved device communicate faster over
 	// a well understood network.
 	MaxDeviceServiceInfoSize func(context.Context, Voucher) (uint16, error)
+
+	// Use this delegate cert for onboarding (or empty string)
+	OnboardDelegate string
+
+	// Use this delegate cert for rendezvous (or empty string)
+	RvDelegate string
 }
 
 // Resell implements the FDO Resale Protocol by removing a voucher from
 // ownership, extending it to a new owner, and then returning it for
 // out-of-band transport.
+//
+// If an error occurs, the unextended voucher may be returned along with the
+// error. The caller should then retry extending the voucher or add it back to
+// persistent state to reverse the effects of the failed Resell call.
 func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner crypto.PublicKey, extra map[int][]byte) (*Voucher, error) {
+	if s.VouchersForExtension == nil {
+		return nil, fmt.Errorf("TO2 server is not configured for resale")
+	}
+
 	// Remove voucher from ownership of this service
-	ov, err := s.Vouchers.RemoveVoucher(ctx, guid)
+	ov, err := s.VouchersForExtension.RemoveVoucher(ctx, guid)
 	if err != nil {
 		return nil, fmt.Errorf("error untracking voucher for resale: %w", err)
 	}
@@ -236,8 +265,7 @@ func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner cr
 	}
 	ownerKey, _, err := s.OwnerKeys.OwnerKey(ctx, ownerPubKey.Type, ownerPubKey.RsaBits())
 	if err != nil {
-		_ = s.Vouchers.AddVoucher(ctx, ov)
-		return nil, fmt.Errorf("error getting key used to sign voucher: %w", err)
+		return ov, fmt.Errorf("error getting key used to sign voucher: %w", err)
 	}
 
 	// Extend voucher
@@ -253,8 +281,7 @@ func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner cr
 		err = fmt.Errorf("unsupported key type: %T", nextOwner)
 	}
 	if err != nil {
-		_ = s.Vouchers.AddVoucher(ctx, ov)
-		return nil, fmt.Errorf("error extending voucher to new owner: %w", err)
+		return ov, fmt.Errorf("error extending voucher to new owner: %w", err)
 	}
 
 	return extended, nil
@@ -270,6 +297,7 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 	// Handle each message type
 	var err error
 	switch msgType {
+	// FDO 1.01 TO2 messages
 	case protocol.TO2HelloDeviceMsgType:
 		respType = protocol.TO2ProveOVHdrMsgType
 		resp, err = s.proveOVHdr(ctx, msg)
@@ -292,6 +320,31 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 		s.Modules.CleanupModules(ctx)
 		respType = protocol.TO2Done2MsgType
 		resp, err = s.to2Done2(ctx, msg)
+
+	// FDO 2.0 TO2 messages
+	// Key difference: Device proves itself FIRST (anti-DoS)
+	case protocol.TO2HelloDeviceProbeMsgType:
+		respType = protocol.TO2HelloDeviceAck20MsgType
+		resp, err = s.helloDeviceAck20(ctx, msg)
+	case protocol.TO2ProveDevice20MsgType:
+		respType = protocol.TO2ProveOVHdr20MsgType
+		resp, err = s.proveOVHdr20(ctx, msg)
+	case protocol.TO2GetOVNextEntry20MsgType:
+		respType = protocol.TO2OVNextEntry20MsgType
+		resp, err = s.ovNextEntry20(ctx, msg)
+	case protocol.TO2DeviceSvcInfoRdy20MsgType:
+		respType = protocol.TO2SetupDevice20MsgType
+		resp, err = s.setupDevice20(ctx, msg)
+	case protocol.TO2DeviceSvcInfo20MsgType:
+		respType = protocol.TO2OwnerSvcInfo20MsgType
+		resp, err = s.ownerSvcInfo20(ctx, msg)
+		if err != nil {
+			s.Modules.CleanupModules(ctx)
+		}
+	case protocol.TO2Done20MsgType:
+		s.Modules.CleanupModules(ctx)
+		respType = protocol.TO2DoneAck20MsgType
+		resp, err = s.doneAck20(ctx, msg)
 	}
 
 	// Return response on success

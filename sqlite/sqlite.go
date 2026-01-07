@@ -64,6 +64,11 @@ func Init(db *sql.DB) error {
 			, x509_chain BLOB NOT NULL
 			, PRIMARY KEY(type, rsa_bits)
 			)`,
+		`CREATE TABLE IF NOT EXISTS delegate_keys
+			( name TEXT UNIQUE NOT NULL
+			, pkcs8 BLOB NOT NULL
+			, x509_chain BLOB 
+			)`,
 		`CREATE TABLE IF NOT EXISTS owner_keys
 			( type INTEGER NOT NULL
 			, pkcs8 BLOB NOT NULL
@@ -121,13 +126,12 @@ func Init(db *sql.DB) error {
 			, devmod_complete BOOLEAN CHECK (devmod_complete IN (0, 1))
 			, FOREIGN KEY(session) REFERENCES sessions(id) ON DELETE CASCADE
 			)`,
-		`CREATE TABLE IF NOT EXISTS mfg_vouchers
+		`CREATE TABLE IF NOT EXISTS vouchers
 			( guid BLOB PRIMARY KEY
+			, device_info TEXT NOT NULL
 			, cbor BLOB NOT NULL
-			)`,
-		`CREATE TABLE IF NOT EXISTS owner_vouchers
-			( guid BLOB PRIMARY KEY
-			, cbor BLOB NOT NULL
+			, created_at INTEGER NOT NULL /* Unix timestamp in microseconds */
+			, updated_at INTEGER NOT NULL /* Unix timestamp in microseconds */
 			)`,
 		`CREATE TABLE IF NOT EXISTS replacement_vouchers
 			( session BLOB UNIQUE NOT NULL
@@ -188,9 +192,9 @@ var _ interface {
 	fdo.TO1SessionState
 	fdo.TO2SessionState
 	fdo.RendezvousBlobPersistentState
-	fdo.ManufacturerVoucherPersistentState
 	fdo.OwnerVoucherPersistentState
 	fdo.OwnerKeyPersistentState
+	fdo.DelegateKeyPersistentState
 } = (*DB)(nil)
 
 const sessionIDSize = 16
@@ -528,8 +532,8 @@ func (db *DB) AddManufacturerKey(keyType protocol.KeyType, key crypto.PrivateKey
 }
 
 // ManufacturerKey returns the signer of a given key type and its certificate
-// chain (required). If key type is not RSAPKCS or RSAPSS then rsaBits is
-// ignored. Otherwise it must be either 2048 or 3072.
+// chain. If key type is not RSAPKCS or RSAPSS then rsaBits is ignored.
+// Otherwise it must be either 2048 or 3072.
 func (db *DB) ManufacturerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error) {
 	where := map[string]any{
 		"type": int(keyType),
@@ -816,57 +820,60 @@ func (db *DB) RvInfo(ctx context.Context) ([][]protocol.RvInstruction, error) {
 	return rvInfo, nil
 }
 
-// NewVoucher creates and stores a voucher for a newly initialized device.
-// Note that the voucher may have entries if the server was configured for
-// auto voucher extension.
-func (db *DB) NewVoucher(ctx context.Context, ov *fdo.Voucher) error {
-	data, err := cbor.Marshal(ov)
-	if err != nil {
-		return fmt.Errorf("error marshaling ownership voucher: %w", err)
-	}
-	table := "mfg_vouchers"
-	if len(ov.Entries) > 0 {
-		table = "owner_vouchers"
-	}
-	return db.insert(ctx, table, map[string]any{
-		"guid": ov.Header.Val.GUID[:],
-		"cbor": data,
-	}, nil)
-}
-
 // AddVoucher stores the voucher of a device owned by the service.
 func (db *DB) AddVoucher(ctx context.Context, ov *fdo.Voucher) error {
 	data, err := cbor.Marshal(ov)
 	if err != nil {
 		return fmt.Errorf("error marshaling ownership voucher: %w", err)
 	}
-	return db.insert(ctx, "owner_vouchers", map[string]any{
-		"guid": ov.Header.Val.GUID[:],
-		"cbor": data,
+	return db.insert(ctx, "vouchers", map[string]any{
+		"guid":        ov.Header.Val.GUID[:],
+		"device_info": ov.Header.Val.DeviceInfo,
+		"cbor":        data,
+		"created_at":  time.Now().Unix(),
+		"updated_at":  time.Now().Unix(),
 	}, nil)
 }
 
-// ReplaceVoucher stores a new voucher, deleting the previous voucher.
+// ReplaceVoucher stores a new voucher with zero extensions, possibly deleting
+// or marking the previous voucher as replaced.
 func (db *DB) ReplaceVoucher(ctx context.Context, guid protocol.GUID, ov *fdo.Voucher) error {
-	data, err := cbor.Marshal(ov)
-	if err != nil {
-		return fmt.Errorf("error marshaling ownership voucher: %w", err)
+	if len(ov.Entries) > 0 {
+		return fmt.Errorf("ReplaceVoucher must be called with a voucher having zero extensions")
 	}
-	return db.update(ctx, "owner_vouchers",
-		map[string]any{
-			"guid": ov.Header.Val.GUID[:],
-			"cbor": data,
-		},
-		map[string]any{
-			"guid": guid[:],
-		},
-	)
+
+	// NOTE: This should be a transaction, but that would break Cloudflare D1
+	// compatibility. Therefore, it is an allowed state to have both the
+	// replacement voucher and the previous voucher. An implementation that
+	// does not need to work with Cloudflare D1 should use a transaction.
+	if err := db.AddVoucher(ctx, ov); err != nil {
+		return err
+	}
+	removeErr := remove(db.debugCtx(ctx), db.db, "vouchers",
+		map[string]any{"guid": guid[:]}, nil)
+	if removeErr == nil {
+		return nil
+	}
+
+	// Use best effort to remove the replacement voucher that was added
+	// optimistically
+	if errors.Is(removeErr, context.Canceled) || errors.Is(removeErr, context.DeadlineExceeded) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+	}
+	if err := remove(db.debugCtx(ctx), db.db, "vouchers", map[string]any{"guid": ov.Header.Val.GUID[:]}, nil); err != nil {
+		// NOTE: This results in an invalid state. See note above.
+		debug(db.debugCtx(ctx), "error removing replacement voucher after failed original voucher removal: %v", err)
+	}
+	return removeErr
 }
 
-// RemoveVoucher untracks a voucher, deleting it, and returns it for extension.
+// RemoveVoucher untracks a voucher, whether extended or not, possibly by
+// deleting it or marking it as removed, and returns it for extension.
 func (db *DB) RemoveVoucher(ctx context.Context, guid protocol.GUID) (*fdo.Voucher, error) {
 	var data []byte
-	if err := remove(db.debugCtx(ctx), db.db, "owner_vouchers",
+	if err := remove(db.debugCtx(ctx), db.db, "vouchers",
 		map[string]any{"guid": guid[:]}, map[string]any{"cbor": &data}); err != nil {
 		return nil, err
 	}
@@ -884,7 +891,7 @@ func (db *DB) RemoveVoucher(ctx context.Context, guid protocol.GUID) (*fdo.Vouch
 // Voucher retrieves a voucher by GUID.
 func (db *DB) Voucher(ctx context.Context, guid protocol.GUID) (*fdo.Voucher, error) {
 	var data []byte
-	if err := db.query(ctx, "owner_vouchers", []string{"cbor"},
+	if err := db.query(ctx, "vouchers", []string{"cbor"},
 		map[string]any{"guid": guid[:]},
 		&data,
 	); err != nil {
@@ -1145,6 +1152,36 @@ func (db *DB) AddOwnerKey(keyType protocol.KeyType, key crypto.PrivateKey, chain
 	return db.insertOrIgnore(context.Background(), "owner_keys", kvs)
 }
 
+// AddDelegateKey to retrieve with [DB.DelegateKey].
+func (db *DB) AddDelegateKey(name string, key crypto.PrivateKey, chain []*x509.Certificate) error {
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return err
+	}
+	return db.insert(context.Background(), "delegate_keys", map[string]any{
+		"pkcs8":      der,
+		"x509_chain": derEncode(chain),
+		"name":       name,
+	}, []string{"name"})
+}
+
+func (db *DB) ListDelegateKeys() (names []string, err error) {
+	rows, err := db.db.Query("SELECT name from delegate_keys;")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return
+		}
+		names = append(names, name)
+	}
+	return
+}
+
 // OwnerKey returns the private key matching a given key type and optionally
 // its certificate chain. If key type is not RSAPKCS or RSAPSS then rsaBits
 // is ignored. Otherwise it must be either 2048 or 3072.
@@ -1178,6 +1215,35 @@ func (db *DB) OwnerKey(ctx context.Context, keyType protocol.KeyType, rsaBits in
 	chain, err := x509.ParseCertificates(certChainDer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing owner certificate chain: %w", err)
+	}
+
+	return key.(crypto.Signer), chain, nil
+}
+
+// Get a delegate cert by name
+func (db *DB) DelegateKey(keyName string) (crypto.Signer, []*x509.Certificate, error) {
+	var keyDer, certChainDer []byte
+	if err := db.query(context.Background(), "delegate_keys", []string{"pkcs8", "x509_chain"}, map[string]any{
+		"name": keyName,
+	}, &keyDer, &certChainDer); err != nil {
+		return nil, nil, fmt.Errorf("error querying delegate key [name=%s]: %w", keyName, err)
+	}
+	if keyDer == nil { // x509_chain may be NULL
+		return nil, nil, fdo.ErrNotFound
+	}
+	return returnDelegate(keyDer, certChainDer)
+}
+
+// Worker function for two functions above
+func returnDelegate(keyDer []byte, certChainDer []byte) (crypto.Signer, []*x509.Certificate, error) {
+	key, err := x509.ParsePKCS8PrivateKey(keyDer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error parsing delegate key: %w", err)
+	}
+
+	chain, err := x509.ParseCertificates(certChainDer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error parsing delegate certificate chain: %w", err)
 	}
 
 	return key.(crypto.Signer), chain, nil

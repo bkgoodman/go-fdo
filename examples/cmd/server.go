@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -46,25 +47,33 @@ import (
 var serverFlags = flag.NewFlagSet("server", flag.ContinueOnError)
 
 var (
-	useTLS           bool
-	addr             string
-	dbPath           string
-	dbPass           string
-	extAddr          string
-	to0Addr          string
-	to0GUID          string
-	resaleGUID       string
-	resaleKey        string
-	reuseCred        bool
-	rvBypass         bool
-	rvDelay          int
-	printOwnerPubKey string
-	importVoucher    string
-	cmdDate          bool
-	downloads        stringList
-	uploadDir        string
-	uploadReqs       stringList
-	wgets            stringList
+	useTLS               bool
+	addr                 string
+	dbPath               string
+	dbPass               string
+	extAddr              string
+	to0Addr              string
+	to0GUID              string
+	rvDelegate           string
+	onboardDelegate      string
+	resaleGUID           string
+	resaleKey            string
+	reuseCred            bool
+	rvBypass             bool
+	rvDelay              int
+	printOwnerPubKey     string
+	printOwnerPrivKey    string
+	printOwnerChain      string
+	printDelegateChain   string
+	printDelegatePrivKey string
+	ownerCert            bool
+	importVoucher        string
+	cmdDate              bool
+	downloads            stringList
+	uploadDir            string
+	uploadReqs           stringList
+	wgets                stringList
+	initOnly             bool
 )
 
 type stringList []string
@@ -82,6 +91,8 @@ func init() {
 	serverFlags.StringVar(&dbPath, "db", "", "SQLite database file path")
 	serverFlags.StringVar(&dbPass, "db-pass", "", "SQLite database encryption-at-rest passphrase")
 	serverFlags.BoolVar(&debug, "debug", debug, "Print HTTP contents")
+	serverFlags.StringVar(&rvDelegate, "rvDelegate", "", "Use delegate cert (name) for RV blob signing")
+	serverFlags.StringVar(&onboardDelegate, "onboardDelegate", "", "Use delegate cert (name) for TO2")
 	serverFlags.StringVar(&to0Addr, "to0", "", "Rendezvous server `addr`ess to register RV blobs (disables self-registration)")
 	serverFlags.StringVar(&to0GUID, "to0-guid", "", "Device `guid` to immediately register an RV blob (requires to0 flag)")
 	serverFlags.StringVar(&extAddr, "ext-http", "", "External `addr`ess devices should connect to (default \"127.0.0.1:${LISTEN_PORT}\")")
@@ -90,18 +101,22 @@ func init() {
 	serverFlags.StringVar(&resaleKey, "resale-key", "", "The `path` to a PEM-encoded x.509 public key for the next owner")
 	serverFlags.BoolVar(&reuseCred, "reuse-cred", false, "Perform the Credential Reuse Protocol in TO2")
 	serverFlags.BoolVar(&insecureTLS, "insecure-tls", false, "Listen with a self-signed TLS certificate")
+	serverFlags.BoolVar(&ownerCert, "owner-certs", false, "Generate Owner Certificatats (in addition to keys)")
 	serverFlags.BoolVar(&rvBypass, "rv-bypass", false, "Skip TO1")
 	serverFlags.IntVar(&rvDelay, "rv-delay", 0, "Delay TO1 by N `seconds`")
 	serverFlags.StringVar(&printOwnerPubKey, "print-owner-public", "", "Print owner public key of `type` and exit")
+	serverFlags.StringVar(&printOwnerPrivKey, "print-owner-private", "", "Print owner private key of `type` and exit")
+	serverFlags.StringVar(&printOwnerChain, "print-owner-chain", "", "Print owner chain of `type` and exit")
 	serverFlags.StringVar(&importVoucher, "import-voucher", "", "Import a PEM encoded voucher file at `path`")
 	serverFlags.BoolVar(&cmdDate, "command-date", false, "Use fdo.command FSIM to have device run \"date +%s\"")
 	serverFlags.Var(&downloads, "download", "Use fdo.download FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
 	serverFlags.Var(&uploadReqs, "upload", "Use fdo.upload FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.Var(&wgets, "wget", "Use fdo.wget FSIM for each `url` (flag may be used multiple times)")
+	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
-func server() error { //nolint:gocyclo
+func server(ctx context.Context) error { //nolint:gocyclo
 	if debug {
 		level.Set(slog.LevelDebug)
 	}
@@ -124,12 +139,20 @@ func server() error { //nolint:gocyclo
 
 	// If printing owner public key, do so and exit
 	if printOwnerPubKey != "" {
-		return doPrintOwnerPubKey(state)
+		return doPrintOwnerPubKey(ctx, state)
+	}
+
+	if printOwnerPrivKey != "" {
+		return doPrintOwnerPrivKey(ctx, state)
+	}
+
+	if printOwnerChain != "" {
+		return doPrintOwnerChain(ctx, state)
 	}
 
 	// If importing a voucher, do so and exit
 	if importVoucher != "" {
-		return doImportVoucher(state)
+		return doImportVoucher(ctx, state)
 	}
 
 	// Normalize address flags
@@ -154,15 +177,15 @@ func server() error { //nolint:gocyclo
 
 	// Invoke TO0 client if a GUID is specified
 	if to0GUID != "" {
-		return registerRvBlob(state)
+		return registerRvBlob(ctx, state)
 	}
 
 	// Invoke resale protocol if a GUID is specified
 	if resaleGUID != "" {
-		return resell(state)
+		return resell(ctx, state)
 	}
 
-	return serveHTTP(rvInfo, state)
+	return serveHTTP(ctx, rvInfo, state)
 }
 
 func generateKeys(state *sqlite.DB) error { //nolint:gocyclo
@@ -251,34 +274,65 @@ func generateKeys(state *sqlite.DB) error { //nolint:gocyclo
 	if err != nil {
 		return err
 	}
-	if err := state.AddOwnerKey(protocol.Rsa2048RestrKeyType, rsa2048OwnerKey, nil); err != nil {
+
+	// Generate owner certificates if requested
+	var rsa2048OwnerCert, rsa3072OwnerCert, ec256OwnerCert, ec384OwnerCert []*x509.Certificate
+	if ownerCert {
+		rsa2048OwnerCert, err = generateCA(rsa2048OwnerKey)
+		if err != nil {
+			return err
+		}
+		rsa3072OwnerCert, err = generateCA(rsa3072OwnerKey)
+		if err != nil {
+			return err
+		}
+		ec256OwnerCert, err = generateCA(ec256OwnerKey)
+		if err != nil {
+			return err
+		}
+		ec384OwnerCert, err = generateCA(ec384OwnerKey)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := state.AddOwnerKey(protocol.Rsa2048RestrKeyType, rsa2048OwnerKey, rsa2048OwnerCert); err != nil {
 		return err
 	}
-	if err := state.AddOwnerKey(protocol.RsaPkcsKeyType, rsa3072OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.RsaPkcsKeyType, rsa3072OwnerKey, rsa3072OwnerCert); err != nil {
 		return err
 	}
-	if err := state.AddOwnerKey(protocol.RsaPssKeyType, rsa3072OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.RsaPssKeyType, rsa3072OwnerKey, rsa3072OwnerCert); err != nil {
 		return err
 	}
-	if err := state.AddOwnerKey(protocol.Secp256r1KeyType, ec256OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.Secp256r1KeyType, ec256OwnerKey, ec256OwnerCert); err != nil {
 		return err
 	}
-	if err := state.AddOwnerKey(protocol.Secp384r1KeyType, ec384OwnerKey, nil); err != nil {
+	if err := state.AddOwnerKey(protocol.Secp384r1KeyType, ec384OwnerKey, ec384OwnerCert); err != nil {
 		return err
 	}
 	return nil
 }
 
-func serveHTTP(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) error {
+func serveHTTP(ctx context.Context, rvInfo [][]protocol.RvInstruction, state *sqlite.DB) error {
 	// Create FDO responder
-	handler, err := newHandler(rvInfo, state)
+	err := generateKeys(state)
+	if err != nil {
+		return fmt.Errorf("error generating keys: %v", err)
+	}
+
+	if initOnly {
+		return nil
+	}
+
+	handler, err := newHandler(ctx, rvInfo, state)
 	if err != nil {
 		return err
 	}
 
 	// Handle messages
 	mux := http.NewServeMux()
-	mux.Handle("POST /fdo/101/msg/{msg}", handler)
+	mux.Handle("POST /fdo/{fdoVer}/msg/{msg}", handler)
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 3 * time.Second,
@@ -298,15 +352,43 @@ func serveHTTP(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) error {
 	return srv.Serve(lis)
 }
 
-func doPrintOwnerPubKey(state *sqlite.DB) error {
+func printCert(cert *x509.Certificate) {
+	var pemData bytes.Buffer
+	pemBlock := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert.Raw,
+	}
+	if err := pem.Encode(&pemData, pemBlock); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to encode certificate: %v\n", err)
+		return
+	}
+
+	fmt.Println(pemData.String())
+}
+
+func doPrintOwnerChain(ctx context.Context, state *sqlite.DB) error {
+	keyType, err := protocol.ParseKeyType(printOwnerChain)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	_, chain, err := state.OwnerKey(ctx, keyType, 3072)
+	if err != nil {
+		return err
+	}
+	fmt.Println(fdo.CertChainToString("CERTIFICATE", chain))
+	return nil
+}
+
+func doPrintOwnerPubKey(ctx context.Context, state *sqlite.DB) error {
 	keyType, err := protocol.ParseKeyType(printOwnerPubKey)
 	if err != nil {
 		return fmt.Errorf("%w: see usage", err)
 	}
-	key, _, err := state.OwnerKey(context.Background(), keyType, 3072) // Always use 3072-bit for RSA PKCS/PSS
+	key, _, err := state.OwnerKey(ctx, keyType, 3072) // Always use 3072-bit for RSA PKCS/PSS
 	if err != nil {
 		return err
 	}
+	fmt.Printf("%s\n", fdo.KeyToString(key.Public()))
 	der, err := x509.MarshalPKIXPublicKey(key.Public())
 	if err != nil {
 		return err
@@ -317,7 +399,42 @@ func doPrintOwnerPubKey(state *sqlite.DB) error {
 	})
 }
 
-func doImportVoucher(state *sqlite.DB) error {
+func doPrintOwnerPrivKey(ctx context.Context, state *sqlite.DB) error {
+	var pemBlock *pem.Block
+	keyType, err := protocol.ParseKeyType(printOwnerPrivKey)
+	if err != nil {
+		return fmt.Errorf("%w: see usage", err)
+	}
+	key, _, err := state.OwnerKey(ctx, keyType, 3072)
+	fmt.Printf("Key is %T %v\n", key, key)
+	if err != nil {
+		return err
+	}
+
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		der := x509.MarshalPKCS1PrivateKey(k)
+		pemBlock = &pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: der,
+		}
+	case *ecdsa.PrivateKey:
+		der, err := x509.MarshalECPrivateKey(k)
+		if err != nil {
+			return err
+		}
+		pemBlock = &pem.Block{
+			Type:  "EC PRIVATE KEY",
+			Bytes: der,
+		}
+	default:
+		return fmt.Errorf("unknown owner key type %T", key)
+	}
+
+	return pem.Encode(os.Stdout, pemBlock)
+}
+
+func doImportVoucher(ctx context.Context, state *sqlite.DB) error {
 	// Parse voucher
 	pemVoucher, err := os.ReadFile(filepath.Clean(importVoucher))
 	if err != nil {
@@ -340,7 +457,7 @@ func doImportVoucher(state *sqlite.DB) error {
 	if err != nil {
 		return fmt.Errorf("error parsing owner public key from voucher: %w", err)
 	}
-	ownerKey, _, err := state.OwnerKey(context.Background(), ov.Header.Val.ManufacturerKey.Type, 3072) // Always use 3072-bit for RSA PKCS/PSS
+	ownerKey, _, err := state.OwnerKey(ctx, ov.Header.Val.ManufacturerKey.Type, 3072) // Always use 3072-bit for RSA PKCS/PSS
 	if err != nil {
 		return fmt.Errorf("error getting owner key: %w", err)
 	}
@@ -349,7 +466,7 @@ func doImportVoucher(state *sqlite.DB) error {
 	}
 
 	// Store voucher
-	return state.AddVoucher(context.Background(), &ov)
+	return state.AddVoucher(ctx, &ov)
 }
 
 func to0AddrToRvInfo() ([][]protocol.RvInstruction, error) {
@@ -420,7 +537,7 @@ func extAddrToRvInfo() ([][]protocol.RvInstruction, error) {
 	return rvInfo, nil
 }
 
-func registerRvBlob(state *sqlite.DB) error {
+func registerRvBlob(ctx context.Context, state *sqlite.DB) error {
 	if to0Addr == "" {
 		return fmt.Errorf("to0-guid depends on to0 flag being set")
 	}
@@ -463,9 +580,10 @@ func registerRvBlob(state *sqlite.DB) error {
 
 	// Register RV blob with RV server
 	refresh, err := (&fdo.TO0Client{
-		Vouchers:  state,
-		OwnerKeys: state,
-	}).RegisterBlob(context.Background(), tlsTransport(to0Addr, nil), guid, to2Addrs)
+		Vouchers:     state,
+		OwnerKeys:    state,
+		DelegateKeys: state,
+	}).RegisterBlob(ctx, tlsTransport(to0Addr, nil), guid, to2Addrs, rvDelegate)
 	if err != nil {
 		return fmt.Errorf("error performing to0: %w", err)
 	}
@@ -474,7 +592,7 @@ func registerRvBlob(state *sqlite.DB) error {
 	return nil
 }
 
-func resell(state *sqlite.DB) error {
+func resell(ctx context.Context, state *sqlite.DB) error {
 	// Parse resale-guid flag
 	guidBytes, err := hex.DecodeString(strings.ReplaceAll(resaleGUID, "-", ""))
 	if err != nil {
@@ -505,10 +623,14 @@ func resell(state *sqlite.DB) error {
 
 	// Perform resale protocol
 	extended, err := (&fdo.TO2Server{
-		Vouchers:  state,
-		OwnerKeys: state,
-	}).Resell(context.TODO(), guid, nextOwner, nil)
+		Vouchers:        state,
+		OwnerKeys:       state,
+		DelegateKeys:    state,
+		OnboardDelegate: onboardDelegate,
+		RvDelegate:      rvDelegate,
+	}).Resell(ctx, guid, nextOwner, nil)
 	if err != nil {
+		// TODO: If extended != nil, then call AddVoucher to restore state
 		return fmt.Errorf("resale protocol: %w", err)
 	}
 	ovBytes, err := cbor.Marshal(extended)
@@ -529,7 +651,8 @@ func mustMarshal(v any) []byte {
 	return data
 }
 
-func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport.Handler, error) {
+//nolint:gocyclo
+func newHandler(ctx context.Context, rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport.Handler, error) {
 	aio := fdo.AllInOne{
 		DIAndOwner:         state,
 		RendezvousAndOwner: withOwnerAddrs{state, rvInfo},
@@ -543,14 +666,32 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 		autoTO0 = aio.RegisterOwnerAddr
 	}
 
+	// Use Manufacturer key as device certificate authority
+	deviceCAKey, deviceCAChain, err := state.ManufacturerKey(ctx, protocol.Secp384r1KeyType, 0)
+	if err != nil {
+		return nil, fmt.Errorf("error getting manufacturer key for use as device certificate authority: %w", err)
+	}
+
 	return &transport.Handler{
 		Tokens: state,
 		DIResponder: &fdo.DIServer[custom.DeviceMfgInfo]{
 			Session:               state,
 			Vouchers:              state,
-			SignDeviceCertificate: custom.SignDeviceCertificate(state),
-			DeviceInfo: func(_ context.Context, info *custom.DeviceMfgInfo, _ []*x509.Certificate) (string, protocol.KeyType, protocol.KeyEncoding, error) {
-				return info.DeviceInfo, info.KeyType, info.KeyEncoding, nil
+			SignDeviceCertificate: custom.SignDeviceCertificate(deviceCAKey, deviceCAChain),
+			DeviceInfo: func(ctx context.Context, info *custom.DeviceMfgInfo, _ []*x509.Certificate) (string, protocol.PublicKey, error) {
+				// Always use RSA 3072 for non 2048 restricted key type. In a
+				// real implementation, the manufacturing server must ensure
+				// that the device has the capability to process such crypto
+				// (including SHA-384 hashes).
+				mfgKey, mfgChain, err := state.ManufacturerKey(ctx, info.KeyType, 3072)
+				if err != nil {
+					return "", protocol.PublicKey{}, err
+				}
+				mfgPubKey, err := encodePublicKey(info.KeyType, info.KeyEncoding, mfgKey.Public(), mfgChain)
+				if err != nil {
+					return "", protocol.PublicKey{}, err
+				}
+				return info.DeviceInfo, *mfgPubKey, nil
 			},
 			BeforeVoucherPersist: autoExtend,
 			AfterVoucherPersist:  autoTO0,
@@ -569,7 +710,10 @@ func newHandler(rvInfo [][]protocol.RvInstruction, state *sqlite.DB) (*transport
 			Modules:         moduleStateMachines{DB: state, states: make(map[string]*moduleStateMachineState)},
 			Vouchers:        state,
 			OwnerKeys:       state,
+			DelegateKeys:    state,
 			RvInfo:          func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) { return rvInfo, nil },
+			OnboardDelegate: onboardDelegate,
+			RvDelegate:      rvDelegate,
 			ReuseCredential: func(context.Context, fdo.Voucher) (bool, error) { return reuseCred, nil },
 		},
 	}, nil
@@ -605,6 +749,32 @@ func (s withOwnerAddrs) OwnerAddrs(context.Context, fdo.Voucher) ([]protocol.RvT
 		}
 	}
 	return autoTO0Addrs, 0, nil
+}
+
+func encodePublicKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding, pub crypto.PublicKey, chain []*x509.Certificate) (*protocol.PublicKey, error) {
+	if pub == nil && len(chain) > 0 {
+		pub = chain[0].PublicKey
+	}
+	if pub == nil {
+		return nil, fmt.Errorf("no key to encode")
+	}
+
+	switch keyEncoding {
+	case protocol.X509KeyEnc, protocol.CoseKeyEnc:
+		// Intentionally panic if pub is not the correct key type
+		switch keyType {
+		case protocol.Secp256r1KeyType, protocol.Secp384r1KeyType:
+			return protocol.NewPublicKey(keyType, pub.(*ecdsa.PublicKey), keyEncoding == protocol.CoseKeyEnc)
+		case protocol.Rsa2048RestrKeyType, protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+			return protocol.NewPublicKey(keyType, pub.(*rsa.PublicKey), keyEncoding == protocol.CoseKeyEnc)
+		default:
+			return nil, fmt.Errorf("unsupported key type: %s", keyType)
+		}
+	case protocol.X5ChainKeyEnc:
+		return protocol.NewPublicKey(keyType, chain, false)
+	default:
+		return nil, fmt.Errorf("unsupported key encoding: %s", keyEncoding)
+	}
 }
 
 type moduleStateMachines struct {

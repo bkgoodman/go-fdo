@@ -33,6 +33,7 @@ import (
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/blob"
 	"github.com/fido-device-onboard/go-fdo/cbor"
+	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/custom"
 	"github.com/fido-device-onboard/go-fdo/fdotest/internal/memory"
 	"github.com/fido-device-onboard/go-fdo/fdotest/internal/token"
@@ -43,11 +44,31 @@ import (
 
 const timeout = 10 * time.Second
 
+// runTO2 calls the appropriate TO2 function based on protocol version
+func runTO2(ctx context.Context, transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], config fdo.TO2Config, version protocol.Version) (*fdo.DeviceCredential, error) {
+	if version == protocol.Version200 {
+		return fdo.TO2v200(ctx, transport, to1d, config)
+	}
+	return fdo.TO2(ctx, transport, to1d, config)
+}
+
 // Config provides options to modify how the test suite runs.
 type Config struct {
 	// If state is nil, then an in-memory implementation will be used. This is
 	// useful for only testing service info modules.
 	State AllServerState
+
+	// If both key and chain are given, DeviceCAKey and DeviceCAChain will be
+	// used to sign all CSRs in the DI protocol.
+	DeviceCAKey   crypto.Signer
+	DeviceCAChain []*x509.Certificate
+
+	// Explicit disable for cases such as TPM simulators
+	UnsupportedRSA3072 bool
+
+	// Version specifies the FDO protocol version to test (101 or 200).
+	// Defaults to 101 if not set.
+	Version protocol.Version
 
 	// If NewCredential is non-nil, then it will be used to create and format
 	// the device credential. Otherwise the blob package will be used.
@@ -118,73 +139,70 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 		}
 	}
 
+	// Generate Device Certificate Authority if not given in config
+	deviceCAKey, deviceCAChain := conf.DeviceCAKey, conf.DeviceCAChain
+	if deviceCAKey == nil || len(deviceCAChain) == 0 {
+		var err error
+		deviceCAKey, err = rsa.GenerateKey(rand.Reader, 3072)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := &x509.Certificate{
+			SerialNumber:          big.NewInt(1),
+			Subject:               pkix.Name{CommonName: "Test CA"},
+			NotBefore:             time.Now(),
+			NotAfter:              time.Now().Add(30 * 365 * 24 * time.Hour),
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, deviceCAKey.Public(), deviceCAKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deviceCAChain = []*x509.Certificate{cert}
+	}
+
 	diResponder := &fdo.DIServer[custom.DeviceMfgInfo]{
-		Session:  conf.State,
-		Vouchers: conf.State,
-		SignDeviceCertificate: func(info *custom.DeviceMfgInfo) ([]*x509.Certificate, error) {
-			// Validate device info
-			csr := x509.CertificateRequest(info.CertInfo)
-			if err := csr.CheckSignature(); err != nil {
-				return nil, fmt.Errorf("invalid CSR: %w", err)
+		Session:               conf.State,
+		Vouchers:              conf.State,
+		SignDeviceCertificate: custom.SignDeviceCertificate(deviceCAKey, deviceCAChain),
+		DeviceInfo: func(ctx context.Context, info *custom.DeviceMfgInfo, devChain []*x509.Certificate) (string, protocol.PublicKey, error) {
+			rsaBits := 3072
+			if conf.UnsupportedRSA3072 {
+				rsaBits = 2048
+			}
+			mfgKey, mfgChain, err := conf.State.ManufacturerKey(ctx, info.KeyType, rsaBits)
+			if err != nil {
+				return "", protocol.PublicKey{}, fmt.Errorf("error getting manufacturer key [type=%s]: %w", info.KeyType, err)
 			}
 
-			// Recommended configurations (see section 3.3.2) have matching
-			// strengths between device and owner attestation keys and
-			// therefore the RSA key size should match the device public key or
-			// should be 2048 for secp256r1 and 3072 for secp384r1
-			var rsaBits int
-			if info.KeyType == protocol.Rsa2048RestrKeyType || info.KeyType == protocol.RsaPkcsKeyType || info.KeyType == protocol.RsaPssKeyType {
-				switch pub := csr.PublicKey.(type) {
-				case *rsa.PublicKey:
-					rsaBits = pub.Size() * 8
-				case *ecdsa.PublicKey:
-					switch pub.Curve {
-					case elliptic.P256():
-						rsaBits = 2048
-					case elliptic.P384():
-						rsaBits = 3072
-					default:
-						return nil, fmt.Errorf("device key uses unsupported EC curve: %s", pub.Curve.Params().Name)
-					}
+			var mfgPubKey *protocol.PublicKey
+			switch info.KeyEncoding {
+			case protocol.X509KeyEnc, protocol.CoseKeyEnc:
+				// Intentionally panic if pub is not the correct key type
+				switch info.KeyType {
+				case protocol.Secp256r1KeyType, protocol.Secp384r1KeyType:
+					mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgKey.Public().(*ecdsa.PublicKey), info.KeyEncoding == protocol.CoseKeyEnc)
+				case protocol.Rsa2048RestrKeyType, protocol.RsaPkcsKeyType, protocol.RsaPssKeyType:
+					mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgKey.Public().(*rsa.PublicKey), info.KeyEncoding == protocol.CoseKeyEnc)
 				default:
-					return nil, fmt.Errorf("device key type is unsupported")
+					err = fmt.Errorf("unsupported key type: %s", info.KeyType)
 				}
+			case protocol.X5ChainKeyEnc:
+				mfgPubKey, err = protocol.NewPublicKey(info.KeyType, mfgChain, false)
+			default:
+				err = fmt.Errorf("unsupported key encoding: %s", info.KeyEncoding)
+			}
+			if err != nil {
+				return "", protocol.PublicKey{}, err
 			}
 
-			// Sign CSR
-			key, chain, err := conf.State.ManufacturerKey(context.Background(), info.KeyType, rsaBits)
-			if err != nil {
-				var unsupportedErr fdo.ErrUnsupportedKeyType
-				if errors.As(err, &unsupportedErr) {
-					return nil, unsupportedErr
-				}
-				return nil, fmt.Errorf("error retrieving manufacturer key [type=%s,bits=%d]: %w", info.KeyType, rsaBits, err)
-			}
-			serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-			serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-			if err != nil {
-				return nil, fmt.Errorf("error generating certificate serial number: %w", err)
-			}
-			template := &x509.Certificate{
-				SerialNumber: serialNumber,
-				Issuer:       chain[0].Subject,
-				Subject:      csr.Subject,
-				NotBefore:    time.Now(),
-				NotAfter:     time.Now().Add(30 * 360 * 24 * time.Hour), // Matches Java impl
-				KeyUsage:     x509.KeyUsageDigitalSignature,
-			}
-			der, err := x509.CreateCertificate(rand.Reader, template, chain[0], csr.PublicKey, key)
-			if err != nil {
-				return nil, fmt.Errorf("error signing CSR: %w", err)
-			}
-			cert, err := x509.ParseCertificate(der)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing signed device cert: %w", err)
-			}
-			chain = append([]*x509.Certificate{cert}, chain...)
-			return chain, nil
+			return "test_device", *mfgPubKey, nil
 		},
-		BeforeVoucherPersist: fdo.AllInOne{DIAndOwner: conf.State}.Extend,
 		RvInfo: func(context.Context, *fdo.Voucher) ([][]protocol.RvInstruction, error) {
 			return [][]protocol.RvInstruction{}, nil
 		},
@@ -217,8 +235,10 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				}
 			},
 		},
-		Vouchers:  conf.State,
-		OwnerKeys: conf.State,
+		Vouchers:             conf.State,
+		OwnerKeys:            conf.State,
+		DelegateKeys:         conf.State,
+		VouchersForExtension: conf.State,
 		RvInfo: func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) {
 			return [][]protocol.RvInstruction{}, nil
 		},
@@ -275,10 +295,6 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 		},
 	} {
 		t.Run(fmt.Sprintf("Key %q Encoding %q Exchange %q Cipher %q", table.keyType, table.keyEncoding, table.keyExchange, table.cipherSuite), func(t *testing.T) {
-			diResponder.DeviceInfo = func(context.Context, *custom.DeviceMfgInfo, []*x509.Certificate) (string, protocol.KeyType, protocol.KeyEncoding, error) {
-				return "test_device", table.keyType, table.keyEncoding, nil
-			}
-
 			newCredential := func(keyType protocol.KeyType) (hmacSha256, hmacSha384 hash.Hash, key crypto.Signer, toDeviceCred func(fdo.DeviceCredential) any) {
 				secret := make([]byte, 32)
 				if _, err := rand.Read(secret); err != nil {
@@ -341,40 +357,46 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 			var cred *fdo.DeviceCredential
 
 			t.Run("Device Initialization", func(t *testing.T) {
-				// Generate Java implementation-compatible mfg string
-				csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-					Subject:            pkix.Name{CommonName: "device.go-fdo"},
-					SignatureAlgorithm: sigAlg,
-				}, key)
-				if err != nil {
-					t.Fatalf("error creating CSR for device certificate chain: %v", err)
-				}
-				csr, err := x509.ParseCertificateRequest(csrDER)
-				if err != nil {
-					t.Fatalf("error parsing CSR for device certificate chain: %v", err)
+				test := func(t *testing.T) {
+					// Generate Java implementation-compatible mfg string
+					csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+						Subject:            pkix.Name{CommonName: "device.go-fdo"},
+						SignatureAlgorithm: sigAlg,
+					}, key)
+					if err != nil {
+						t.Fatalf("error creating CSR for device certificate chain: %v", err)
+					}
+					csr, err := x509.ParseCertificateRequest(csrDER)
+					if err != nil {
+						t.Fatalf("error parsing CSR for device certificate chain: %v", err)
+					}
+
+					// Call the DI server
+					serial := make([]byte, 10)
+					if _, err := rand.Read(serial); err != nil {
+						t.Fatalf("error generating serial: %v", err)
+					}
+					cred, err = fdo.DI(context.TODO(), transport, custom.DeviceMfgInfo{
+						KeyType:      table.keyType,
+						KeyEncoding:  table.keyEncoding,
+						SerialNumber: hex.EncodeToString(serial),
+						DeviceInfo:   "gotest",
+						CertInfo:     cbor.X509CertificateRequest(*csr),
+					}, fdo.DIConfig{
+						HmacSha256: hmacSha256,
+						HmacSha384: hmacSha384,
+						Key:        key,
+						PSS:        table.keyType == protocol.RsaPssKeyType,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("Credential: %s", toDeviceCred(*cred))
 				}
 
-				// Call the DI server
-				serial := make([]byte, 10)
-				if _, err := rand.Read(serial); err != nil {
-					t.Fatalf("error generating serial: %v", err)
-				}
-				cred, err = fdo.DI(context.TODO(), transport, custom.DeviceMfgInfo{
-					KeyType:      table.keyType,
-					KeyEncoding:  table.keyEncoding,
-					SerialNumber: hex.EncodeToString(serial),
-					DeviceInfo:   "gotest",
-					CertInfo:     cbor.X509CertificateRequest(*csr),
-				}, fdo.DIConfig{
-					HmacSha256: hmacSha256,
-					HmacSha384: hmacSha384,
-					Key:        key,
-					PSS:        table.keyType == protocol.RsaPssKeyType,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Logf("Credential: %s", toDeviceCred(*cred))
+				t.Run("without auto-extend", test)
+				diResponder.BeforeVoucherPersist = fdo.AllInOne{DIAndOwner: conf.State}.Extend
+				t.Run("with auto-extend", test)
 			})
 
 			t.Run("Transfer Ownership 0", func(t *testing.T) {
@@ -396,7 +418,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						Port:              8080,
 						TransportProtocol: protocol.HTTPTransport,
 					},
-				})
+				}, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -418,7 +440,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				}
 				t.Logf("RV Blob: %+v", to1d)
 
-				cred, err = fdo.TO2(ctx, transport, to1d, fdo.TO2Config{
+				cred, err = runTO2(ctx, transport, to1d, fdo.TO2Config{
 					Cred:       *cred,
 					HmacSha256: hmacSha256,
 					HmacSha384: hmacSha384,
@@ -435,7 +457,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 					KeyExchange:          table.keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
-				})
+				}, conf.Version)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -446,11 +468,25 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				if cred == nil {
 					t.Fatal("cred not set due to previous failure")
 				}
+				rsaBits := 3072
+				if conf.UnsupportedRSA3072 {
+					rsaBits = 2048
+				}
+				nextOwner, _, err := to2Responder.OwnerKeys.OwnerKey(t.Context(), table.keyType, rsaBits)
+				if err != nil {
+					t.Fatalf("could not get owner key for voucher extension: %v", err)
+				}
+				ov, err := to2Responder.Resell(t.Context(), cred.GUID, nextOwner.Public(), nil)
+				if err != nil {
+					t.Fatalf("could not extend voucher from previous onboarding: %v", err)
+				}
+				if err := to2Responder.Vouchers.AddVoucher(t.Context(), ov); err != nil {
+					t.Fatalf("could not add voucher for TO2: %v", err)
+				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
-				var err error
-				cred, err = fdo.TO2(ctx, transport, nil, fdo.TO2Config{
+				cred, err = runTO2(ctx, transport, nil, fdo.TO2Config{
 					Cred:       *cred,
 					HmacSha256: hmacSha256,
 					HmacSha384: hmacSha384,
@@ -467,7 +503,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 					KeyExchange:          table.keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
-				})
+				}, conf.Version)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -478,10 +514,25 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				if cred == nil {
 					t.Fatal("cred not set due to previous failure")
 				}
+				rsaBits := 3072
+				if conf.UnsupportedRSA3072 {
+					rsaBits = 2048
+				}
+				nextOwner, _, err := to2Responder.OwnerKeys.OwnerKey(t.Context(), table.keyType, rsaBits)
+				if err != nil {
+					t.Fatalf("could not get owner key for voucher extension: %v", err)
+				}
+				ov, err := to2Responder.Resell(t.Context(), cred.GUID, nextOwner.Public(), nil)
+				if err != nil {
+					t.Fatalf("could not extend voucher from previous onboarding: %v", err)
+				}
+				if err := to2Responder.Vouchers.AddVoucher(t.Context(), ov); err != nil {
+					t.Fatalf("could not add voucher for TO2: %v", err)
+				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
-				newCred, err := fdo.TO2(ctx, transport, nil, fdo.TO2Config{
+				cred, err = runTO2(ctx, transport, nil, fdo.TO2Config{
 					Cred:       *cred,
 					HmacSha256: hmacSha256,
 					HmacSha384: hmacSha384,
@@ -499,7 +550,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 					KeyExchange:          table.keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
-				})
+				}, conf.Version)
 				if conf.CustomExpect != nil {
 					conf.CustomExpect(t, err)
 					if err != nil {
@@ -509,7 +560,6 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 					t.Fatal(err)
 				}
 				t.Logf("New credential: %s", toDeviceCred(*cred))
-				cred = newCred
 			})
 		})
 	}
@@ -519,8 +569,11 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 // relying on CleanupModules to be called to clear the state before the next
 // usage.
 type to2ModuleStateMachine struct {
-	Session      fdo.TO2SessionState
-	Vouchers     fdo.OwnerVoucherPersistentState
+	Session  fdo.TO2SessionState
+	Vouchers interface {
+		fdo.VoucherPersistentState
+		fdo.OwnerVoucherPersistentState
+	}
 	OwnerModules func(ctx context.Context, guid protocol.GUID, info string, chain []*x509.Certificate, devmod serviceinfo.Devmod, modules []string) iter.Seq2[string, serviceinfo.OwnerModule]
 
 	module *moduleStateMachineState

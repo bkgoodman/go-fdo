@@ -12,36 +12,65 @@ jobs:
   go:
     name: Test Go packages
     runs-on: ubuntu-latest
-    container:
-      image: golang:alpine
     env:
       GOFLAGS: -buildvcs=false
     steps:
       - name: Check out repository code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Set up test environment
-        run: |
-          apk add --no-cache bash gcc g++ openssl-dev openssl
-          go work init
-          go work use -r .
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install Nix
+        uses: cachix/install-nix-action@4e002c8ec80594ecd40e759629461e26c8abed15
+        with:
+          # Avoid GitHub rate limiting
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - name: Test base library
-        run: go test -v ./...
+        run: |
+          nix develop '.#go' -c sh -c "if go work init; then go work use -r .; fi;
+            go test -v ./...
+          "
       - name: Test FSIM
-        run: go test -v ./fsim/...
+        run: |
+          nix develop '.#go' -c sh -c "if go work init; then go work use -r .; fi;
+            go test -v ./fsim/...
+          "
       - name: Test sqlite
-        run: go test -v ./sqlite/...
+        run: |
+          nix develop '.#go' -c sh -c "if go work init; then go work use -r .; fi;
+            go test -v ./sqlite/...
+          "
       - name: Test TPM
-        run: go test -v ./tpm/...
+        run: |
+          nix develop '.#go' -c sh -c "if go work init; then go work use -r .; fi;
+            go test -v ./tpm/...
+          "
       - name: Test examples
-        run: go test -v ./examples/...
+        run: |
+          nix develop '.#go' -c sh -c "if go work init; then go work use -r .; fi;
+            go test -v ./examples/...
+          "
+      - name: Test example builds with Nix
+        run: |
+          nix build '.#example'
+          nix build '.#example-tpmsim'
   tinygo:
     name: Test Go packages (TinyGo)
     runs-on: ubuntu-latest
-    container:
-      image: tinygo/tinygo:0.35.0
-      options: --user root
+    env:
+      GOFLAGS: -buildvcs=false
     steps:
       - name: Check out repository code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install Nix
+        uses: cachix/install-nix-action@4e002c8ec80594ecd40e759629461e26c8abed15
+        with:
+          # Avoid GitHub rate limiting
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - name: Test base library
-        run: tinygo test -v ./...
+        run: |
+          nix develop '.#tinygo' -c sh -c "if go work init; then go work use -r .; fi;
+            tinygo test -v ./...
+          "
+      - name: Test example builds with Nix
+        run: |
+          nix build '.#example-tinygo'
