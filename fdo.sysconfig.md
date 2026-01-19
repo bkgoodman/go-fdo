@@ -27,25 +27,26 @@ This FSIM is designed to configure the minimum parameters needed to make a devic
 | -------- | --------- | ---------- | ----------- |
 | `fdo.sysconfig:active` | Bidirectional | `bool` | Module activation status |
 | `fdo.sysconfig:set` | Owner → Device | `SystemParam` | Set a system parameter |
-| `fdo.sysconfig:error` | Device → Owner | `uint` | Error code for failed operations |
+| `fdo.sysconfig:response` | Device → Owner | `SysconfigResponses` | Per-parameter responses (success/warning/error) |
 
 ## Data Structures
 
 ### SystemParam
 
-The `SystemParam` structure represents a single system parameter to be configured:
+The `SystemParam` structure is a CBOR array (list) of key/value pairs. Each pair is exactly two elements: parameter name and parameter value. Multiple pairs MAY be carried in one `SystemParam` array.
 
-    SystemParam = {
-        parameter: tstr,  ; Parameter name (e.g., "hostname")
-        value: tstr       ; Parameter value (e.g., "device-001")
-    }
+    SystemParam = [
+        [ tstr parameter, tstr value ],
+        [ tstr parameter, tstr value ],
+        ...
+    ]
 
-**Fields:**
+**Notes:**
 
-- `parameter` (required): The parameter name as a string
-- `value` (required): The parameter value as a string
-
-Both parameter names and values are treated as opaque strings by the protocol. The device implementation is responsible for interpreting and applying them.
+- Each pair is always two CBOR text strings in positional order: index 0 = parameter name, index 1 = parameter value.
+- A single `fdo.sysconfig:set` message may carry one or more parameter pairs in the `SystemParam` array.
+- Parameter names/values are opaque to the protocol; the device interprets and applies them.
+- Using fixed-length arrays for pairs keeps encoding deterministic for ServiceInfo transport.
 
 ## Standard Parameters
 
@@ -240,27 +241,38 @@ Instructs the device to set a system parameter.
 1. Device receives parameter name and value as opaque strings
 2. Device validates parameter name (known vs. unknown)
 3. Device applies parameter value using OS-specific mechanisms
-4. Device sends error if parameter cannot be applied
+4. Device sends `fdo.sysconfig:response` entries reflecting outcomes for each parameter in the message
 
-**Multiple Parameters**: Owner may send multiple `set` messages to configure multiple parameters. Each message configures one parameter.
+**Multiple Parameters**: Owner may send multiple parameters in one `set` message (as multiple pairs) or multiple `set` messages; responses are per-parameter.
 
-### fdo.sysconfig:error
+### fdo.sysconfig:response
 
 **Direction**: Device → Owner
 
-Reports an error when a parameter cannot be set.
+Reports the outcome of applying one or more parameters. One response entry per parameter in the corresponding `fdo.sysconfig:set`.
 
-**Value**: Unsigned integer error code
+**Value**: `SysconfigResponses`
 
-**Error Codes**:
+    SysconfigResponses = [ SysconfigResponse, ... ]
 
-| Code | Description | Meaning |
-| ---- | ----------- | ------- |
-| 1 | Unknown parameter | Parameter name not recognized |
-| 2 | Invalid value | Value format is invalid for this parameter |
-| 3 | Permission denied | Insufficient permissions to set parameter |
-| 4 | Operation failed | System operation failed (e.g., file write error) |
-| 5 | Not supported | Parameter recognized but not supported on this device |
+    SysconfigResponse = [
+        code: uint,        ; 0=success, 1=warning, 2=error
+        ? message: tstr    ; optional human-readable note (warnings/errors)
+    ]
+
+**Semantics:**
+
+- `code = 0 (success)`: Parameter applied successfully; `message` MAY be omitted.
+- `code = 1 (warning)`: Parameter applied but with caveat; `message` SHOULD describe the warning.
+- `code = 2 (error)`: Parameter not applied; `message` SHOULD describe the failure cause.
+
+**Mapping examples (non-normative):**
+
+- Unknown parameter → `code=2`, message "unknown parameter"
+- Invalid value → `code=2`, message "invalid value"
+- Permission denied → `code=2`, message "permission denied"
+- Not supported → `code=1` or `code=2` depending on whether a fallback was applied
+- Operation failed (e.g., file write) → `code=2`, message describing failure
 
 ## Example Message Exchange
 

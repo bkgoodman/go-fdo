@@ -101,6 +101,16 @@ Adds a network configuration. Device processes networks sequentially. Uses CBOR 
 7: trust_level (enumerated)
 ```
 
+#### Conditional Requirements
+
+- For `auth_type = open` (0): `password`, `eap_method`, and `ca_certificates` MUST be omitted.
+- For `auth_type = wpa2-psk` (1) or `wpa3-psk` (2): `password` MUST be present; `eap_method` and `ca_certificates` MUST be omitted.
+- For `auth_type = wpa3-enterprise` (3):
+  - `eap_method` MUST be present.
+  - `ca_certificates` MUST be present with at least one CA cert; order MUST be leaf-to-root or explicitly documented.
+  - `password` MUST be omitted (credentials are certificate/EAP based).
+- `trust_level` MUST be present for all networks; devices MUST enforce policy (e.g., single-sided may only allow `onboard-only`).
+
 ##### Authentication Type Enumeration
 ```
 0: open

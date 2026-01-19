@@ -33,24 +33,30 @@ The SSH FSIM supports the following functionality:
 
 The following table describes key-value pairs for the SSH FSIM.
 
-| Direction | Key Name            | Value           | Meaning                                                    |
-| --------- | ------------------- | --------------- | ---------------------------------------------------------- |
-| o <-> d   | `fdo.ssh:active`    | `bool`          | Instructs the device to activate or deactivate the module  |
-| o --> d   | `fdo.ssh:add-key`   | `SSHKeyInstall` | Install SSH authorized public key                          |
-| o <-- d   | `fdo.ssh:host-keys` | `array of tstr` | Device SSH host public keys                                |
-| o --> d   | `fdo.ssh:error`     | `uint`          | Error indication                                           |
+| Direction | Key Name            | Value               | Meaning                                                    |
+| --------- | ------------------- | ------------------- | ---------------------------------------------------------- |
+| o <-> d   | `fdo.ssh:active`    | `bool`              | Instructs the device to activate or deactivate the module  |
+| o --> d   | `fdo.ssh:add-key`   | `SSHKeyInstalls`    | Install one or more SSH authorized public keys             |
+| o <-- d   | `fdo.ssh:host-keys` | `array of tstr`     | Device SSH host public keys                                |
+| o <-- d   | `fdo.ssh:response`  | `SSHKeyResponses`   | Status for the corresponding `add-key` message             |
 
 ## Data Structures
 
 ### SSHKeyInstall
 
-The `SSHKeyInstall` structure contains the information needed to install an SSH authorized key on the device.
+An individual SSH key to install on the device.
 
     SSHKeyInstall = {
         key: tstr,           ; SSH public key in OpenSSH format
         ? username: tstr,    ; Optional username for the key
         ? sudo: bool         ; Optional flag indicating privileged access
     }
+
+### SSHKeyInstalls
+
+Array of one or more `SSHKeyInstall` objects carried in a single `fdo.ssh:add-key` message.
+
+    SSHKeyInstalls = [ SSHKeyInstall, ... ]
 
 **Fields:**
 
@@ -60,14 +66,23 @@ The `SSHKeyInstall` structure contains the information needed to install an SSH 
 
 ## fdo.ssh:add-key
 
-The owning Device Management Service sends `fdo.ssh:add-key` to install an SSH authorized public key on the device.
+The owning Device Management Service sends `fdo.ssh:add-key` with an array of one or more `SSHKeyInstall` items.
 
-The device receives the `SSHKeyInstall` structure and performs the following actions:
+**Atomicity:** Status applies to the entire message. Devices SHOULD apply keys atomically per message:
 
-1. Parse the SSH public key to validate format
-2. Determine the target user (from username field or implementation default)
+- Success: all keys applied
+- Warning: keys applied but with caveats (see response message)
+- Error: no keys applied
+
+For non-atomic behavior, owners SHOULD send individual `add-key` messages (one key per message).
+
+The device processes each key in the array:
+
+1. Parse each SSH public key to validate format
+2. Determine target user (username field or implementation default)
 3. Install the key in the appropriate authorized_keys file
-4. If sudo flag is set, configure privileged access according to device policy
+4. If sudo flag is set, configure privileged access per device policy
+5. Return a single `fdo.ssh:response` covering the whole array
 
 **Implementation Notes:**
 
@@ -108,27 +123,31 @@ The owning Device Management Service can use these host keys to populate its `kn
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4..."
     ]
 
-## fdo.ssh:error
+## fdo.ssh:response
 
-The device sends `fdo.ssh:error` when an SSH operation fails.
+The device sends `fdo.ssh:response` to report the outcome of the corresponding `add-key` message.
 
-The following table lists error codes:
+    SSHKeyResponses = [ SSHKeyResponse, ... ]
 
-| Error Number | Description                   | Sent in response to |
-| ------------ | ----------------------------- | ------------------- |
-| 1            | Bad request / Invalid format  | fdo.ssh:add-key     |
-| 2            | Permission denied             | fdo.ssh:add-key     |
-| 3            | User not found                | fdo.ssh:add-key     |
-| 4            | Filesystem error              | fdo.ssh:add-key     |
-| 5            | SSH service not available     | fdo.ssh:add-key     |
+    SSHKeyResponse = [
+        code: uint,        ; 0=success, 1=warning, 2=error
+        ? message: tstr    ; optional human-readable note (warnings/errors)
+    ]
 
-**Error Descriptions:**
+Semantics:
 
-- **Error 1 (Bad request)**: The SSH key format is invalid or the request is malformed
-- **Error 2 (Permission denied)**: The device cannot install the key due to insufficient permissions
-- **Error 3 (User not found)**: The specified username does not exist and the device cannot or will not create it
-- **Error 4 (Filesystem error)**: Cannot write to authorized_keys file or create necessary directories
-- **Error 5 (SSH service not available)**: SSH service is not installed or cannot be configured
+- code = 0 (success): All keys in the message were applied; message MAY be omitted.
+- code = 1 (warning): Keys were applied but with caveats (e.g., created default user, deprecated key type); message SHOULD describe the warning.
+- code = 2 (error): No keys in the message were applied; message SHOULD describe the failure cause.
+
+Examples (non-normative):
+
+- Invalid key format → code=2, "bad request"
+- User not found and not created → code=2, "user not found"
+- Permission denied → code=2, "permission denied"
+- Partial support (e.g., unsupported key option ignored) but keys installed → code=1, "option ignored"
+
+Note: Success or failure here means the FDO layer accepted/applied the keys. It does not guarantee the underlying SSH implementation will accept them for login; operators should still verify reachability.
 
 ## Example Exchange
 
@@ -137,8 +156,8 @@ The following table describes an example exchange for the SSH FSIM:
 | Device sends | Owner sends | Meaning |
 | ------------ | ----------- | ------- |
 | `[fdo.ssh:active, True]` | - | Device instructs owner to activate the SSH FSIM |
-| - | `[fdo.ssh:add-key, {key: "ssh-rsa AAAA...", username: "admin", sudo: true}]` | Owner installs admin key with sudo |
-| - | `[fdo.ssh:add-key, {key: "ssh-ed25519 AAAA...", username: "operator"}]` | Owner installs operator key without sudo |
+| - | `[fdo.ssh:add-key, [ {key: "ssh-rsa AAAA...", username: "admin", sudo: true}, {key: "ssh-ed25519 AAAA...", username: "operator"} ]]` | Owner installs two keys in one atomic message |
+| `[fdo.ssh:response, [0]]` | - | Device reports success for that add-key message |
 | `[fdo.ssh:host-keys, ["ssh-rsa AAAA...", "ssh-ed25519 AAAA..."]]` | - | Device reports host keys |
 | `[fdo.ssh:active, False]` | - | Device instructs owner to deactivate the SSH FSIM |
 
