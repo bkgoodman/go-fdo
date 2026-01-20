@@ -117,7 +117,7 @@ Many FSIM payloads expect the receiver to emit a follow-up status once the paylo
 ]
 ```
 
-**CDDL Example**
+## CDDL Example
 
 ```cddl
 payload-result = [

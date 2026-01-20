@@ -22,7 +22,7 @@ The `fdo.wifi` FSIM provides Wi-Fi network configuration and credential provisio
 
 The FSIM follows a sequential network-by-network flow:
 
-```
+```text
 1. s → d: fdo.wifi:active = true
 2. s → d: fdo.wifi:network-add (basic network)
 3. s → d: fdo.wifi:network-add (certificate network metadata)
@@ -45,15 +45,15 @@ The following table describes key-value pairs for the fdo.wifi FSIM. All structu
 | d → s | `fdo.wifi:csr-begin` | `map` | Announces a CSR payload using the [chunking strategy](./chunking-strategy.md) |
 | d → s | `fdo.wifi:csr-data-<n>` | `bstr` | CSR chunk `n` (0-based) |
 | d → s | `fdo.wifi:csr-end` | `map` | Completes CSR payload, may include hash |
-| s → d | `fdo.wifi:csr-result` | `array` | Result array `[status, ?message, ?output]` acknowledging CSR processing |
+| s → d | `fdo.wifi:csr-result` | `array` | Result array `[status, ?message]` acknowledging CSR processing |
 | s → d | `fdo.wifi:cert-begin` | `map` | Announces client certificate payload per chunking strategy |
 | s → d | `fdo.wifi:cert-data-<n>` | `bstr` | Client certificate chunk `n` (0-based) |
 | s → d | `fdo.wifi:cert-end` | `map` | Completes client certificate payload |
-| d → s | `fdo.wifi:cert-result` | `array` | Result array `[status, ?message, ?output]` for certificate installation |
+| d → s | `fdo.wifi:cert-result` | `array` | Result array `[status, ?message]` for certificate installation |
 | s → d | `fdo.wifi:ca-begin` | `map` | Announces CA bundle payload (one or more CA certs) |
 | s → d | `fdo.wifi:ca-data-<n>` | `bstr` | CA chunk `n` |
 | s → d | `fdo.wifi:ca-end` | `map` | Completes CA bundle payload |
-| d → s | `fdo.wifi:ca-result` | `array` | Result array for CA processing |
+| d → s | `fdo.wifi:ca-result` | `array` | Result array `[status, ?message]` for CA processing |
 | s → d | `fdo.wifi:error` | `uint` | Error indication |
 
 All chunk-capable keys follow the shared protocol so CSRs, signed certificates, and CA bundles can exceed MTU limits without inventing Wi-Fi-specific transport rules.
@@ -157,7 +157,7 @@ Adds a network configuration. Device processes networks sequentially. Uses CBOR 
 
 ##### Network Configuration Schema
 
-```
+```text
 0: version (string)
 1: network_id (string)
 2: ssid (string)
@@ -182,7 +182,7 @@ Adds a network configuration. Device processes networks sequentially. Uses CBOR 
   - Devices SHOULD support WPA3-SAE (Simultaneous Authentication of Equals) protocol
 - For `auth_type = wpa3-enterprise` (3):
   - `eap_method` MUST be present.
-  - `ca_certificates` MUST be present with at least one CA cert; order MUST be leaf-to-root or explicitly documented.
+  - `ca_certificates` MUST be present with at least one CA cert; order MUST be root-to-leaf (trust anchor first).
   - `password` MUST be omitted (credentials are certificate/EAP based).
   - For EAP methods requiring credentials (`eap-peap`, `eap-ttls`): `eap_username` and `eap_password` MAY be provided for device authentication.
 - `trust_level` MUST be present for all networks; devices MUST enforce policy (e.g., single-sided may only allow `onboard-only`).
@@ -235,7 +235,7 @@ Adds a network configuration. Device processes networks sequentially. Uses CBOR 
 2: online_signup  // Device should use online signup process
 ```
 
-### fdo.wifi:csr-begin / csr-data-\<n> / csr-end / csr-result
+### fdo.wifi:csr-begin / csr-data-\<n\> / csr-end / csr-result
 
 **Direction**: d → s
 
@@ -263,11 +263,11 @@ Example:
 
 The device streams `fdo.wifi:csr-data-0`, `csr-data-1`, … until the CSR DER/PEM blob is complete, then sends `csr-end` (hash optional). The service replies with `csr-result = [status, ?message]` to indicate whether the CSR was accepted for signing.
 
-### fdo.wifi:cert-begin / cert-data-<n> / cert-end / cert-result
+### fdo.wifi:cert-begin / cert-data-\<n\> / cert-end / cert-result
 
 **Direction**: s → d
 
-Certificate payloads reuse the generic chunking strategy so large PEM/DER blobs fit inside ServiceInfo. The service sends `cert-begin`, followed by numbered `cert-data-<n>` chunks, then a `cert-end`. The device responds with `cert-result`, a CBOR array mirroring the strategy doc's `[status, ?message, ?output]` format.
+Certificate payloads reuse the generic chunking strategy so large PEM/DER blobs fit inside ServiceInfo. The service sends `cert-begin`, followed by numbered `cert-data-<n>` chunks, then a `cert-end`. The device responds with `cert-result`, a CBOR array following the strategy doc's `[status, ?message]` format.
 
 #### Wi-Fi Certificate Begin Fields
 
@@ -303,11 +303,16 @@ Service → Device: fdo.wifi:cert-end {1: h'<sha256>'}
 Device  → Service: fdo.wifi:cert-result [0, "installed"]
 ```
 
-- Chunks MUST be contiguous starting at index 0. 
+- Chunks MUST be contiguous starting at index 0.
 - Hashes, length checks, retransmission, and timeouts inherit the behavior defined in `chunking-strategy.md`.
-- Devices SHOULD treat `cert-result[0] = 0` as success, non-zero as FSIM-level error, and may include a diagnostic message.
+- Certificate chain ordering: The device MUST expect the certificate chain to be ordered from leaf to root, with the end-entity certificate first, followed by intermediate certificates, and ending with the trust anchor (root CA).
+- Certificate network_id MUST match a network previously added via `network-add`, otherwise device returns error status.
+- Status code semantics:
+  - `cert-result[0] = 0` (success): Certificate was successfully applied and is usable
+  - `cert-result[0] = 1` (warning): Certificate was applied but with warnings (e.g., expiration soon); certificate is usable
+  - `cert-result[0] = 2` (error): Certificate was NOT applied; certificate is unusable and should not be used for network authentication
 
-### fdo.wifi:ca-begin / ca-data-\<n> / ca-end / ca-result
+### fdo.wifi:ca-begin / ca-data-\<n\> / ca-end / ca-result
 
 **Direction**: s → d
 
@@ -319,7 +324,12 @@ Owners often need to provision a CA chain alongside the client certificate. This
 | `-2` | bundle_id | tstr | Optional | Distinguishes multiple CA bundles (e.g., "root", "intermediate"). |
 | `-3` | metadata | map | Optional | Storage slot, rotation hints, etc. |
 
-Devices treat the payload bytes as concatenated DER or PEM objects (implementation-defined). After verifying size/hash, they respond with `ca-result = [status, ?message]`. Owners may send multiple CA bundles sequentially if a chain requires separate handling.
+Devices treat the payload bytes as concatenated DER or PEM objects (implementation-defined). After verifying size/hash, they respond with `ca-result = [status, ?message]`. CA bundle network_id MUST match a network previously added via `network-add`, otherwise device returns error status. Owners may send multiple CA bundles sequentially if a chain requires separate handling.
+
+- Status code semantics:
+  - `ca-result[0] = 0` (success): CA bundle was successfully stored and is usable
+  - `ca-result[0] = 1` (warning): CA bundle was stored but with warnings; bundle is usable
+  - `ca-result[0] = 2` (error): CA bundle was NOT stored; bundle is unusable
 
 ### fdo.wifi:error
 
@@ -336,19 +346,35 @@ Error indication for FSIM operation failures.
 - `1003`: Invalid network configuration
 - `1004`: Trust level not authorized
 
+## Sequential Flow Requirements
+
+**Network Addition Phase**: All `network-add` messages MUST be sent before any certificate operations (CSR, cert, CA).
+
+**Certificate Operations Phase**: CSR, certificate, and CA bundle transfers may proceed only for networks that were previously added via `network-add`.
+
+**Validation Rule**: Any certificate operation (csr-begin, cert-begin, ca-begin) referencing a network_id that was not previously added via `network-add` MUST return an error status in the corresponding result message.
+
 ## Sequential Flow Example
 
-```
+```text
 1. s --> d: fdo.wifi-setup:active = true
 2. s --> d: fdo.wifi-setup:network-add (basic SSID/password)
-   → Device configures and connects to network
-3. s --> d: fdo.wifi-setup:network-add (certificate network)
-   → Device generates CSR
-4. s <-- d: fdo.wifi-setup:cert-req (CSR for network)
-5. s --> d: fdo.wifi-setup:cert-res (signed certificate)
-   → Device installs certificate and connects to network
-6. s --> d: fdo.wifi-setup:network-add (another basic network)
-   → Device configures and connects to network
+   → Device adds network to configuration
+3. s --> d: fdo.wifi-setup:network-add (certificate network metadata)
+   → Device adds network and prepares for CSR
+4. d --> s: fdo.wifi-setup:csr-begin / csr-data-<n> / csr-end (device sends CSR)
+   → CSR for network added in step 3
+5. s --> d: fdo.wifi-setup:csr-result (ack CSR processing)
+6. s --> d: fdo.wifi-setup:cert-begin / cert-data-<n> / cert-end (owner returns signed cert)
+   → Certificate for network added in step 3
+7. d --> s: fdo.wifi-setup:cert-result (device installs certificate)
+   → Status = 0 (success) means cert is applied and usable
+   → Status = 1 (warning) means cert is applied but with warnings
+   → Status = 2 (error) means cert was NOT applied and is unusable
+8. s --> d: fdo.wifi-setup:ca-begin / ca-data-<n> / ca-end (optional CA bundle)
+   → CA bundle for network added in step 3
+9. d --> s: fdo.wifi-setup:ca-result (device stores CA material)
+   → Status semantics same as cert-result
 ```
 
 ### Sequence Diagrams

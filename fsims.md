@@ -18,7 +18,7 @@ limitations under the License.
 ## Quick Summary
 
 | FSIM | Primary Purpose | Key Characteristics | Typical Use Cases |
-|------|----------------|-------------------|------------------|
+| --- | --- | --- | --- |
 | **fdo.payload** | Generic data delivery based on MIME type | Type-centric processing, multi-platform support, content-driven | Shell scripts, cloud-init, configs, firmware updates |
 | **fdo.sysconfig** | Fundamental OS configuration | Cross-platform, essential settings, standardized primitives | Hostname, timezone, DNS, basic security policies |
 | **fdo.csr** | Certificate management for mutual TLS | PKI integration, day-2 operations, mutual authentication | Client certificates, CA distribution, certificate renewal |
@@ -35,15 +35,18 @@ FDO Service Info Modules (FSIMs) are specialized protocol extensions that enable
 **High-Level Intent**: Deliver arbitrary data types to devices for processing based on MIME type identification.
 
 **Key Characteristics**:
+
 - **Content-Type Driven**: Uses MIME types to identify data format and processing requirements
 - **Multi-Platform Support**: Different endpoint systems may understand different MIME types
 - **Processing-Oriented**: Focuses on what the device should DO with the data, not just where to store it
 
 **Comparison to fdo.upload**:
+
 - **fdo.upload**: File-centric - "put this file at this location"
 - **fdo.payload**: Type-centric - "here's data of type X, process it appropriately"
 
 **Use Cases**:
+
 - Shell scripts for system configuration
 - Cloud-init configuration files
 - Ansible playbooks or other infrastructure-as-code
@@ -60,11 +63,13 @@ FDO Service Info Modules (FSIMs) are specialized protocol extensions that enable
 **High-Level Intent**: Provide an extensible, general-purpose mechanism for bare-metal onboarded systems to receive fundamental OS-level configuration.
 
 **Key Characteristics**:
+
 - **OS-Agnostic**: Works across different operating systems and platforms
 - **Core Configuration**: Focuses on essential settings any provisioned system typically needs
 - **Extensible Design**: Can accommodate new configuration domains as needs evolve
 
 **Fundamental Configuration Domains**:
+
 - **Identity**: Hostname, device identification
 - **Time**: Timezone, NTP configuration
 - **Network**: Basic network settings (DNS, search domains)
@@ -81,11 +86,13 @@ FDO Service Info Modules (FSIMs) are specialized protocol extensions that enable
 **High-Level Intent**: Enable client and management systems to establish mutual TLS authentication required for day-2 operations.
 
 **Key Characteristics**:
+
 - **Security-Focused**: Establishes trust relationships for ongoing management
 - **Mutual Authentication**: Both client and server sides require certificates
 - **PKI Integration**: Interfaces with existing certificate authorities and PKI infrastructure
 
 **Certificate Operations**:
+
 - **Client Certificate Enrollment**: Device obtains identity certificates
 - **CA Certificate Distribution**: Devices receive trust anchors
 - **Server-Side Key Generation**: For devices that cannot generate their own keys
@@ -102,16 +109,19 @@ FDO Service Info Modules (FSIMs) are specialized protocol extensions that enable
 **High-Level Intent**: Configure Wi-Fi network access with support for both simple and complex authentication scenarios.
 
 **Key Characteristics**:
+
 - **Authentication Flexibility**: Supports both password-based and certificate-based authentication
 - **Trust Level Differentiation**: Can configure networks for onboarding-only or full operational use
 - **Attestation Compatibility**: Works in both fully attested and restricted/delegate permission scenarios
 
 **Configuration Complexity**:
+
 - **Simple Setup**: WPA2-PSK/WPA3-PSK with shared passwords
 - **Complex Setup**: WPA3-Enterprise with certificate authentication
 - **Certificate Exchange**: CSR/certificate provisioning for enterprise networks
 
 **Trust Management**:
+
 - **Onboard-Only Networks**: Temporary access for initial provisioning
 - **Full-Access Networks**: Long-term operational network access
 - **Owner-Declared Trust**: Network trustworthiness based on Owner's assessment
@@ -132,6 +142,7 @@ FDO Service Info Modules (FSIMs) are specialized protocol extensions that enable
 ### Domain Separation
 
 Each FSIM addresses a specific configuration domain with appropriate complexity:
+
 - **Single Responsibility**: Each FSIM has a clear, focused purpose
 - **Appropriate Complexity**: Complexity matches the problem domain requirements
 - **Clear Boundaries**: Minimal overlap between FSIM responsibilities
@@ -139,6 +150,7 @@ Each FSIM addresses a specific configuration domain with appropriate complexity:
 ### Security Considerations
 
 FSIMs are designed with different security postures:
+
 - **fdo.wifi**: May work in restricted attestation scenarios
 - **fdo.csr**: Requires full attestation for certificate operations
 - **fdo.sysconfig**: Basic configuration with standard security
@@ -147,6 +159,7 @@ FSIMs are designed with different security postures:
 ### Extensibility
 
 The FSIM architecture allows for:
+
 - **New Modules**: Additional FSIMs for new configuration domains
 - **Protocol Evolution**: Existing FSIMs can be enhanced over time
 - **Vendor Extensions**: Custom FSIMs for specialized requirements
@@ -156,24 +169,28 @@ The FSIM architecture allows for:
 ### Choosing the Right FSIM
 
 **Use fdo.payload when**:
+
 - Delivering custom data formats
 - Processing logic varies by device type
 - MIME type negotiation is appropriate
 - Data interpretation is device-specific
 
 **Use fdo.sysconfig when**:
+
 - Configuring basic OS parameters
 - Standardized configuration primitives are needed
 - Cross-platform compatibility is required
 - Core system settings are being established
 
 **Use fdo.csr when**:
+
 - Establishing mutual TLS relationships
 - Long-term security credentials are needed
 - PKI integration is required
 - Day-2 operations will use certificate-based auth
 
 **Use fdo.wifi when**:
+
 - Configuring network access (Wi-Fi)
 - Both simple and complex authentication are needed
 - Trust level differentiation is required

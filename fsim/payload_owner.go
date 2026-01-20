@@ -4,43 +4,60 @@
 package fsim
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
+	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
 
 // PayloadOwner implements the fdo.payload FSIM for owner-side payload delivery.
+// It follows the specification in fdo.payload.md and uses the generic chunking strategy.
 type PayloadOwner struct {
 	// Payloads to send to the device
 	payloads []PayloadToSend
 
 	// Internal state
-	currentPayload *PayloadToSend
-	currentIndex   int
-	bytesSent      int64
-	chunkSize      int
-	waitingForAck  bool
-	lastError      *PayloadErrorInfo
+	currentSender *chunking.ChunkSender
+	currentIndex  int
+	sendState     payloadSendState
+	lastResult    *PayloadResult
+	lastError     *PayloadErrorInfo
 }
 
-// PayloadToSend represents a payload to be sent to the device.
+type payloadSendState int
+
+const (
+	stateIdle payloadSendState = iota
+	stateSendingBegin
+	stateSendingChunks
+	stateSendingEnd
+	stateWaitingResult
+)
+
+// PayloadToSend represents a payload to be sent to the device per fdo.payload.md.
 type PayloadToSend struct {
-	MimeType string
-	Name     string
-	Data     []byte
-	Metadata map[string]string
+	MimeType string         // Required: MIME type (field -1)
+	Name     string         // Optional: Payload name (field -2)
+	Data     []byte         // Payload data
+	Metadata map[string]any // Optional: Metadata map (field -3)
+	HashAlg  string         // Optional: Hash algorithm (e.g., "sha256")
 }
 
-// PayloadErrorInfo contains error information from the device.
+// PayloadResult represents the result received from the device.
+type PayloadResult struct {
+	StatusCode int    // 0=success, 1=warning, 2=error
+	Message    string // Optional message
+}
+
+// PayloadErrorInfo contains error information from the device per fdo.payload.md.
 type PayloadErrorInfo struct {
-	Code    int
-	Message string
-	Details string
+	Code    int    // Error code (see fdo.payload.md)
+	Message string // Human-readable error message
+	Details string // Optional additional details
 }
 
 var _ serviceinfo.OwnerModule = (*PayloadOwner)(nil)
@@ -57,12 +74,13 @@ func (p *PayloadOwner) ProduceInfo(ctx context.Context, producer *serviceinfo.Pr
 }
 
 // AddPayload adds a payload to be sent to the device.
-func (p *PayloadOwner) AddPayload(mimeType, name string, data []byte, metadata map[string]string) {
+func (p *PayloadOwner) AddPayload(mimeType, name string, data []byte, metadata map[string]any) {
 	p.payloads = append(p.payloads, PayloadToSend{
 		MimeType: mimeType,
 		Name:     name,
 		Data:     data,
 		Metadata: metadata,
+		HashAlg:  "sha256", // Default hash algorithm
 	})
 }
 
@@ -76,110 +94,78 @@ func (p *PayloadOwner) Transition(active bool) error {
 
 // reset clears the internal state.
 func (p *PayloadOwner) reset() {
-	p.currentPayload = nil
+	p.currentSender = nil
 	p.currentIndex = 0
-	p.bytesSent = 0
-	p.waitingForAck = false
+	p.sendState = stateIdle
+	p.lastResult = nil
 	p.lastError = nil
 }
 
-// produceInfo generates messages to send to the device.
+// produceInfo generates messages to send to the device using the chunking library.
 func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Producer) (blockPeer, moduleDone bool, _ error) {
-	// If waiting for acknowledgment, block peer
-	if p.waitingForAck {
-		return true, false, nil
+	// Check if we're done with all payloads
+	if p.currentIndex >= len(p.payloads) && p.sendState == stateIdle {
+		return false, true, nil
 	}
 
-	// If no current payload, start the next one
-	if p.currentPayload == nil {
-		if p.currentIndex >= len(p.payloads) {
-			// No more payloads to send
-			return false, true, nil
+	// Initialize sender for next payload if needed
+	if p.currentSender == nil && p.currentIndex < len(p.payloads) {
+		payload := &p.payloads[p.currentIndex]
+		p.currentSender = chunking.NewChunkSender("payload", payload.Data)
+
+		// Set hash algorithm if provided
+		if payload.HashAlg != "" {
+			p.currentSender.BeginFields.HashAlg = payload.HashAlg
 		}
 
-		p.currentPayload = &p.payloads[p.currentIndex]
-		p.bytesSent = 0
-
-		// Set default chunk size (4KB)
-		if p.chunkSize == 0 {
-			p.chunkSize = 4096
+		// Set FSIM-specific fields per fdo.payload.md
+		p.currentSender.BeginFields.FSIMFields[-1] = payload.MimeType // Required
+		if payload.Name != "" {
+			p.currentSender.BeginFields.FSIMFields[-2] = payload.Name
+		}
+		if payload.Metadata != nil {
+			p.currentSender.BeginFields.FSIMFields[-3] = payload.Metadata
 		}
 
-		// Send begin message
-		begin := map[string]any{
-			"mime_type": p.currentPayload.MimeType,
-		}
-		if p.currentPayload.Name != "" {
-			begin["name"] = p.currentPayload.Name
-		}
-		if len(p.currentPayload.Data) > 0 {
-			begin["size"] = int64(len(p.currentPayload.Data))
-		}
-		if p.currentPayload.Metadata != nil {
-			begin["metadata"] = p.currentPayload.Metadata
-		}
+		p.sendState = stateSendingBegin
+	}
 
-		var buf bytes.Buffer
-		if err := cbor.NewEncoder(&buf).Encode(begin); err != nil {
-			return false, false, fmt.Errorf("failed to encode begin: %w", err)
-		}
-
-		if err := producer.WriteChunk("begin", buf.Bytes()); err != nil {
+	// State machine for sending
+	switch p.sendState {
+	case stateSendingBegin:
+		if err := p.currentSender.SendBegin(producer); err != nil {
 			return false, false, fmt.Errorf("failed to send begin: %w", err)
 		}
-
 		slog.Debug("fdo.payload sent begin",
-			"mime_type", p.currentPayload.MimeType,
-			"name", p.currentPayload.Name,
-			"size", len(p.currentPayload.Data))
-
+			"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
+			"size", len(p.currentSender.Data))
+		p.sendState = stateSendingChunks
 		return false, false, nil
-	}
 
-	// Send data chunks
-	if p.bytesSent < int64(len(p.currentPayload.Data)) {
-		// Calculate chunk size
-		remaining := int64(len(p.currentPayload.Data)) - p.bytesSent
-		chunkLen := int64(p.chunkSize)
-		if chunkLen > remaining {
-			chunkLen = remaining
+	case stateSendingChunks:
+		done, err := p.currentSender.SendNextChunk(producer)
+		if err != nil {
+			return false, false, fmt.Errorf("failed to send chunk: %w", err)
 		}
-
-		// Extract chunk
-		chunk := p.currentPayload.Data[p.bytesSent : p.bytesSent+chunkLen]
-
-		// Send data
-		var buf bytes.Buffer
-		if err := cbor.NewEncoder(&buf).Encode(chunk); err != nil {
-			return false, false, fmt.Errorf("failed to encode data chunk: %w", err)
+		if done {
+			p.sendState = stateSendingEnd
 		}
-
-		if err := producer.WriteChunk("data", buf.Bytes()); err != nil {
-			return false, false, fmt.Errorf("failed to send data chunk: %w", err)
-		}
-
-		p.bytesSent += chunkLen
-		p.waitingForAck = true
-
-		slog.Debug("fdo.payload sent data chunk",
-			"bytes", chunkLen,
-			"total_sent", p.bytesSent,
-			"total_size", len(p.currentPayload.Data))
-
 		return false, false, nil
-	}
 
-	// All data sent, send end message
-	var buf bytes.Buffer
-	if err := cbor.NewEncoder(&buf).Encode(true); err != nil {
-		return false, false, fmt.Errorf("failed to encode end: %w", err)
-	}
+	case stateSendingEnd:
+		if err := p.currentSender.SendEnd(producer); err != nil {
+			return false, false, fmt.Errorf("failed to send end: %w", err)
+		}
+		slog.Debug("fdo.payload sent end")
+		p.sendState = stateWaitingResult
+		// Block peer to wait for result
+		return true, false, nil
 
-	if err := producer.WriteChunk("end", buf.Bytes()); err != nil {
-		return false, false, fmt.Errorf("failed to send end: %w", err)
+	case stateWaitingResult:
+		// Waiting for device to send payload-result
+		// This will be unblocked when we receive the result in HandleInfo
+		return true, false, nil
 	}
-
-	slog.Debug("fdo.payload sent end")
 
 	return false, false, nil
 }
@@ -190,101 +176,73 @@ func (p *PayloadOwner) receive(ctx context.Context, key string, messageBody io.R
 
 	switch key {
 	case "active":
-		// Device responds with active status
-		var active bool
-		if err := cbor.NewDecoder(messageBody).Decode(&active); err != nil {
-			return fmt.Errorf("invalid active response: %w", err)
+		// Device responds with active status (not used in chunking flow)
+		slog.Debug("fdo.payload device active status received")
+
+	case "payload-result":
+		// Device reports final result per fdo.payload.md
+		if p.currentSender == nil {
+			return fmt.Errorf("received result without active transfer")
 		}
 
-		slog.Debug("fdo.payload device active status", "active", active)
-
-	case "ready":
-		// Device is ready to receive payload data
-		var ready bool
-		if err := cbor.NewDecoder(messageBody).Decode(&ready); err != nil {
-			return fmt.Errorf("invalid ready response: %w", err)
+		result, err := p.currentSender.HandleResult(messageBody)
+		if err != nil {
+			return fmt.Errorf("failed to decode result: %w", err)
 		}
 
-		if !ready {
-			return fmt.Errorf("device not ready for payload")
+		p.lastResult = &PayloadResult{
+			StatusCode: result.StatusCode,
+			Message:    result.Message,
 		}
 
-		slog.Debug("fdo.payload device ready for data")
-
-	case "ack":
-		// Device acknowledges data receipt
-		var bytesReceived int
-		if err := cbor.NewDecoder(messageBody).Decode(&bytesReceived); err != nil {
-			return fmt.Errorf("invalid ack response: %w", err)
-		}
-
-		slog.Debug("fdo.payload device acknowledged", "bytes", bytesReceived)
-		p.waitingForAck = false
-
-		// Verify acknowledgment matches what we sent
-		if int64(bytesReceived) != p.bytesSent {
-			return fmt.Errorf("ack mismatch: sent %d, device received %d", p.bytesSent, bytesReceived)
-		}
-
-	case "result":
-		// Device reports final result
-		var result struct {
-			Success bool   `cbor:"success"`
-			Message string `cbor:"message,omitempty"`
-			Output  string `cbor:"output,omitempty"`
-		}
-		if err := cbor.NewDecoder(messageBody).Decode(&result); err != nil {
-			return fmt.Errorf("invalid result response: %w", err)
-		}
-
-		if result.Success {
+		if result.StatusCode == 0 {
 			slog.Info("fdo.payload applied successfully",
-				"mime_type", p.currentPayload.MimeType,
-				"name", p.currentPayload.Name,
+				"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
 				"message", result.Message)
 		} else {
 			slog.Warn("fdo.payload application failed",
-				"mime_type", p.currentPayload.MimeType,
-				"name", p.currentPayload.Name,
+				"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
+				"status", result.StatusCode,
 				"message", result.Message)
 		}
 
-		if result.Output != "" {
-			slog.Debug("fdo.payload output", "output", result.Output)
-		}
-
 		// Move to next payload
-		p.currentPayload = nil
+		p.currentSender = nil
 		p.currentIndex++
-		p.bytesSent = 0
+		p.sendState = stateIdle
 
 	case "error":
-		// Device reports an error
-		var errorInfo struct {
-			Code    int    `cbor:"code"`
-			Message string `cbor:"message"`
-			Details string `cbor:"details,omitempty"`
+		// Device reports an error per fdo.payload.md error format
+		var errorMap map[any]any
+		data, err := io.ReadAll(messageBody)
+		if err != nil {
+			return fmt.Errorf("failed to read error: %w", err)
 		}
-		if err := cbor.NewDecoder(messageBody).Decode(&errorInfo); err != nil {
-			return fmt.Errorf("invalid error response: %w", err)
+		if err := cbor.Unmarshal(data, &errorMap); err != nil {
+			return fmt.Errorf("failed to decode error: %w", err)
 		}
 
+		// Extract error fields (keys 0, 1, 2)
+		code, _ := errorMap[0].(int)
+		message, _ := errorMap[1].(string)
+		details, _ := errorMap[2].(string)
+
 		p.lastError = &PayloadErrorInfo{
-			Code:    errorInfo.Code,
-			Message: errorInfo.Message,
-			Details: errorInfo.Details,
+			Code:    code,
+			Message: message,
+			Details: details,
 		}
 
 		slog.Error("fdo.payload device error",
-			"code", errorInfo.Code,
-			"message", errorInfo.Message,
-			"details", errorInfo.Details)
+			"code", code,
+			"message", message,
+			"details", details)
 
 		// Reset current payload
-		p.currentPayload = nil
-		p.bytesSent = 0
+		p.currentSender = nil
+		p.sendState = stateIdle
 
-		return fmt.Errorf("payload error %d: %s", errorInfo.Code, errorInfo.Message)
+		return fmt.Errorf("payload error %d: %s", code, message)
 
 	default:
 		slog.Warn("fdo.payload owner received unknown key", "key", key)
@@ -298,7 +256,14 @@ func (p *PayloadOwner) GetLastError() *PayloadErrorInfo {
 	return p.lastError
 }
 
-// SetChunkSize sets the chunk size for data transfer (default 4KB).
+// GetLastResult returns the last result reported by the device.
+func (p *PayloadOwner) GetLastResult() *PayloadResult {
+	return p.lastResult
+}
+
+// SetChunkSize sets the chunk size for data transfer (default 1014 bytes per spec).
 func (p *PayloadOwner) SetChunkSize(size int) {
-	p.chunkSize = size
+	if p.currentSender != nil {
+		p.currentSender.ChunkSize = size
+	}
 }

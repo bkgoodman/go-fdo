@@ -2,30 +2,30 @@
 
 ## 1. fdo.wifi-setup.md
 
-### Strengths:
+### Strengths
 
 - Well-defined authentication types (open, wpa2-psk, wpa3-psk, wpa3-enterprise)
 - Clear message flow between device and owner
 - Good coverage of common WiFi configuration parameters
 - Explicit conditional requirements for different auth types
 
-### Areas for Improvement:
+### Areas for Improvement
 
-#### Security:
+#### Security
 
 - [X] Add support for WPA3-SAE (Simultaneous Authentication of Equals)
 - [ ] Define minimum key length requirements for PSK
 - [ ] Add certificate validation requirements for WPA3-Enterprise
 - [ ] Add security considerations section
 
-#### Features:
+#### Features
 
 - [ ] Add support for hidden SSIDs
 - [ ] REVIEW 802.1X fast roaming (802.11r) support
 - [ ] REVIEW Hotspot 2.0/Passpoint support
 - [ ] Add support for WPA3-Enterprise 192-bit security
 
-#### Documentation:
+#### Documentation
 
 - [ ] Add example exchanges
 - [ ] Document error handling
@@ -35,27 +35,27 @@
 
 ## 2. fdo.payload.md
 
-### Strengths:
+### Strengths
 
 - Clear separation of concerns
 - Good use of MIME types
 - Support for chunked transfers
 
-### Areas for Improvement:
+### Areas for Improvement
 
-#### Security:
+#### Security
 
 - [ ] Add payload signing/verification
 - [ ] Define size limits for chunks
 - [ ] Add integrity verification
 
-#### Features:
+#### Features
 
 - [ ] Add payload prioritization
 - [ ] Implement retry mechanism
 - [ ] Add progress tracking
 
-#### Documentation:
+#### Documentation
 
 - [ ] Add sequence diagrams
 - [ ] Document error recovery
@@ -65,28 +65,28 @@
 
 ## 3. fdo.ssh.md
 
-### Strengths:
+### Strengths
 
 - Clear key installation flow
 - Good key type support
 - Atomic operation semantics
 
-### Areas for Improvement:
+### Areas for Improvement
 
-#### Security:
+#### Security
 
 - [ ] Add key restrictions (command=, from=)
 - [ ] Add key options support
 - [ ] Implement key rotation
 - [ ] Add SSH CA support
 
-#### Features:
+#### Features
 
 - [ ] Add certificate-based authentication
 - [ ] Add known_hosts management
 - [ ] Add key expiration
 
-#### Documentation:
+#### Documentation
 
 - [ ] Add security considerations
 - [ ] Document key formats
@@ -96,27 +96,27 @@
 
 ## 4. fdo.sysconfig.md
 
-### Strengths:
+### Strengths
 
 - Simple parameter-value model
 - Clear response semantics
 - Multiple parameters per message
 
-### Areas for Improvement:
+### Areas for Improvement
 
-#### Security:
+#### Security
 
 - [ ] Add parameter validation
 - [ ] Implement access control
 - [ ] Add encryption for sensitive values
 
-#### Features:
+#### Features
 
 - [ ] Define standard parameters
 - [ ] Add parameter metadata
 - [ ] Implement parameter versioning
 
-#### Documentation:
+#### Documentation
 
 - [ ] Add parameter reference
 - [ ] Document security model
@@ -126,25 +126,25 @@
 
 ## Cross-Cutting Concerns
 
-### Standardization:
+### Standardization
 
 - [ ] Create common error codes
 - [ ] Standardize response formats
 - [ ] Define common patterns
 
-### Security:
+### Security
 
 - [ ] Add security considerations to all FSIMs
 - [ ] Define data sensitivity levels
 - [ ] Document authentication/authorization
 
-### Documentation:
+### Documentation
 
 - [ ] Add sequence diagrams
 - [ ] Include example exchanges
 - [ ] Document error recovery
 
-### Testing:
+### Testing
 
 - [ ] Define conformance tests
 - [ ] Add negative test cases
@@ -154,19 +154,19 @@
 
 ## Implementation Priorities
 
-### High Priority:
+### High Priority
 
 1. Security hardening for all FSIMs
 2. Standardized error handling
 3. Complete documentation
 
-### Medium Priority:
+### Medium Priority
 
 1. Missing features
 2. Enhanced validation
 3. Testing framework
 
-### Low Priority:
+### Low Priority
 
 1. Advanced features
 2. Optimization
@@ -174,7 +174,7 @@
 
 ---
 
-## Notes:
+## Notes
 
 - All changes should maintain backward compatibility
 - Security fixes take highest priority

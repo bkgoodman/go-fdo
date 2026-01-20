@@ -27,7 +27,8 @@ This FSIM is designed to configure the minimum parameters needed to make a devic
 | -------- | --------- | ---------- | ----------- |
 | `fdo.sysconfig:active` | Bidirectional | `bool` | Module activation status |
 | `fdo.sysconfig:set` | Owner → Device | `SystemParam` | Set one or more small parameters inline |
-| `fdo.sysconfig:response` | Device → Owner | `SysconfigResponses` | Per-parameter responses (success/warning/error) |
+| `fdo.sysconfig:response` | Device → Owner | `Array` | Result array `[status, ?message]` per parameter |
+| `fdo.sysconfig:error` | Device → Owner | `uint` | Error indication for FSIM operation failures |
 
 ## Data Structures
 
@@ -50,14 +51,14 @@ The `SystemParam` structure is a CBOR array (list) of key/value pairs. Each pair
 
 ## Standard Parameters
 
-| Parameter  | Purpose                               | Typical Format            |
-| ---------- | -------------------------------------- | ------------------------- |
-| `hostname` | Device identity on the network         | Text hostname or FQDN     |
-| `timezone` | Local clock configuration              | IANA timezone string      |
-| `ntp-server` | Time synchronization source          | Hostname or IP address    |
-| `locale`   | Regional formats & character encoding  | POSIX locale (e.g., `en_US.UTF-8`) |
-| `language` | UI/message language preference         | ISO 639 / 639+3166 code   |
-| `wifi`     | Basic Wi-Fi network credentials        | JSON object (SSID, auth)  |
+| Parameter | Purpose | Typical Format |
+| --- | --- | --- |
+| `hostname` | Device identity on the network | Text hostname or FQDN |
+| `timezone` | Local clock configuration | IANA timezone string |
+| `ntp-server` | Time synchronization source | Hostname or IP address |
+| `locale` | Regional formats & character encoding | POSIX locale (e.g., `en_US.UTF-8`) |
+| `language` | UI/message language preference | ISO 639 / 639+3166 code |
+| `wifi` | Basic Wi-Fi network credentials | JSON object (SSID, auth) |
 
 These parameters are defined by this specification and MUST be supported by compliant implementations. Owners SHOULD restrict `fdo.sysconfig:set` payloads to short values; when the desired state requires larger data (cloud-init, PEM certificates, etc.), use `fdo.payload` with an appropriate MIME type instead.
 
@@ -259,30 +260,34 @@ Instructs the device to set a system parameter.
 
 **Direction**: Device → Owner
 
-Reports the outcome of applying one or more parameters. One response entry per parameter in the corresponding `fdo.sysconfig:set`.
-
-**Value**: `SysconfigResponses`
-
-    SysconfigResponses = [ SysconfigResponse, ... ]
+Reports the outcome of applying one or more parameters. One response entry per parameter in the corresponding `fdo.sysconfig:set`. Follows the generic `*-result` array format from the chunking strategy:
 
     SysconfigResponse = [
         code: uint,        ; 0=success, 1=warning, 2=error
         ? message: tstr    ; optional human-readable note (warnings/errors)
     ]
 
-**Semantics:**
+**Status Code Semantics**:
 
-- `code = 0 (success)`: Parameter applied successfully; `message` MAY be omitted.
-- `code = 1 (warning)`: Parameter applied but with caveat; `message` SHOULD describe the warning.
-- `code = 2 (error)`: Parameter not applied; `message` SHOULD describe the failure cause.
+- `code = 0` (success): Parameter was successfully applied and is usable
+- `code = 1` (warning): Parameter was applied but with warnings (e.g., partial application); parameter is usable
+- `code = 2` (error): Parameter was NOT applied; parameter is unusable and should not be considered applied
 
-**Mapping examples (non-normative):**
+**Message Field**:
 
-- Unknown parameter → `code=2`, message "unknown parameter"
-- Invalid value → `code=2`, message "invalid value"
-- Permission denied → `code=2`, message "permission denied"
-- Not supported → `code=1` or `code=2` depending on whether a fallback was applied
-- Operation failed (e.g., file write) → `code=2`, message describing failure
+- `message` (optional): Human-readable status description
+  - For `code = 0`: MAY be omitted or contain success details
+  - For `code = 1`: SHOULD describe the warning condition
+  - For `code = 2`: SHOULD describe the failure cause
+
+**Mapping examples (non-normative)**:
+
+- Unknown parameter → `code=2`, message "unknown parameter" (NOT applied)
+- Invalid value → `code=2`, message "invalid value" (NOT applied)
+- Permission denied → `code=2`, message "permission denied" (NOT applied)
+- Partial application → `code=1`, message "applied with fallback" (WAS applied)
+- Not supported but fallback applied → `code=1`, message "using default value" (WAS applied)
+- Not supported, no fallback → `code=2`, message "not supported" (NOT applied)
 
 ## Example Message Exchange
 
@@ -326,28 +331,46 @@ Reports the outcome of applying one or more parameters. One response entry per p
       value: "some-value"
     }
 
-**Device → Owner**: Report error
+**Device → Owner**: Report error in response
 
-    fdo.sysconfig:error = 1  // Unknown parameter
+    fdo.sysconfig:response = [2, "unknown parameter"]
+
+### fdo.sysconfig:error
+
+**Direction**: Device → Owner
+
+Reports an error during FSIM operation (distinct from per-parameter response codes).
+
+**CBOR Structure**: Unsigned integer error code
+
+**Error Codes**:
+
+- `1`: Module not supported
+- `2`: Invalid request format
+- `3`: Internal device error
+
+**Processing**:
+
+- Can be sent if the device cannot process the `fdo.sysconfig:set` message at all
+- Terminates the current parameter setting operation
+- Owner should not send more parameters after receiving error
 
 ### Sequence Diagrams
 
 #### Basic Parameter Setting
 
-```text
-Owner                           Device
-  |                               |
-  | fdo.sysconfig:active(true)    |
-  |------------------------------>|
-  |                               | Activate module
-  |                               |
-  | fdo.sysconfig:set(params)     |
-  |------------------------------>|
-  |                               | Validate & apply parameters
-  |                               |
-  | fdo.sysconfig:response(codes) |
-  |<------------------------------|
-```
+    Owner                           Device
+      |                               |
+      | fdo.sysconfig:active(true)    |
+      |------------------------------>|
+      |                               | Activate module
+      |                               |
+      | fdo.sysconfig:set(params)     |
+      |------------------------------>|
+      |                               | Validate & apply parameters
+      |                               |
+      | fdo.sysconfig:response(codes) |
+      |<------------------------------|
 
 ## Security Considerations
 

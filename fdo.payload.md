@@ -38,14 +38,16 @@ The device interprets the payload based on the MIME type and applies it accordin
 
 ## Key-Value Pairs
 
+<!-- markdownlint-disable MD033 -->
 | Key | Direction | Type | Description |
 | --- | --------- | ---- | ----------- |
 | `fdo.payload:active` | Bidirectional | Boolean | Module activation status |
 | `fdo.payload:payload-begin` | Owner → Device | Map | Announces payload transfer (per chunking strategy) |
 | `fdo.payload:payload-data-<n>` | Owner → Device | Byte string | Payload data chunk `n` (0-based) |
 | `fdo.payload:payload-end` | Owner → Device | Map | Signals completion of payload transfer |
-| `fdo.payload:payload-result` | Device → Owner | Array | Final result with status/message/output |
+| `fdo.payload:payload-result` | Device → Owner | Array | Final result with status/message |
 | `fdo.payload:error` | Device → Owner | Object | Error during transfer |
+<!-- markdownlint-enable MD033 -->
 
 ## Data Structures
 
@@ -53,67 +55,64 @@ The device interprets the payload based on the MIME type and applies it accordin
 
 Payload transfers use the generic `payload-begin` map from the chunking strategy. `fdo.payload` reserves the following negative keys for MIME metadata:
 
-```cbor
-{
-  0: 4096,                      / total_size per chunk spec /
-  1: "sha256",                  / optional hash algorithm /
-  -1: "application/x-sh",       / mime_type (required) /
-  -2: "setup.sh",               / payload name (optional) /
-  -3: {                         / payload metadata (optional) /
-    "description": "Initial setup script",
-    "version": "1.0"
-  }
-}
-```
+    {
+      0: 4096,                      / total_size per chunk spec /
+      1: "sha256",                  / optional hash algorithm /
+      -1: "application/x-sh",       / mime_type (required) /
+      -2: "setup.sh",               / payload name (optional) /
+      -3: {                         / payload metadata (optional) /
+        "description": "Initial setup script",
+        "version": "1.0"
+      }
+    }
 
 #### PayloadBegin Schema Extensions
 
-| Key  | Name       | Type   | Requirement | Description |
-| ---- | ---------- | ------ | ----------- | ----------- |
-| `-1` | mime_type  | tstr   | **Required** | MIME type of the payload; devices MUST validate support before accepting data. |
-| `-2` | name       | tstr   | Optional | Descriptive name for the payload (e.g., filename). |
-| `-3` | metadata   | map    | Optional | Additional FSIM-defined metadata (version, description, etc.). |
+| Key | Name | Type | Requirement | Description |
+| --- | ---- | ---- | ----------- | ----------- |
+| `-1` | mime_type | tstr | **Required** | MIME type of the payload; devices MUST validate support before accepting data. |
+| `-2` | name | tstr | Optional | Descriptive name for the payload (e.g., filename). |
+| `-3` | metadata | map | Optional | Additional FSIM-defined metadata (version, description, etc.). |
 
 All non-negative keys remain reserved for the generic chunking fields (`total_size`, `hash_alg`, etc.) as documented in `chunking-strategy.md`.
 
 ### PayloadResult
 
-Devices MUST send `fdo.payload:payload-result` after processing the payload. It follows the generic `*-result` array shape with one payload-specific extension for execution output:
+Devices MUST send `fdo.payload:payload-result` after processing the payload. It follows the generic result array shape from the chunking strategy:
 
-```cbor
-[
-  0,                                / status_code: 0=success, 1=warning, 2=error /
-  "Script executed successfully",   / optional message /
-  h'436f6e66696775726174696f6e206170706c6965640a'  / optional output bytes /
-]
-```
+    [
+      0,                                / status_code: 0=success, 1=warning, 2=error /
+      "Script executed successfully"     / optional message /
+    ]
 
-| Index | Name        | Type  | Description |
-| ----- | ----------- | ----- | ----------- |
-| 0     | status_code | int   | Mandatory status (0=success, 1=warning, 2=error; devices MAY extend with additional values ≥3). |
-| 1     | message     | tstr  | Optional human-readable status. |
-| 2     | output      | bstr  | Optional execution output (stdout/stderr, log data). |
+| Index | Name | Type | Description |
+| ----- | ---- | ---- | ----------- |
+| 0 | status_code | int | Mandatory status (0=success, 1=warning, 2=error; devices MAY extend with additional values ≥3). |
+| 1 | message | tstr | Optional human-readable status. |
 
-Owners SHOULD treat `status_code ≥ 2` as a failure and consult `fdo.payload:error` for detailed diagnostics when provided.
+**Status Code Semantics**:
+
+- `status_code = 0` (success): Payload was successfully applied and is usable
+- `status_code = 1` (warning): Payload was applied but with warnings (e.g., partial execution); payload is usable
+- `status_code = 2` (error): Payload was NOT applied; payload is unusable and should not be considered applied
+
+Owners SHOULD treat `status_code = 2` as a failure and consult `fdo.payload:error` for detailed diagnostics when provided.
 
 ### PayloadError
 
 Error during payload transfer or processing.
 
-```
-{
-  0: 2,
-  1: "Invalid YAML syntax at line 15",
-  2: "expected mapping, found sequence"
-}
-```
+    {
+      0: 2,
+      1: "Invalid YAML syntax at line 15",
+      2: "expected mapping, found sequence"
+    }
 
 #### PayloadError Schema
-```
-0: code (uint, required)
-1: message (string, required)
-2: details (string, optional)
-```
+
+    0: code (uint, required)
+    1: message (string, required)
+    2: details (string, optional)
 
 **Fields**:
 
@@ -150,7 +149,7 @@ Indicates whether the payload module is active.
 
 Announces a payload transfer by sending the `payload-begin` map described above (generic chunk fields plus MIME metadata). Devices MUST validate the MIME type (`-1` key) before accepting data. If the MIME type is unsupported, they SHOULD immediately return `fdo.payload:error` with code `1`.
 
-### fdo.payload:payload-data-<n>
+### fdo.payload:payload-data-\<n\>
 
 **Direction**: Owner → Device
 
@@ -223,91 +222,37 @@ Vendors may define custom MIME types using the `application/vnd.` prefix:
 
 ### Sequence Diagram
 
-```
-Owner                           Device
-  |                               |
-  | fdo.payload:payload-begin     |
-  |------------------------------>|
-  |                               | Validate MIME type & resources
-  |                               |
-  | fdo.payload:payload-data-0    |
-  |------------------------------>|
-  |                               | Accumulate chunk0
-  |                               |
-  | fdo.payload:payload-data-1    |
-  |------------------------------>|
-  |                               | Accumulate chunk1
-  |                               |
-  | ...                           |
-  |                               |
-  | fdo.payload:payload-end       |
-  |------------------------------>|
-  |                               | Verify hash/size, apply payload
-  |                               |
-  | fdo.payload:payload-result    |
-  |<------------------------------|
-```
-
-### Successful Transfer
-
-```
-Owner → Device: fdo.payload:active?
-Device → Owner: fdo.payload:active = true
-
-Owner → Device: fdo.payload:payload-begin {
-  0: 1024,
-  -1: "application/x-sh",
-  -2: "setup.sh"
-}
-Device → Owner: fdo.payload:ready = true
-
-Owner → Device: fdo.payload:payload-data-0 = h'...'
-Device → Owner: fdo.payload:ack = 512
-
-Owner → Device: fdo.payload:payload-data-1 = h'...'
-Device → Owner: fdo.payload:ack = 1024
-
-Owner → Device: fdo.payload:payload-end {
-  1: h'<sha256-hash>'
-}
-Device → Owner: fdo.payload:result {
-  0: true,
-  1: "Applied",
-  2: h'...'
-  1: "Applied"
-}
-```
-
-### Error During Transfer
-
-```
-Owner → Device: fdo.payload:payload-begin {
-  0: 2048,
-  -1: "text/cloud-config"
-}
-
-Owner → Device: fdo.payload:payload-data-0 h'...' / chunk 1 /
-
-Owner → Device: fdo.payload:payload-data-1 h'...' / chunk 2 /
-
-Device → Owner: fdo.payload:error {
-  0: 6,
-  1: "Checksum mismatch"
-}
-```
+    Owner                           Device
+      |                               |
+      | fdo.payload:payload-begin     |
+      |------------------------------>|
+      |                               | Validate MIME type & resources
+      |                               |
+      | fdo.payload:payload-data-0    |
+      |------------------------------>|
+      |                               | Accumulate chunk0
+      |                               |
+      | fdo.payload:payload-data-1    |
+      |------------------------------>|
+      |                               | Accumulate chunk1
+      |                               |
+      | ...                           |
+      |                               |
+      | fdo.payload:payload-end       |
+      |------------------------------>|
+      |                               | Verify hash/size, apply payload
+      | fdo.payload:payload-result    |
+      |<------------------------------|
 
 ### Unsupported MIME Type
 
-```
-Owner → Device: fdo.payload:payload-begin {
-  -1: "application/x-custom"
-}
-
-Device → Owner: fdo.payload:error {
-  0: 1,
-  1: "MIME type not supported"
-}
-```
+    Owner → Device: fdo.payload:payload-begin {
+      -1: "application/x-custom"
+    }
+    Device → Owner: fdo.payload:error {
+      0: 1,
+      1: "MIME type not supported"
+    }
 
 ## Implementation Requirements
 
@@ -412,19 +357,15 @@ Two representative scenarios illustrate how devices might act on payload content
 
 ### Shell Script Execution
 
-```
-MIME Type: application/x-sh
-Payload: h'23212f62696e2f626173680a6563686f2022436f6e6669677572696e67206465766963652e2e2e220a' / "#!/bin/bash\necho \"Configuring device...\"\n" /
-Result: [0, "Script executed", h'436f6e66...']
-```
+    MIME Type: application/x-sh
+    Payload: h'23212f62696e2f626173680a6563686f2022436f6e6669677572696e67206465766963652e2e2e220a' / "#!/bin/bash\necho \"Configuring device...\"\n" /
+    Result: [0, "Script executed", h'436f6e66...']
 
 ### Declarative Configuration (cloud-init)
 
-```
-MIME Type: text/cloud-config
-Payload: h'23636c6f75642d636f6e6669670a7061636b616765733a0a20202d206e67696e780a'
-Result: [0, "Cloud-init applied"]
-```
+    MIME Type: text/cloud-config
+    Payload: h'23636c6f75642d636f6e6669670a7061636b616765733a0a20202d206e67696e780a'
+    Result: [0, "Cloud-init applied"]
 
 ## Relationship to Other FSIMs
 

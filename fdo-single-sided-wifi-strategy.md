@@ -36,7 +36,7 @@ Create a dedicated `fdo.wifi-config` FSIM that:
 
 #### FSIM Access Control
 
-```
+```text
 Single-Sided Mode (Owner Not Attested):
 ├── fdo.wifi-config    ✅ ALLOWED
 ├── fdo.sysconfig      ❌ BLOCKED
@@ -247,30 +247,35 @@ type AuditLog struct {
 ## Development Tasks
 
 ### Priority 1: Core Protocol Changes
+
 - [ ] Add single-sided mode detection
 - [ ] Implement Owner verification bypass
 - [ ] Create mode state management
 - [ ] Update TO2 protocol flow
 
 ### Priority 2: FSIM Implementation
+
 - [ ] Create fdo.wifi-config FSIM specification
 - [ ] Implement FSIM access control
 - [ ] Update existing FSIMs with mode checks
 - [ ] Add FSIM filtering logic
 
 ### Priority 3: Client Integration
+
 - [ ] Update device client for single-sided mode
 - [ ] Implement network transition logic
 - [ ] Add state persistence across network changes
 - [ ] Create restart mechanism for double-sided onboarding
 
 ### Priority 4: Security & Testing
+
 - [ ] Implement information leakage prevention
 - [ ] Add enhanced rate limiting
 - [ ] Create comprehensive audit logging
 - [ ] Develop test suite for single-sided scenarios
 
 ### Priority 5: Documentation & Deployment
+
 - [ ] Update FDO specification
 - [ ] Create deployment guides
 - [ ] Add security analysis documentation
@@ -281,16 +286,19 @@ type AuditLog struct {
 ### Threat Model
 
 #### Malicious Wi-Fi Setup Service
+
 - **Risk**: Can provide malicious network credentials
 - **Mitigation**: Final onboarding fails without legitimate Owner
 - **Impact**: Temporary network exposure only
 
 #### Information Leakage
+
 - **Risk**: Device information exposure in single-sided mode
 - **Mitigation**: Block all non-Wi-Fi FSIMs
 - **Impact**: Minimal exposure, no persistent compromise
 
 #### Replay Attacks
+
 - **Risk**: Replayed single-sided attestation
 - **Mitigation**: Standard FDO replay protection mechanisms
 - **Impact**: Prevented by existing cryptographic protections
@@ -305,18 +313,21 @@ type AuditLog struct {
 ## Testing Strategy
 
 ### Unit Tests
+
 - Single-sided mode detection
 - FSIM access control
 - Network transition logic
 - State persistence
 
 ### Integration Tests
+
 - End-to-end single-sided onboarding
 - Network switching scenarios
 - Security boundary testing
 - Rate limiting verification
 
 ### Security Tests
+
 - Information leakage prevention
 - Malicious service handling
 - Replay attack resistance
@@ -325,16 +336,19 @@ type AuditLog struct {
 ## Deployment Considerations
 
 ### Backward Compatibility
+
 - Existing double-sided onboarding unchanged
 - New single-sided mode is additive
 - No breaking changes to existing deployments
 
 ### Configuration
+
 - DHCP Option 223 for Wi-Fi Setup service discovery
 - Manufacturer-specific Rendezvous list support
 - Configurable rate limiting parameters
 
 ### Monitoring
+
 - Single-sided mode usage metrics
 - Success/failure rate tracking
 - Security event monitoring
@@ -343,26 +357,31 @@ type AuditLog struct {
 ## Timeline
 
 ### Phase 1 (Weeks 1-2): Protocol Layer
+
 - Core protocol changes
 - Mode detection logic
 - Basic testing framework
 
-### Phase 2 (Weeks 3-4): FSIM Layer  
+### Phase 2 (Weeks 3-4): FSIM Layer
+
 - fdo.wifi-config implementation
 - Access control mechanisms
 - FSIM updates
 
 ### Phase 3 (Weeks 5-6): Client Integration
+
 - Device client updates
 - Network transition logic
 - State management
 
 ### Phase 4 (Weeks 7-8): Security & Testing
+
 - Security enhancements
 - Comprehensive testing
 - Performance optimization
 
 ### Phase 5 (Weeks 9-10): Documentation & Deployment
+
 - Documentation updates
 - Deployment guides
 - Final validation
