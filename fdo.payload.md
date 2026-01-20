@@ -200,6 +200,14 @@ The following MIME types are **non-normative** examples of formats a device MAY 
 - `application/toml` - TOML configuration
 - `text/x-ini` - INI configuration
 
+### SSH Keys
+
+- `application/x-ssh-key` - SSH private key (OpenSSH format)
+- `application/x-ssh-public-key` - SSH public key
+- `application/x-openssh-key` - OpenSSH format private key
+- `application/pkcs8` - PKCS#8 private key format
+- `text/plain` - SSH authorized_keys format (for public keys)
+
 ### Infrastructure as Code
 
 - `application/x-ansible` - Ansible playbook
@@ -371,15 +379,14 @@ Two representative scenarios illustrate how devices might act on payload content
 
 The `fdo.payload` FSIM complements other configuration FSIMs:
 
-- **fdo.ssh**: Configures SSH access (authentication)
 - **fdo.sysconfig**: Configures basic system parameters (identity, time, network)
 - **fdo.csr**: Configures certificates (security credentials)
-- **fdo.payload**: Delivers arbitrary configuration payloads (scripts, configs, binaries)
+- **fdo.payload**: Delivers arbitrary configuration payloads (scripts, configs, binaries, SSH keys)
 
 Together, these FSIMs provide comprehensive device onboarding:
 
 1. Basic system configuration (fdo.sysconfig)
-2. Security credentials (fdo.csr, fdo.ssh)
+2. Security credentials (fdo.csr)
 3. Advanced configuration (fdo.payload)
 
 ## Design Rationale

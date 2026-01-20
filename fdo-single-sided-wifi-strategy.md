@@ -41,15 +41,13 @@ Single-Sided Mode (Owner Not Attested):
 ├── fdo.wifi-config    ✅ ALLOWED
 ├── fdo.sysconfig      ❌ BLOCKED
 ├── fdo.devmod         ❌ BLOCKED
-├── fdo.payload        ❌ BLOCKED
-└── fdo.ssh            ❌ BLOCKED
+└── fdo.payload        ❌ BLOCKED
 
 Double-Sided Mode (Owner Attested):
 ├── fdo.wifi-config    ✅ ALLOWED
 ├── fdo.sysconfig      ✅ ALLOWED
 ├── fdo.devmod         ✅ ALLOWED
-├── fdo.payload        ✅ ALLOWED
-└── fdo.ssh            ✅ ALLOWED
+└── fdo.payload        ✅ ALLOWED
 ```
 
 ## Implementation Plan

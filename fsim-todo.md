@@ -63,38 +63,7 @@
 
 ---
 
-## 3. fdo.ssh.md
-
-### Strengths
-
-- Clear key installation flow
-- Good key type support
-- Atomic operation semantics
-
-### Areas for Improvement
-
-#### Security
-
-- [ ] Add key restrictions (command=, from=)
-- [ ] Add key options support
-- [ ] Implement key rotation
-- [ ] Add SSH CA support
-
-#### Features
-
-- [ ] Add certificate-based authentication
-- [ ] Add known_hosts management
-- [ ] Add key expiration
-
-#### Documentation
-
-- [ ] Add security considerations
-- [ ] Document key formats
-- [ ] Add example exchanges
-
----
-
-## 4. fdo.sysconfig.md
+## 3. fdo.sysconfig.md
 
 ### Strengths
 
