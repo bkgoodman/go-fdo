@@ -19,14 +19,14 @@ limitations under the License.
 
 The `fdo.sysconfig` FSIM enables configuration of essential system parameters during FDO device onboarding. This module provides a minimal, extensible mechanism for setting basic system configuration such as hostname, timezone, and time synchronization.
 
-This FSIM is designed to configure the minimum parameters needed to make a device "network-ready" after onboarding.
+This FSIM is designed to configure the minimum parameters needed to make a device "network-ready" after onboarding. It is intentionally scoped to **small key/value settings**; larger artifacts (certificates, configuration bundles, scripts) SHOULD be delivered via [`fdo.payload`](./fdo.payload.md), which can describe content using MIME types and chunked transport.
 
 ## Key-Value Pairs
 
 | FSIM Key | Direction | Value Type | Description |
 | -------- | --------- | ---------- | ----------- |
 | `fdo.sysconfig:active` | Bidirectional | `bool` | Module activation status |
-| `fdo.sysconfig:set` | Owner → Device | `SystemParam` | Set a system parameter |
+| `fdo.sysconfig:set` | Owner → Device | `SystemParam` | Set one or more small parameters inline |
 | `fdo.sysconfig:response` | Device → Owner | `SysconfigResponses` | Per-parameter responses (success/warning/error) |
 
 ## Data Structures
@@ -50,7 +50,16 @@ The `SystemParam` structure is a CBOR array (list) of key/value pairs. Each pair
 
 ## Standard Parameters
 
-The following parameters are defined by this specification and MUST be supported by compliant implementations:
+| Parameter  | Purpose                               | Typical Format            |
+| ---------- | -------------------------------------- | ------------------------- |
+| `hostname` | Device identity on the network         | Text hostname or FQDN     |
+| `timezone` | Local clock configuration              | IANA timezone string      |
+| `ntp-server` | Time synchronization source          | Hostname or IP address    |
+| `locale`   | Regional formats & character encoding  | POSIX locale (e.g., `en_US.UTF-8`) |
+| `language` | UI/message language preference         | ISO 639 / 639+3166 code   |
+| `wifi`     | Basic Wi-Fi network credentials        | JSON object (SSID, auth)  |
+
+These parameters are defined by this specification and MUST be supported by compliant implementations. Owners SHOULD restrict `fdo.sysconfig:set` payloads to short values; when the desired state requires larger data (cloud-init, PEM certificates, etc.), use `fdo.payload` with an appropriate MIME type instead.
 
 ### hostname
 
@@ -190,6 +199,7 @@ Configures WiFi network credentials for wireless connectivity.
 - Security type auto-detection allows devices to scan and determine appropriate settings
 - Implementations SHOULD support at least WPA2-PSK and open networks
 - Enterprise authentication (802.1X, RADIUS) is not covered by this parameter
+- This parameter exists purely for convenience during simple onboarding scenarios. If provisioning requires certificates, EAP credentials, Hotspot 2.0, or any advanced Wi-Fi workflows, owners MUST use the dedicated [`fdo.wifi-setup`](./fdo.wifi-setup.md) FSIM instead of `fdo.sysconfig:wifi`.
 
 **Security considerations:**
 
@@ -320,6 +330,25 @@ Reports the outcome of applying one or more parameters. One response entry per p
 
     fdo.sysconfig:error = 1  // Unknown parameter
 
+### Sequence Diagrams
+
+#### Basic Parameter Setting
+
+```text
+Owner                           Device
+  |                               |
+  | fdo.sysconfig:active(true)    |
+  |------------------------------>|
+  |                               | Activate module
+  |                               |
+  | fdo.sysconfig:set(params)     |
+  |------------------------------>|
+  |                               | Validate & apply parameters
+  |                               |
+  | fdo.sysconfig:response(codes) |
+  |<------------------------------|
+```
+
 ## Security Considerations
 
 ### Parameter Validation
@@ -420,13 +449,6 @@ This specification intentionally limits the standard parameter set to avoid:
 
 Additional parameters can be added through vendor-specific extensions or future specification revisions.
 
-## Future Extensions
+### Large Configuration Guidance
 
-Potential future standard parameters (informative, not normative):
-
-- `dns-server`: DNS server configuration
-- `syslog-server`: Remote syslog server
-- `proxy-server`: HTTP/HTTPS proxy configuration
-- `keyboard-layout`: Console keyboard layout
-
-These may be standardized in future revisions based on implementation experience and user requirements.
+`fdo.sysconfig` deliberately does **not** support chunking. Devices MAY reject oversized values (e.g., >1 KB) and instruct the owner to resend the material via `fdo.payload` with an appropriate MIME type (cloud-init, PEM, JSON template, etc.). This keeps `fdo.sysconfig` lightweight and focused on the core parameter set while providing a clear upgrade path for richer configuration flows.
