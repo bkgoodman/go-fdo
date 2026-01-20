@@ -24,6 +24,7 @@ type PayloadOwner struct {
 	currentSender *chunking.ChunkSender
 	currentIndex  int
 	sendState     payloadSendState
+	sentActive    bool
 	lastResult    *PayloadResult
 	lastError     *PayloadErrorInfo
 }
@@ -103,6 +104,15 @@ func (p *PayloadOwner) reset() {
 
 // produceInfo generates messages to send to the device using the chunking library.
 func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Producer) (blockPeer, moduleDone bool, _ error) {
+	// Send active message first if we have payloads to send
+	if !p.sentActive && len(p.payloads) > 0 {
+		if err := producer.WriteChunk("active", []byte{0xf5}); err != nil { // 0xf5 is CBOR true
+			return false, false, fmt.Errorf("error sending active message: %w", err)
+		}
+		p.sentActive = true
+		return false, false, nil
+	}
+
 	// Check if we're done with all payloads
 	if p.currentIndex >= len(p.payloads) && p.sendState == stateIdle {
 		return false, true, nil
@@ -130,9 +140,10 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 		p.sendState = stateSendingBegin
 	}
 
-	// State machine for sending
+	// State machine for sending - send begin, all chunks, and end in one call
 	switch p.sendState {
 	case stateSendingBegin:
+		fmt.Printf("[PayloadOwner] Sending begin message\n")
 		if err := p.currentSender.SendBegin(producer); err != nil {
 			return false, false, fmt.Errorf("failed to send begin: %w", err)
 		}
@@ -140,31 +151,58 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 			"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
 			"size", len(p.currentSender.Data))
 		p.sendState = stateSendingChunks
-		return false, false, nil
+		fmt.Printf("[PayloadOwner] Sent begin, continuing to send chunks\n")
+		// Fall through to send chunks in same call
+		fallthrough
 
 	case stateSendingChunks:
+		// Send chunks one at a time, respecting MTU limits
+		// Check if we have space for the next chunk
+		chunkIndex := p.currentSender.GetBytesSent() / int64(p.currentSender.ChunkSize)
+		chunkKey := fmt.Sprintf("payload-data-%d", chunkIndex)
+
+		// Estimate the size needed for the next chunk (chunk size + CBOR overhead)
+		// Add some buffer for CBOR encoding overhead
+		estimatedSize := p.currentSender.ChunkSize + 50
+		if producer.Available(chunkKey) < estimatedSize {
+			// Not enough space, block and continue in next round
+			fmt.Printf("[PayloadOwner] Not enough MTU space for next chunk, blocking\n")
+			return true, false, nil
+		}
+
+		fmt.Printf("[PayloadOwner] Sending chunk %d, totalSize=%d\n", chunkIndex, len(p.currentSender.Data))
 		done, err := p.currentSender.SendNextChunk(producer)
 		if err != nil {
 			return false, false, fmt.Errorf("failed to send chunk: %w", err)
 		}
 		if done {
+			fmt.Printf("[PayloadOwner] All chunks sent, transitioning to send end\n")
 			p.sendState = stateSendingEnd
+			// Don't send end in same round - let it happen in next ProduceInfo call
+			// This ensures we don't exceed MTU
+			return true, false, nil
 		}
-		return false, false, nil
+		fmt.Printf("[PayloadOwner] Chunk sent, will continue in next round\n")
+		// Block to continue sending more chunks in next round
+		return true, false, nil
 
 	case stateSendingEnd:
+		fmt.Printf("[PayloadOwner] Sending end message\n")
 		if err := p.currentSender.SendEnd(producer); err != nil {
 			return false, false, fmt.Errorf("failed to send end: %w", err)
 		}
 		slog.Debug("fdo.payload sent end")
+		fmt.Printf("[PayloadOwner] Sent end, waiting for result\n")
 		p.sendState = stateWaitingResult
-		// Block peer to wait for result
-		return true, false, nil
+		// Don't block - the device will send payload-result in the same round
+		// We'll receive it via HandleInfo before the next ProduceInfo call
+		return false, false, nil
 
 	case stateWaitingResult:
 		// Waiting for device to send payload-result
 		// This will be unblocked when we receive the result in HandleInfo
-		return true, false, nil
+		// Don't block or send anything - just wait for HandleInfo to be called
+		return false, false, nil
 	}
 
 	return false, false, nil
@@ -176,8 +214,16 @@ func (p *PayloadOwner) receive(ctx context.Context, key string, messageBody io.R
 
 	switch key {
 	case "active":
-		// Device responds with active status (not used in chunking flow)
+		// Device responds with active status
+		var deviceActive bool
+		if err := cbor.NewDecoder(messageBody).Decode(&deviceActive); err != nil {
+			return fmt.Errorf("error decoding active message: %w", err)
+		}
+		if !deviceActive {
+			return fmt.Errorf("device payload module is not active")
+		}
 		slog.Debug("fdo.payload device active status received")
+		return nil
 
 	case "payload-result":
 		// Device reports final result per fdo.payload.md
@@ -245,7 +291,11 @@ func (p *PayloadOwner) receive(ctx context.Context, key string, messageBody io.R
 		return fmt.Errorf("payload error %d: %s", code, message)
 
 	default:
-		slog.Warn("fdo.payload owner received unknown key", "key", key)
+		// Silently ignore unknown messages for protocol compatibility
+		if debugEnabled() {
+			slog.Debug("fdo.payload: ignoring unknown message", "messageName", key)
+		}
+		return nil
 	}
 
 	return nil

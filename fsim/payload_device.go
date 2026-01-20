@@ -69,22 +69,16 @@ func (p *Payload) Transition(active bool) error {
 
 // Receive implements serviceinfo.DeviceModule.
 func (p *Payload) Receive(ctx context.Context, messageName string, messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
-	// Handle active query
-	if messageName == "active" {
-		var active bool
-		if err := cbor.NewDecoder(messageBody).Decode(&active); err != nil {
-			return fmt.Errorf("invalid active message: %w", err)
-		}
-		w := respond("active")
-		return cbor.NewEncoder(w).Encode(p.Active)
-	}
+	fmt.Printf("[PayloadDevice] Receive called: messageName=%s\n", messageName)
 
 	// Handle chunked payload messages
 	if strings.HasPrefix(messageName, "payload-") {
+		fmt.Printf("[PayloadDevice] Handling chunked message: %s\n", messageName)
 		return p.handleChunkedMessage(messageName, messageBody, respond)
 	}
 
-	slog.Warn("fdo.payload received unknown message", "key", messageName)
+	fmt.Printf("[PayloadDevice] Ignoring unknown message: %s\n", messageName)
+	// Silently ignore unknown messages for protocol compatibility
 	return nil
 }
 
@@ -120,16 +114,20 @@ func (p *Payload) handleChunkedMessage(messageName string, messageBody io.Reader
 	// Handle the message using the chunking receiver
 	if err := p.receiver.HandleMessage(messageName, messageBody); err != nil {
 		// On error, send error response and reset
-		p.sendError(respond, 6, "Transfer error", err.Error())
+		if sendErr := p.sendError(respond, 6, "Transfer error", err.Error()); sendErr != nil {
+			return sendErr
+		}
 		p.receiver = nil
 		if p.Handler != nil {
 			p.Handler.CancelPayload()
 		}
-		return err
+		// Return nil to allow protocol to continue after sending error
+		return nil
 	}
 
 	// After successful end message, send result per fdo.payload.md
 	if strings.HasSuffix(messageName, "-end") && !p.receiver.IsReceiving() {
+		fmt.Printf("[PayloadDevice] Received end message, sending result\n")
 		// Send payload-result as array [status_code, ?message]
 		result := chunking.ResultMessage{
 			StatusCode: p.resultStatus,
@@ -137,13 +135,16 @@ func (p *Payload) handleChunkedMessage(messageName string, messageBody io.Reader
 		}
 		resultData, err := result.MarshalCBOR()
 		if err != nil {
+			fmt.Printf("[PayloadDevice] ERROR: failed to encode result: %v\n", err)
 			return fmt.Errorf("failed to encode result: %w", err)
 		}
 
 		w := respond("payload-result")
 		if _, err := w.Write(resultData); err != nil {
+			fmt.Printf("[PayloadDevice] ERROR: failed to send result: %v\n", err)
 			return fmt.Errorf("failed to send result: %w", err)
 		}
+		fmt.Printf("[PayloadDevice] Sent result successfully\n")
 
 		p.receiver = nil
 	}
@@ -153,6 +154,11 @@ func (p *Payload) handleChunkedMessage(messageName string, messageBody io.Reader
 
 // onBegin is called when payload-begin is received.
 func (p *Payload) onBegin(begin chunking.BeginMessage) error {
+	// Check if Handler is set
+	if p.Handler == nil {
+		return fmt.Errorf("payload handler not configured")
+	}
+
 	// Extract MIME type from field -1 (required per fdo.payload.md)
 	mimeType, ok := begin.FSIMFields[-1].(string)
 	if !ok || mimeType == "" {
@@ -226,7 +232,9 @@ func (p *Payload) sendError(respond func(string) io.Writer, code int, message, d
 		return fmt.Errorf("failed to encode error: %w", err)
 	}
 
-	return fmt.Errorf("payload error: %s", message)
+	// Return nil after successfully sending error message
+	// The error has been communicated to the owner via the error message
+	return nil
 }
 
 // payloadErrorString returns a human-readable error message for error codes.

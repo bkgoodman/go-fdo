@@ -65,8 +65,13 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 		case int:
 			switch k {
 			case 0:
+				// TotalSize can be decoded as uint64, int, or int64 depending on value
 				if v, ok := val.(uint64); ok {
 					b.TotalSize = v
+				} else if v, ok := val.(int); ok {
+					b.TotalSize = uint64(v)
+				} else if v, ok := val.(int64); ok {
+					b.TotalSize = uint64(v)
 				}
 			case 1:
 				if v, ok := val.(string); ok {
@@ -82,12 +87,44 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 					b.FSIMFields[k] = val
 				}
 			}
+		case int64:
+			// Handle int64 keys (CBOR may decode negative integers as int64)
+			ki := int(k)
+			switch ki {
+			case 0:
+				// TotalSize can be decoded as uint64, int, or int64 depending on value
+				if v, ok := val.(uint64); ok {
+					b.TotalSize = v
+				} else if v, ok := val.(int); ok {
+					b.TotalSize = uint64(v)
+				} else if v, ok := val.(int64); ok {
+					b.TotalSize = uint64(v)
+				}
+			case 1:
+				if v, ok := val.(string); ok {
+					b.HashAlg = v
+				}
+			case 2:
+				if v, ok := val.(map[any]any); ok {
+					b.Metadata = convertToStringMap(v)
+				}
+			default:
+				// Negative keys are FSIM-specific
+				if ki < 0 {
+					b.FSIMFields[ki] = val
+				}
+			}
 		case uint64:
 			// Handle uint64 keys (CBOR may decode as uint64)
 			switch k {
 			case 0:
+				// TotalSize can be decoded as uint64, int, or int64 depending on value
 				if v, ok := val.(uint64); ok {
 					b.TotalSize = v
+				} else if v, ok := val.(int); ok {
+					b.TotalSize = uint64(v)
+				} else if v, ok := val.(int64); ok {
+					b.TotalSize = uint64(v)
 				}
 			case 1:
 				if v, ok := val.(string); ok {

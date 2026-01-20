@@ -33,56 +33,73 @@ The SSH FSIM supports the following functionality:
 
 The following table describes key-value pairs for the SSH FSIM.
 
-| Direction | Key Name            | Value               | Meaning                                                    |
-| --------- | ------------------- | ------------------- | ---------------------------------------------------------- |
-| o <-> d   | `fdo.ssh:active`    | `bool`              | Instructs the device to activate or deactivate the module  |
-| o --> d   | `fdo.ssh:add-key`   | `SSHKeyInstalls`    | Install one or more SSH authorized public keys             |
-| o <-- d   | `fdo.ssh:host-keys` | `array of tstr`     | Device SSH host public keys                                |
-| o <-- d   | `fdo.ssh:response`  | `SSHKeyResponses`   | Status for the corresponding `add-key` message             |
+| Direction | Key Name                   | Value          | Meaning                                                    |
+| --------- | -------------------------- | -------------- | ---------------------------------------------------------- |
+| o <-> d   | `fdo.ssh:active`           | `bool`         | Instructs the device to activate or deactivate the module  |
+| o --> d   | `fdo.ssh:key-begin`        | `map`          | Announces the start of an SSH key installation transfer    |
+| o --> d   | `fdo.ssh:key-data-<n>`     | `bstr`         | Chunk of SSH key data (0-based index)                      |
+| o --> d   | `fdo.ssh:key-end`          | `map`          | Signals completion of SSH key transfer                     |
+| o <-- d   | `fdo.ssh:key-result`       | `[int, ?tstr]` | Status for the corresponding key installation              |
+| o <-- d   | `fdo.ssh:hostkey-begin`    | `map`          | Announces the start of a host key transfer                 |
+| o <-- d   | `fdo.ssh:hostkey-data-<n>` | `bstr`         | Chunk of host key data (0-based index)                     |
+| o <-- d   | `fdo.ssh:hostkey-end`      | `map`          | Signals completion of host key transfer                    |
+
+This FSIM follows the generic chunking strategy defined in `chunking-strategy.md`.
 
 ## Data Structures
 
-### SSHKeyInstall
+### Key Installation Metadata
 
-An individual SSH key to install on the device.
+The `fdo.ssh:key-begin` message uses the generic chunking `begin` structure with FSIM-specific metadata in negative keys:
 
-    SSHKeyInstall = {
-        key: tstr,           ; SSH public key in OpenSSH format
-        ? username: tstr,    ; Optional username for the key
-        ? sudo: bool         ; Optional flag indicating privileged access
+    key-begin = {
+        ? 0: uint,        ; total_size (optional)
+        ? 1: tstr,        ; hash_alg (optional, e.g., "sha256")
+        ? 2: map,         ; reserved for generic metadata
+        ? -1: tstr,       ; username (optional)
+        ? -2: bool        ; sudo flag (optional)
     }
 
-### SSHKeyInstalls
+**FSIM-Specific Fields (negative keys):**
 
-Array of one or more `SSHKeyInstall` objects carried in a single `fdo.ssh:add-key` message.
+- **-1 (username)**: Username for which the key should be installed. If not specified, the device implementation decides the target user (could be a default user, root, or implementation-specific behavior)
+- **-2 (sudo)**: Boolean flag indicating whether the user should have privileged (sudo/root) access. How this is implemented is device-specific (e.g., adding to sudoers file, wheel group, etc.)
 
-    SSHKeyInstalls = [ SSHKeyInstall, ... ]
+The key data itself (SSH public key in OpenSSH authorized_keys format) is transmitted via `fdo.ssh:key-data-<n>` chunks as raw bytes.
 
-**Fields:**
+### Host Key Metadata
 
-- **key** (required): SSH public key in OpenSSH authorized_keys format (e.g., "ssh-rsa AAAAB3NzaC1yc2EA... user@host")
-- **username** (optional): Username for which the key should be installed. If not specified, the device implementation decides the target user (could be a default user, root, or implementation-specific behavior)
-- **sudo** (optional): Boolean flag indicating whether the user should have privileged (sudo/root) access. How this is implemented is device-specific (e.g., adding to sudoers file, wheel group, etc.)
+The `fdo.ssh:hostkey-begin` message uses the generic chunking `begin` structure with optional FSIM-specific metadata:
 
-## fdo.ssh:add-key
+    hostkey-begin = {
+        ? 0: uint,        ; total_size (optional)
+        ? 1: tstr,        ; hash_alg (optional)
+        ? 2: map,         ; reserved for generic metadata
+        ? -1: tstr        ; key_type (optional, e.g., "ssh-rsa", "ssh-ed25519")
+    }
 
-The owning Device Management Service sends `fdo.ssh:add-key` with an array of one or more `SSHKeyInstall` items.
+**FSIM-Specific Fields (negative keys):**
 
-**Atomicity:** Status applies to the entire message. Devices SHOULD apply keys atomically per message:
+- **-1 (key_type)**: SSH key type identifier (e.g., "ssh-rsa", "ecdsa-sha2-nistp256", "ssh-ed25519"). This is informational and also present in the key data itself.
 
-- Success: all keys applied
-- Warning: keys applied but with caveats (see response message)
-- Error: no keys applied
+## Key Installation Protocol
 
-For non-atomic behavior, owners SHOULD send individual `add-key` messages (one key per message).
+The owner installs SSH authorized keys using the chunking protocol:
 
-The device processes each key in the array:
+1. **Owner sends `fdo.ssh:key-begin`** with metadata (username, sudo flag)
+2. **Owner sends `fdo.ssh:key-data-<n>`** chunks containing the SSH public key bytes
+3. **Owner sends `fdo.ssh:key-end`** to signal completion
+4. **Device sends `fdo.ssh:key-result`** with status code
 
-1. Parse each SSH public key to validate format
-2. Determine target user (username field or implementation default)
-3. Install the key in the appropriate authorized_keys file
-4. If sudo flag is set, configure privileged access per device policy
-5. Return a single `fdo.ssh:response` covering the whole array
+The device processes the key installation:
+
+1. Receive and buffer all key data chunks
+2. Verify hash if provided in `key-begin`
+3. Parse the SSH public key to validate format
+4. Determine target user (username from metadata or implementation default)
+5. Install the key in the appropriate authorized_keys file
+6. If sudo flag is set, configure privileged access per device policy
+7. Send `fdo.ssh:key-result` with status
 
 **Implementation Notes:**
 
@@ -90,7 +107,7 @@ The device processes each key in the array:
 - The device may create the user account if it doesn't exist, or may return an error
 - The device may create necessary directories and set appropriate permissions
 - Key format validation should follow OpenSSH standards
-- Multiple keys can be installed by sending multiple `fdo.ssh:add-key` messages
+- Multiple keys can be installed by repeating the chunking sequence
 
 **Example key formats:**
 
@@ -98,11 +115,14 @@ The device processes each key in the array:
     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@example.com
     ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY... user@example.com
 
-## fdo.ssh:host-keys
+## Host Key Transfer Protocol
 
-The device sends `fdo.ssh:host-keys` to report its SSH host public keys to the owning Device Management Service.
+The device sends its SSH host public keys to the owner using the chunking protocol. Each host key is sent as a separate chunked transfer:
 
-The value is an array of text strings, where each string is an SSH host public key in OpenSSH known_hosts format.
+1. **Device sends `fdo.ssh:hostkey-begin`** with optional metadata (key_type)
+2. **Device sends `fdo.ssh:hostkey-data-<n>`** chunks containing the SSH host public key bytes
+3. **Device sends `fdo.ssh:hostkey-end`** to signal completion
+4. Repeat for each host key type
 
 **Purpose:**
 
@@ -111,55 +131,67 @@ The owning Device Management Service can use these host keys to populate its `kn
 **Implementation Notes:**
 
 - The device should send all available host key types (RSA, ECDSA, Ed25519, etc.)
+- Each key type is sent as a separate chunked transfer
 - Keys should be in OpenSSH public key format
 - The device may generate new host keys if none exist
-- The order of keys in the array is not significant
+- The order of keys is not significant
 
-**Example response:**
+**Example key formats:**
 
-    [
-      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...",
-      "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY...",
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4..."
-    ]
+    ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...
+    ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY...
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4...
 
-## fdo.ssh:response
+## fdo.ssh:key-result
 
-The device sends `fdo.ssh:response` to report the outcome of the corresponding `add-key` message.
+The device sends `fdo.ssh:key-result` to report the outcome of the key installation. This follows the generic result message format from `chunking-strategy.md`:
 
-    SSHKeyResponses = [ SSHKeyResponse, ... ]
-
-    SSHKeyResponse = [
-        code: uint,        ; 0=success, 1=warning, 2=error
+    key-result = [
+        code: int,         ; 0=success, 1=warning, 2=error
         ? message: tstr    ; optional human-readable note (warnings/errors)
     ]
 
-Semantics:
+**Status Codes:**
 
-- code = 0 (success): All keys in the message were applied; message MAY be omitted.
-- code = 1 (warning): Keys were applied but with caveats (e.g., created default user, deprecated key type); message SHOULD describe the warning.
-- code = 2 (error): No keys in the message were applied; message SHOULD describe the failure cause.
+- **0 (success)**: Key was successfully installed; message MAY be omitted
+- **1 (warning)**: Key was installed but with caveats (e.g., created default user, deprecated key type); message SHOULD describe the warning
+- **2 (error)**: Key installation failed; message SHOULD describe the failure cause
 
-Examples (non-normative):
+**Examples (non-normative):**
 
-- Invalid key format → code=2, "bad request"
-- User not found and not created → code=2, "user not found"
-- Permission denied → code=2, "permission denied"
-- Partial support (e.g., unsupported key option ignored) but keys installed → code=1, "option ignored"
+- Invalid key format → `[2, "invalid SSH key format"]`
+- User not found and not created → `[2, "user not found"]`
+- Permission denied → `[2, "permission denied"]`
+- Unsupported key option ignored but key installed → `[1, "key option ignored"]`
+- Success → `[0]` or `[0, "key installed for user admin"]`
 
-Note: Success or failure here means the FDO layer accepted/applied the keys. It does not guarantee the underlying SSH implementation will accept them for login; operators should still verify reachability.
+**Note:** Success or failure here means the FDO layer accepted/applied the key. It does not guarantee the underlying SSH implementation will accept it for login; operators should still verify reachability.
 
 ## Example Exchange
 
-The following table describes an example exchange for the SSH FSIM:
+The following table describes an example exchange for the SSH FSIM using the chunking protocol:
 
-| Device sends | Owner sends | Meaning |
-| ------------ | ----------- | ------- |
-| `[fdo.ssh:active, True]` | - | Device instructs owner to activate the SSH FSIM |
-| - | `[fdo.ssh:add-key, [ {key: "ssh-rsa AAAA...", username: "admin", sudo: true}, {key: "ssh-ed25519 AAAA...", username: "operator"} ]]` | Owner installs two keys in one atomic message |
-| `[fdo.ssh:response, [0]]` | - | Device reports success for that add-key message |
-| `[fdo.ssh:host-keys, ["ssh-rsa AAAA...", "ssh-ed25519 AAAA..."]]` | - | Device reports host keys |
-| `[fdo.ssh:active, False]` | - | Device instructs owner to deactivate the SSH FSIM |
+| Direction | Message | Meaning |
+| --------- | ------- | ------- |
+| o --> d | `[fdo.ssh:active, true]` | Owner activates the SSH FSIM |
+| d --> o | `[fdo.ssh:active, true]` | Device confirms activation |
+| o --> d | `[fdo.ssh:key-begin, {-1: "admin", -2: true}]` | Owner begins key transfer with username and sudo flag |
+| o --> d | `[fdo.ssh:key-data-0, h'73736820...]` | Owner sends key data chunk 0 |
+| o --> d | `[fdo.ssh:key-data-1, h'414141...]` | Owner sends key data chunk 1 |
+| o --> d | `[fdo.ssh:key-end, {}]` | Owner signals completion |
+| d --> o | `[fdo.ssh:key-result, [0, "key installed"]]` | Device reports success |
+| o --> d | `[fdo.ssh:key-begin, {-1: "operator"}]` | Owner begins second key transfer |
+| o --> d | `[fdo.ssh:key-data-0, h'73736820...]` | Owner sends key data |
+| o --> d | `[fdo.ssh:key-end, {}]` | Owner signals completion |
+| d --> o | `[fdo.ssh:key-result, [0]]` | Device reports success |
+| d --> o | `[fdo.ssh:hostkey-begin, {-1: "ssh-rsa"}]` | Device begins host key transfer |
+| d --> o | `[fdo.ssh:hostkey-data-0, h'73736820...]` | Device sends host key data |
+| d --> o | `[fdo.ssh:hostkey-end, {}]` | Device signals completion |
+| d --> o | `[fdo.ssh:hostkey-begin, {-1: "ssh-ed25519"}]` | Device begins second host key transfer |
+| d --> o | `[fdo.ssh:hostkey-data-0, h'73736820...]` | Device sends host key data |
+| d --> o | `[fdo.ssh:hostkey-end, {}]` | Device signals completion |
+| o --> d | `[fdo.ssh:active, false]` | Owner deactivates the SSH FSIM |
+| d --> o | `[fdo.ssh:active, false]` | Device confirms deactivation |
 
 ## Security Considerations
 
@@ -221,46 +253,51 @@ The use of standard OpenSSH key formats ensures broad compatibility.
 
 ### Basic Remote Access
 
-Install a single SSH key for administrative access:
+Install a single SSH key for administrative access using chunking:
 
-    Owner sends: fdo.ssh:add-key {
-        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqn... admin@company.com",
-        username: "admin",
-        sudo: true
-    }
+    Owner sends: fdo.ssh:key-begin {-1: "admin", -2: true}
+    Owner sends: fdo.ssh:key-data-0 <key bytes>
+    Owner sends: fdo.ssh:key-end {}
+    Device sends: fdo.ssh:key-result [0]
 
 ### Multiple User Access
 
-Install keys for multiple users with different privilege levels:
+Install keys for multiple users with different privilege levels by repeating the chunking sequence:
 
-    Owner sends: fdo.ssh:add-key {
-        key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... admin@company.com",
-        username: "admin",
-        sudo: true
-    }
+    # First key (admin with sudo)
+    Owner sends: fdo.ssh:key-begin {-1: "admin", -2: true}
+    Owner sends: fdo.ssh:key-data-0 <key bytes>
+    Owner sends: fdo.ssh:key-end {}
+    Device sends: fdo.ssh:key-result [0]
     
-    Owner sends: fdo.ssh:add-key {
-        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4... operator@company.com",
-        username: "operator",
-        sudo: false
-    }
+    # Second key (operator without sudo)
+    Owner sends: fdo.ssh:key-begin {-1: "operator", -2: false}
+    Owner sends: fdo.ssh:key-data-0 <key bytes>
+    Owner sends: fdo.ssh:key-end {}
+    Device sends: fdo.ssh:key-result [0]
 
 ### Default User Access
 
 Install key without specifying username (device uses default):
 
-    Owner sends: fdo.ssh:add-key {
-        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4... user@company.com"
-    }
+    Owner sends: fdo.ssh:key-begin {}
+    Owner sends: fdo.ssh:key-data-0 <key bytes>
+    Owner sends: fdo.ssh:key-end {}
+    Device sends: fdo.ssh:key-result [0]
 
 ### Host Key Verification
 
-After onboarding, the owner receives host keys and can verify subsequent connections:
+After onboarding, the owner receives host keys via chunking and can verify subsequent connections:
 
-    Device sends: fdo.ssh:host-keys [
-        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...",
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4..."
-    ]
+    # Device sends first host key
+    Device sends: fdo.ssh:hostkey-begin {-1: "ssh-rsa"}
+    Device sends: fdo.ssh:hostkey-data-0 <key bytes>
+    Device sends: fdo.ssh:hostkey-end {}
+    
+    # Device sends second host key
+    Device sends: fdo.ssh:hostkey-begin {-1: "ssh-ed25519"}
+    Device sends: fdo.ssh:hostkey-data-0 <key bytes>
+    Device sends: fdo.ssh:hostkey-end {}
     
     Owner adds to known_hosts:
     device-hostname ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...

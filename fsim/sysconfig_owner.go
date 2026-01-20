@@ -25,6 +25,7 @@ type SysConfigOwner struct {
 
 	// Internal state
 	paramIndex      int
+	sentActive      bool
 	pendingResponse *pendingSystemResponse
 }
 
@@ -57,12 +58,24 @@ func (s *SysConfigOwner) HandleInfo(ctx context.Context, messageName string, mes
 		return fmt.Errorf("device reported system error %d: %s", errCode, sysconfigErrorString(errCode))
 
 	default:
-		return fmt.Errorf("unknown message %s", messageName)
+		// Silently ignore unknown messages for protocol compatibility
+		if debugEnabled() {
+			slog.Debug("fdo.sysconfig: ignoring unknown message", "messageName", messageName)
+		}
+		return nil
 	}
 }
 
 // ProduceInfo implements serviceinfo.OwnerModule.
 func (s *SysConfigOwner) ProduceInfo(ctx context.Context, producer *serviceinfo.Producer) (blockPeer, moduleDone bool, _ error) {
+	// Send active message first if we have parameters to send
+	if !s.sentActive && len(s.Parameters) > 0 {
+		if err := producer.WriteChunk("active", []byte{0xf5}); err != nil { // 0xf5 is CBOR true
+			return false, false, fmt.Errorf("error sending active message: %w", err)
+		}
+		s.sentActive = true
+	}
+
 	// Send pending response if any
 	if s.pendingResponse != nil {
 		if s.pendingResponse.errorCode != nil {

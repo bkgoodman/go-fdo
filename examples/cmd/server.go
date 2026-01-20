@@ -73,6 +73,9 @@ var (
 	uploadDir            string
 	uploadReqs           stringList
 	wgets                stringList
+	sysconfig            stringList
+	payloadFile          string
+	payloadMimeType      string
 	initOnly             bool
 )
 
@@ -114,6 +117,9 @@ func init() {
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
 	serverFlags.Var(&uploadReqs, "upload", "Use fdo.upload FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.Var(&wgets, "wget", "Use fdo.wget FSIM for each `url` (flag may be used multiple times)")
+	serverFlags.Var(&sysconfig, "sysconfig", "Use fdo.sysconfig FSIM with `key=value` pairs (flag may be used multiple times)")
+	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
+	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
@@ -870,7 +876,33 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 
-		if cmdDate && slices.Contains(modules, "fdo.command") {
+		if slices.Contains(modules, "fdo.sysconfig") && len(sysconfig) > 0 {
+			sysconfigOwner := &fsim.SysConfigOwner{}
+			for _, param := range sysconfig {
+				parts := strings.SplitN(param, "=", 2)
+				if len(parts) != 2 {
+					log.Fatalf("invalid sysconfig parameter %q: expected key=value format", param)
+				}
+				sysconfigOwner.AddParameter(parts[0], parts[1])
+			}
+			if !yield("fdo.sysconfig", sysconfigOwner) {
+				return
+			}
+		}
+
+		if slices.Contains(modules, "fdo.payload") && payloadFile != "" {
+			data, err := os.ReadFile(payloadFile)
+			if err != nil {
+				log.Fatalf("error reading payload file %q: %v", payloadFile, err)
+			}
+			payloadOwner := &fsim.PayloadOwner{}
+			payloadOwner.AddPayload(payloadMimeType, filepath.Base(payloadFile), data, nil)
+			if !yield("fdo.payload", payloadOwner) {
+				return
+			}
+		}
+
+		if slices.Contains(modules, "fdo.command") {
 			if !yield("fdo.command", &fsim.RunCommand{
 				Command: "date",
 				Args:    []string{"+%s"},

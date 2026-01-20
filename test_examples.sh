@@ -568,6 +568,81 @@ echo "Hello from typed shell payload"'
 	log_success "Attested Payload (Shell/OpenSSL Interoperability) test PASSED"
 }
 
+# Test: Sysconfig FSIM
+# This test demonstrates the fdo.sysconfig FSIM with key=value parameters
+test_sysconfig() {
+	log_section "TEST: Sysconfig FSIM"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	start_server "-sysconfig hostname=test-device -sysconfig timezone=UTC -sysconfig ntp-server=pool.ntp.org"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with sysconfig parameters"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with sysconfig parameters"
+
+	stop_server
+	log_success "Sysconfig FSIM test PASSED"
+}
+
+# Test: Payload FSIM
+# This test demonstrates the fdo.payload FSIM by sending a file and verifying it's received correctly
+test_payload() {
+	log_section "TEST: Payload FSIM"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create a random test file (10KB to test multi-chunk transfer)
+	# Default chunk size is 1014 bytes, so 10KB will require ~10 chunks
+	PAYLOAD_FILE="test_payload.bin"
+	RECEIVED_FILE="test_payload.bin"
+	log_step "Creating random test file (10KB for multi-chunk transfer)"
+	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=10 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
+	log_success "Created test file: $PAYLOAD_FILE (hash: $ORIGINAL_HASH)"
+
+	start_server "-payload-file ../$PAYLOAD_FILE -payload-mime application/octet-stream"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with payload transfer"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with payload transfer"
+
+	stop_server
+
+	# Verify the received file matches the original
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found: $RECEIVED_FILE"
+		rm -f "$PAYLOAD_FILE"
+		return 1
+	fi
+
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	log_step "Verifying file integrity"
+	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
+		log_success "File hashes match! Payload transferred correctly"
+		log_success "  Original:  $ORIGINAL_HASH"
+		log_success "  Received:  $RECEIVED_HASH"
+	else
+		log_error "File hashes DO NOT match!"
+		log_error "  Original:  $ORIGINAL_HASH"
+		log_error "  Received:  $RECEIVED_HASH"
+		rm -f "$PAYLOAD_FILE" "$RECEIVED_FILE"
+		return 1
+	fi
+
+	# Cleanup
+	rm -f "$PAYLOAD_FILE" "$RECEIVED_FILE"
+	log_success "Payload FSIM test PASSED"
+}
+
 # Test: Bad Delegate Rejection (Security Test)
 # This test verifies that a delegate chain created with a DIFFERENT owner key
 # (simulating an attacker) cannot be used for onboarding.
@@ -627,6 +702,8 @@ test_all() {
 	test_attested_payload_encrypted || failed=1
 	test_attested_payload_delegate || failed=1
 	test_attested_payload_shell || failed=1
+	test_sysconfig || failed=1
+	test_payload || failed=1
 	test_bad_delegate || failed=1
 
 	echo ""
@@ -695,12 +772,18 @@ main() {
 	attested-payload-shell)
 		test_attested_payload_shell
 		;;
+	sysconfig)
+		test_sysconfig
+		;;
+	payload)
+		test_payload
+		;;
 	all)
 		test_all
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, all"
 		exit 1
 		;;
 	esac

@@ -5,7 +5,6 @@ package fsim
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -61,24 +60,12 @@ func (s *SysConfig) Receive(ctx context.Context, messageName string, messageBody
 
 func (s *SysConfig) receive(ctx context.Context, messageName string, messageBody io.Reader, respond func(string) io.Writer) error {
 	switch messageName {
-	case "active":
-		var ownerActive bool
-		if err := cbor.NewDecoder(messageBody).Decode(&ownerActive); err != nil {
-			return fmt.Errorf("error decoding active message: %w", err)
-		}
-
-		// Respond that we're active
-		if err := cbor.NewEncoder(respond("active")).Encode(true); err != nil {
-			return fmt.Errorf("error sending active response: %w", err)
-		}
-
-		return nil
-
 	case "set":
 		return s.receiveSet(messageBody, respond)
 
 	default:
-		return fmt.Errorf("unknown message %s", messageName)
+		// Silently ignore unknown messages to maintain protocol compatibility
+		return nil
 	}
 }
 
@@ -99,9 +86,12 @@ func (s *SysConfig) receiveSet(messageBody io.Reader, respond func(string) io.Wr
 		return fmt.Errorf("error decoding set message: %w", err)
 	}
 
-	// Check that callback is provided
+	// If no callback is provided, just log and continue
 	if s.SetParameter == nil {
-		return errors.New("SetParameter callback is required but not provided")
+		if debugEnabled() {
+			slog.Debug("fdo.sysconfig: no SetParameter callback provided, parameter will be ignored", "parameter", param.Parameter)
+		}
+		return nil
 	}
 
 	// Set parameter via callback - both parameter and value are treated as opaque strings

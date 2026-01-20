@@ -413,6 +413,61 @@ TO1:
 	return nil, fmt.Errorf("TO2 failed on all addresses")
 }
 
+// payloadHandler implements fsim.PayloadHandler to save received payloads
+type payloadHandler struct {
+	buffer   *[]byte
+	name     *string
+	mimeType string
+}
+
+func (h *payloadHandler) SupportsMimeType(mimeType string) bool {
+	// Accept all MIME types
+	return true
+}
+
+func (h *payloadHandler) BeginPayload(mimeType, name string, size uint64, metadata map[string]any) error {
+	fmt.Printf("[fdo.payload] BeginPayload called: name=%s, mime=%s, size=%d\n", name, mimeType, size)
+	if h.buffer == nil {
+		fmt.Printf("[fdo.payload] ERROR: buffer is nil\n")
+		return fmt.Errorf("payload handler buffer is nil")
+	}
+	if h.name == nil {
+		fmt.Printf("[fdo.payload] ERROR: name pointer is nil\n")
+		return fmt.Errorf("payload handler name pointer is nil")
+	}
+	h.mimeType = mimeType
+	*h.name = name
+	*h.buffer = make([]byte, 0, size)
+	fmt.Printf("[fdo.payload] BeginPayload successful, buffer allocated\n")
+	return nil
+}
+
+func (h *payloadHandler) ReceiveChunk(data []byte) error {
+	fmt.Printf("[fdo.payload] ReceiveChunk called: %d bytes\n", len(data))
+	*h.buffer = append(*h.buffer, data...)
+	return nil
+}
+
+func (h *payloadHandler) EndPayload() (statusCode int, message string, err error) {
+	fmt.Printf("[fdo.payload] EndPayload called: %d bytes total\n", len(*h.buffer))
+	// Save payload to file
+	filename := *h.name
+	if filename == "" {
+		filename = "received_payload.bin"
+	}
+	if err := os.WriteFile(filename, *h.buffer, 0644); err != nil {
+		fmt.Printf("[fdo.payload] ERROR: failed to save file: %v\n", err)
+		return 2, fmt.Sprintf("failed to save payload: %v", err), err
+	}
+	fmt.Printf("[fdo.payload] Saved payload to: %s (%d bytes)\n", filename, len(*h.buffer))
+	return 0, fmt.Sprintf("saved to %s", filename), nil
+}
+
+func (h *payloadHandler) CancelPayload() error {
+	*h.buffer = nil
+	return nil
+}
+
 func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], conf fdo.TO2Config) (*fdo.DeviceCredential, error) {
 	fsims := map[string]serviceinfo.DeviceModule{
 		"fido_alliance": &fsim.Interop{},
@@ -460,6 +515,23 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 			Timeout: 10 * time.Second,
 		}
 	}
+	fsims["fdo.sysconfig"] = &fsim.SysConfig{
+		SetParameter: func(parameter, value string) error {
+			fmt.Printf("[fdo.sysconfig] Received parameter: %s = %s\n", parameter, value)
+			return nil
+		},
+	}
+
+	// Add payload handler to receive and save payloads
+	var payloadBuffer []byte
+	var payloadName string
+	fsims["fdo.payload"] = &fsim.Payload{
+		Handler: &payloadHandler{
+			buffer: &payloadBuffer,
+			name:   &payloadName,
+		},
+	}
+
 	conf.DeviceModules = fsims
 
 	// Call version-specific TO2 function
