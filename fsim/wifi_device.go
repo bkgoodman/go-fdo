@@ -93,12 +93,15 @@ func (w *WiFi) Transition(active bool) error {
 func (w *WiFi) Receive(ctx context.Context, messageName string, messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
 	slog.Debug("fdo.wifi received message", "key", messageName)
 
-	// Handle active query
+	// Handle active message
 	if messageName == "active" {
 		var active bool
 		if err := cbor.NewDecoder(messageBody).Decode(&active); err != nil {
 			return fmt.Errorf("invalid active message: %w", err)
 		}
+		w.Active = active
+		slog.Debug("fdo.wifi active state set", "active", active)
+		// Respond with our active state
 		writer := respond("active")
 		return cbor.NewEncoder(writer).Encode(w.Active)
 	}
@@ -108,31 +111,7 @@ func (w *WiFi) Receive(ctx context.Context, messageName string, messageBody io.R
 		return w.handleNetworkAdd(messageBody)
 	}
 
-	// Handle CSR chunked messages (device sends to owner)
-	if strings.HasPrefix(messageName, "csr-") {
-		return w.handleCSRMessage(messageName, messageBody, respond)
-	}
-
-	// Handle certificate chunked messages (owner sends to device)
-	if strings.HasPrefix(messageName, "cert-") {
-		return w.handleCertMessage(messageName, messageBody, respond)
-	}
-
-	// Handle CA chunked messages (owner sends to device)
-	if strings.HasPrefix(messageName, "ca-") {
-		return w.handleCAMessage(messageName, messageBody, respond)
-	}
-
-	// Handle error
-	if messageName == "error" {
-		var errCode uint
-		if err := cbor.NewDecoder(messageBody).Decode(&errCode); err != nil {
-			return fmt.Errorf("invalid error message: %w", err)
-		}
-		return fmt.Errorf("wifi error %d: %s", errCode, wifiErrorString(errCode))
-	}
-
-	slog.Warn("fdo.wifi received unknown message", "key", messageName)
+	// Silently ignore unknown messages for protocol compatibility
 	return nil
 }
 

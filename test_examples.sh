@@ -643,6 +643,29 @@ test_payload() {
 	log_success "Payload FSIM test PASSED"
 }
 
+# Test: WiFi FSIM (network-add only)
+# This test verifies that the WiFi FSIM can send network configurations
+# from the server to the device, which displays them.
+test_wifi() {
+	log_section "TEST: WiFi FSIM (network-add)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	log_step "Starting server with WiFi config"
+	start_server "-wifi-config ../examples/wifi_config.json"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with WiFi network configuration"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with WiFi network-add"
+
+	stop_server
+	log_success "WiFi FSIM test PASSED"
+}
+
 # Test: Bad Delegate Rejection (Security Test)
 # This test verifies that a delegate chain created with a DIFFERENT owner key
 # (simulating an attacker) cannot be used for onboarding.
@@ -704,6 +727,7 @@ test_all() {
 	test_attested_payload_shell || failed=1
 	test_sysconfig || failed=1
 	test_payload || failed=1
+	test_wifi || failed=1
 	test_bad_delegate || failed=1
 
 	echo ""
@@ -778,12 +802,15 @@ main() {
 	payload)
 		test_payload
 		;;
+	wifi)
+		test_wifi
+		;;
 	all)
 		test_all
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, all"
 		exit 1
 		;;
 	esac

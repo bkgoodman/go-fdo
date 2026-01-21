@@ -433,6 +433,59 @@ func (h *payloadHandler) HandlePayload(ctx context.Context, mimeType, name strin
 	return 0, fmt.Sprintf("saved to %s", filename), nil
 }
 
+// wifiHandler implements fsim.WiFiHandler to display WiFi network configuration.
+// For this simple test, we just display the networks received from the server.
+type wifiHandler struct{}
+
+func (h *wifiHandler) AddNetwork(network *fsim.WiFiNetwork) error {
+	fmt.Printf("[fdo.wifi] Received network configuration:\n")
+	fmt.Printf("  Version:     %s\n", network.Version)
+	fmt.Printf("  NetworkID:   %s\n", network.NetworkID)
+	fmt.Printf("  SSID:        %s\n", network.SSID)
+	fmt.Printf("  AuthType:    %d", network.AuthType)
+	switch network.AuthType {
+	case 0:
+		fmt.Printf(" (open)")
+	case 1:
+		fmt.Printf(" (wpa2-psk)")
+	case 2:
+		fmt.Printf(" (wpa3-psk)")
+	case 3:
+		fmt.Printf(" (wpa3-enterprise)")
+	}
+	fmt.Printf("\n")
+	if len(network.Password) > 0 {
+		fmt.Printf("  Password:    %s\n", string(network.Password))
+	}
+	fmt.Printf("  TrustLevel:  %d", network.TrustLevel)
+	switch network.TrustLevel {
+	case 0:
+		fmt.Printf(" (onboard-only)")
+	case 1:
+		fmt.Printf(" (full-access)")
+	}
+	fmt.Printf("\n")
+	return nil
+}
+
+func (h *wifiHandler) GenerateCSR(networkID, ssid string) (csrData []byte, metadata map[string]any, err error) {
+	// Not implemented for this simple test
+	fmt.Printf("[fdo.wifi] GenerateCSR called (not supported)\n")
+	return nil, nil, fmt.Errorf("CSR generation not supported in this test")
+}
+
+func (h *wifiHandler) InstallCertificate(networkID, ssid string, certData []byte, metadata map[string]any) (statusCode int, message string, err error) {
+	// Not implemented for this simple test
+	fmt.Printf("[fdo.wifi] InstallCertificate called (not supported)\n")
+	return 2, "Certificate installation not supported in this test", nil
+}
+
+func (h *wifiHandler) InstallCACerts(networkID, bundleID string, caData []byte, metadata map[string]any) (statusCode int, message string, err error) {
+	// Not implemented for this simple test
+	fmt.Printf("[fdo.wifi] InstallCACerts called (not supported)\n")
+	return 2, "CA certificate installation not supported in this test", nil
+}
+
 func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], conf fdo.TO2Config) (*fdo.DeviceCredential, error) {
 	fsims := map[string]serviceinfo.DeviceModule{
 		"fido_alliance": &fsim.Interop{},
@@ -491,6 +544,11 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	// Using UnifiedHandler - the framework handles chunking transparently
 	fsims["fdo.payload"] = &fsim.Payload{
 		UnifiedHandler: &payloadHandler{},
+	}
+
+	// Add WiFi handler to display network configuration
+	fsims["fdo.wifi"] = &fsim.WiFi{
+		Handler: &wifiHandler{},
 	}
 
 	conf.DeviceModules = fsims

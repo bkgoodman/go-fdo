@@ -13,6 +13,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -76,6 +77,7 @@ var (
 	sysconfig            stringList
 	payloadFile          string
 	payloadMimeType      string
+	wifiConfigFile       string
 	initOnly             bool
 )
 
@@ -120,6 +122,7 @@ func init() {
 	serverFlags.Var(&sysconfig, "sysconfig", "Use fdo.sysconfig FSIM with `key=value` pairs (flag may be used multiple times)")
 	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
+	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
@@ -902,6 +905,16 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 
+		if slices.Contains(modules, "fdo.wifi") && wifiConfigFile != "" {
+			wifiOwner, err := loadWiFiConfig(wifiConfigFile)
+			if err != nil {
+				log.Fatalf("error loading WiFi config from %q: %v", wifiConfigFile, err)
+			}
+			if !yield("fdo.wifi", wifiOwner) {
+				return
+			}
+		}
+
 		if slices.Contains(modules, "fdo.command") {
 			if !yield("fdo.command", &fsim.RunCommand{
 				Command: "date",
@@ -913,4 +926,42 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 	}
+}
+
+// WiFiConfigEntry represents a single WiFi network in the JSON config file
+type WiFiConfigEntry struct {
+	Version    string `json:"version"`
+	NetworkID  string `json:"network_id"`
+	SSID       string `json:"ssid"`
+	AuthType   int    `json:"auth_type"`
+	Password   string `json:"password"`
+	TrustLevel int    `json:"trust_level"`
+}
+
+// loadWiFiConfig loads WiFi network configurations from a JSON file
+func loadWiFiConfig(filePath string) (*fsim.WiFiOwner, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read WiFi config file: %w", err)
+	}
+
+	var entries []WiFiConfigEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse WiFi config JSON: %w", err)
+	}
+
+	wifiOwner := &fsim.WiFiOwner{}
+	for _, entry := range entries {
+		network := &fsim.WiFiNetwork{
+			Version:    entry.Version,
+			NetworkID:  entry.NetworkID,
+			SSID:       entry.SSID,
+			AuthType:   entry.AuthType,
+			Password:   []byte(entry.Password),
+			TrustLevel: entry.TrustLevel,
+		}
+		wifiOwner.AddNetwork(network)
+	}
+
+	return wifiOwner, nil
 }
