@@ -936,6 +936,7 @@ type WiFiConfigEntry struct {
 	AuthType   int    `json:"auth_type"`
 	Password   string `json:"password"`
 	TrustLevel int    `json:"trust_level"`
+	NeedsCert  bool   `json:"needs_cert"`
 }
 
 // loadWiFiConfig loads WiFi network configurations from a JSON file
@@ -961,6 +962,46 @@ func loadWiFiConfig(filePath string) (*fsim.WiFiOwner, error) {
 			TrustLevel: entry.TrustLevel,
 		}
 		wifiOwner.AddNetwork(network)
+
+		// If this is an enterprise network that needs a certificate, add a fake cert and CA bundle
+		if entry.NeedsCert && entry.AuthType == 3 {
+			fakeCert := []byte("-----BEGIN CERTIFICATE-----\n" +
+				"MIIDXTCCAkWgAwIBAgIJAKL0UG+mRKKzMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV\n" +
+				"BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX\n" +
+				"aWRnaXRzIFB0eSBMdGQwHhcNMjQwMTAxMDAwMDAwWhcNMjUwMTAxMDAwMDAwWjBF\n" +
+				"-----END CERTIFICATE-----\n")
+
+			cert := fsim.WiFiCertificate{
+				NetworkID: entry.NetworkID,
+				SSID:      entry.SSID,
+				CertRole:  0, // client certificate
+				CertData:  fakeCert,
+				Metadata: map[string]any{
+					"cert_type": "x509",
+					"format":    "pem",
+				},
+			}
+			wifiOwner.AddCertificate(cert)
+
+			// Add fake CA bundle (root CA certificate)
+			fakeCA := []byte("-----BEGIN CERTIFICATE-----\n" +
+				"MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n" +
+				"ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n" +
+				"b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n" +
+				"MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n" +
+				"-----END CERTIFICATE-----\n")
+
+			caBundle := fsim.WiFiCABundle{
+				NetworkID: entry.NetworkID,
+				BundleID:  "root-ca",
+				CAData:    fakeCA,
+				Metadata: map[string]any{
+					"cert_type": "x509",
+					"format":    "pem",
+				},
+			}
+			wifiOwner.AddCABundle(caBundle)
+		}
 	}
 
 	return wifiOwner, nil

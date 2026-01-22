@@ -659,9 +659,8 @@ test_wifi() {
 	log_success "DI completed"
 
 	log_step "Running TO1/TO2 with WiFi network configuration"
-	run_cmd go run ./cmd client
+	run_cmd timeout 30 go run ./cmd client
 	log_success "TO1/TO2 completed with WiFi network-add"
-
 	stop_server
 	log_success "WiFi FSIM test PASSED"
 }

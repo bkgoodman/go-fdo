@@ -62,6 +62,7 @@ type WiFi struct {
 	Active bool
 
 	// Internal state for chunked transfers
+	csrSender    *chunking.ChunkSender
 	csrReceiver  *chunking.ChunkReceiver
 	certReceiver *chunking.ChunkReceiver
 	caReceiver   *chunking.ChunkReceiver
@@ -69,6 +70,10 @@ type WiFi struct {
 	// Current network context
 	currentNetworkID string
 	currentSSID      string
+	needsCSR         bool
+	csrData          []byte
+	csrMetadata      map[string]any
+	csrState         int // 0=not started, 1=sent begin, 2=sent data, 3=sent end
 
 	// Result storage
 	csrResultStatus  int
@@ -106,9 +111,19 @@ func (w *WiFi) Receive(ctx context.Context, messageName string, messageBody io.R
 		return cbor.NewEncoder(writer).Encode(w.Active)
 	}
 
-	// Handle network-add
+	// Handle network-add messages
 	if messageName == "network-add" {
-		return w.handleNetworkAdd(messageBody)
+		return w.handleNetworkAdd(messageBody, respond)
+	}
+
+	// Handle certificate messages
+	if strings.HasPrefix(messageName, "cert-") {
+		return w.handleCertificate(messageName, messageBody, respond)
+	}
+
+	// Handle CA bundle messages
+	if strings.HasPrefix(messageName, "ca-") {
+		return w.handleCABundle(messageName, messageBody, respond)
 	}
 
 	// Silently ignore unknown messages for protocol compatibility
@@ -117,8 +132,7 @@ func (w *WiFi) Receive(ctx context.Context, messageName string, messageBody io.R
 
 // Yield implements serviceinfo.DeviceModule.
 func (w *WiFi) Yield(ctx context.Context, respond func(string) io.Writer, yield func()) error {
-	// Device may need to send CSR after receiving network-add
-	// This would be triggered by the application calling a method
+	// Nothing to yield - CSR is sent directly in Receive method
 	return nil
 }
 
@@ -132,19 +146,35 @@ func (w *WiFi) reset() {
 }
 
 // handleNetworkAdd processes network-add messages.
-func (w *WiFi) handleNetworkAdd(messageBody io.Reader) error {
+func (w *WiFi) handleNetworkAdd(messageBody io.Reader, respond func(string) io.Writer) error {
 	if w.Handler == nil {
 		return fmt.Errorf("no WiFi handler configured")
 	}
 
-	// Decode network configuration as CBOR map with integer keys
-	var networkMap map[any]any
+	// Decode CBOR map - try uint64 keys first (CBOR default), then any
+	var networkMap map[uint64]any
 	if err := cbor.NewDecoder(messageBody).Decode(&networkMap); err != nil {
-		return fmt.Errorf("invalid network-add format: %w", err)
+		// Try with any keys as fallback
+		var networkMapAny map[any]any
+		if err2 := cbor.NewDecoder(messageBody).Decode(&networkMapAny); err2 != nil {
+			return fmt.Errorf("invalid network-add format: %w", err)
+		}
+		// Convert to uint64 keys
+		networkMap = make(map[uint64]any)
+		for k, v := range networkMapAny {
+			if ki, ok := k.(int); ok {
+				networkMap[uint64(ki)] = v
+			} else if ku, ok := k.(uint64); ok {
+				networkMap[ku] = v
+			}
+		}
 	}
 
 	// Parse network configuration
 	network := &WiFiNetwork{}
+
+	// Debug: log what we received
+	slog.Debug("fdo.wifi decoding network map", "keys", len(networkMap), "auth_type_value", networkMap[3])
 
 	if v, ok := networkMap[0].(string); ok {
 		network.Version = v
@@ -155,10 +185,32 @@ func (w *WiFi) handleNetworkAdd(messageBody io.Reader) error {
 	if v, ok := networkMap[2].(string); ok {
 		network.SSID = v
 	}
-	if v, ok := networkMap[3].(int); ok {
+	// AuthType - try all possible integer types CBOR might use
+	switch v := networkMap[3].(type) {
+	case int:
 		network.AuthType = v
-	} else if v, ok := networkMap[3].(uint64); ok {
+	case int8:
 		network.AuthType = int(v)
+	case int16:
+		network.AuthType = int(v)
+	case int32:
+		network.AuthType = int(v)
+	case int64:
+		network.AuthType = int(v)
+	case uint:
+		network.AuthType = int(v)
+	case uint8:
+		network.AuthType = int(v)
+	case uint16:
+		network.AuthType = int(v)
+	case uint32:
+		network.AuthType = int(v)
+	case uint64:
+		network.AuthType = int(v)
+	default:
+		if networkMap[3] != nil {
+			slog.Warn("fdo.wifi auth_type type mismatch", "type", fmt.Sprintf("%T", networkMap[3]), "value", networkMap[3])
+		}
 	}
 
 	// Key 4 can be password (bstr) or EAP method (int)
@@ -180,9 +232,27 @@ func (w *WiFi) handleNetworkAdd(messageBody io.Reader) error {
 		}
 	}
 
-	if v, ok := networkMap[6].(int); ok {
+	// TrustLevel - try all possible integer types CBOR might use
+	switch v := networkMap[6].(type) {
+	case int:
 		network.TrustLevel = v
-	} else if v, ok := networkMap[6].(uint64); ok {
+	case int8:
+		network.TrustLevel = int(v)
+	case int16:
+		network.TrustLevel = int(v)
+	case int32:
+		network.TrustLevel = int(v)
+	case int64:
+		network.TrustLevel = int(v)
+	case uint:
+		network.TrustLevel = int(v)
+	case uint8:
+		network.TrustLevel = int(v)
+	case uint16:
+		network.TrustLevel = int(v)
+	case uint32:
+		network.TrustLevel = int(v)
+	case uint64:
 		network.TrustLevel = int(v)
 	}
 
@@ -206,7 +276,168 @@ func (w *WiFi) handleNetworkAdd(messageBody io.Reader) error {
 		"auth_type", network.AuthType)
 
 	// Call application handler
-	return w.Handler.AddNetwork(network)
+	if err := w.Handler.AddNetwork(network); err != nil {
+		return err
+	}
+
+	// If this is an enterprise network (auth_type 3), generate and send CSR immediately
+	if network.AuthType == 3 {
+		w.currentNetworkID = network.NetworkID
+		w.currentSSID = network.SSID
+		slog.Info("fdo.wifi enterprise network detected, generating and sending CSR", "network_id", network.NetworkID, "ssid", network.SSID)
+		fmt.Printf("[fdo.wifi] Enterprise network detected - generating and sending CSR\n")
+
+		// Generate CSR
+		csrData, metadata, err := w.Handler.GenerateCSR(network.NetworkID, network.SSID)
+		if err != nil {
+			slog.Warn("fdo.wifi CSR generation failed", "error", err)
+			return nil // Don't fail the protocol
+		}
+
+		fmt.Printf("[fdo.wifi] Generated CSR (%d bytes), sending via chunking\n", len(csrData))
+
+		// Send CSR using chunking pattern
+		if err := w.sendCSR(respond, csrData, metadata, network.NetworkID, network.SSID); err != nil {
+			return fmt.Errorf("failed to send CSR: %w", err)
+		}
+
+		fmt.Printf("[fdo.wifi] CSR sent successfully\n")
+	}
+
+	return nil
+}
+
+// handleCertificate processes certificate messages from the owner
+func (w *WiFi) handleCertificate(messageName string, messageBody io.Reader, respond func(string) io.Writer) error {
+	// Initialize receiver on first message
+	if w.certReceiver == nil {
+		w.certReceiver = &chunking.ChunkReceiver{
+			PayloadName: "cert",
+			OnBegin:     w.onCertBegin,
+			OnChunk:     w.onCertChunk,
+			OnEnd:       w.onCertEnd,
+		}
+	}
+
+	// Handle the message
+	if err := w.certReceiver.HandleMessage(messageName, messageBody); err != nil {
+		w.certReceiver = nil
+		return err
+	}
+
+	// After successful end, send result
+	if messageName == "cert-end" && !w.certReceiver.IsReceiving() {
+		w.certReceiver = nil
+
+		// Send success result
+		resultMsg := chunking.ResultMessage{
+			StatusCode: 0,
+			Message:    "Certificate installed successfully",
+		}
+		resultData, err := resultMsg.MarshalCBOR()
+		if err != nil {
+			return fmt.Errorf("failed to marshal cert-result: %w", err)
+		}
+
+		writer := respond("cert-result")
+		if _, err := writer.Write(resultData); err != nil {
+			return fmt.Errorf("failed to send cert-result: %w", err)
+		}
+		slog.Debug("fdo.wifi sent cert-result")
+	}
+
+	return nil
+}
+
+// handleCABundle processes CA bundle messages from the owner
+func (w *WiFi) handleCABundle(messageName string, messageBody io.Reader, respond func(string) io.Writer) error {
+	// Initialize receiver on first message
+	if w.caReceiver == nil {
+		w.caReceiver = &chunking.ChunkReceiver{
+			PayloadName: "ca",
+			OnBegin:     w.onCABegin,
+			OnChunk:     w.onCAChunk,
+			OnEnd:       w.onCAEnd,
+		}
+	}
+
+	// Handle the message
+	if err := w.caReceiver.HandleMessage(messageName, messageBody); err != nil {
+		w.caReceiver = nil
+		return err
+	}
+
+	// After successful end, send result
+	if messageName == "ca-end" && !w.caReceiver.IsReceiving() {
+		w.caReceiver = nil
+
+		// Send success result
+		resultMsg := chunking.ResultMessage{
+			StatusCode: 0,
+			Message:    "CA bundle installed successfully",
+		}
+		resultData, err := resultMsg.MarshalCBOR()
+		if err != nil {
+			return fmt.Errorf("failed to marshal ca-result: %w", err)
+		}
+
+		writer := respond("ca-result")
+		if _, err := writer.Write(resultData); err != nil {
+			return fmt.Errorf("failed to send ca-result: %w", err)
+		}
+		slog.Debug("fdo.wifi sent ca-result")
+	}
+
+	return nil
+}
+
+// sendCSR sends a CSR to the owner using the chunking pattern
+func (w *WiFi) sendCSR(respond func(string) io.Writer, csrData []byte, metadata map[string]any, networkID, ssid string) error {
+	// Send begin message
+	beginMsg := chunking.BeginMessage{
+		TotalSize:  uint64(len(csrData)),
+		FSIMFields: make(map[int]any),
+	}
+	beginMsg.FSIMFields[-1] = networkID
+	if ssid != "" {
+		beginMsg.FSIMFields[-2] = ssid
+	}
+	if metadata != nil {
+		beginMsg.FSIMFields[-4] = metadata
+	}
+
+	beginData, err := beginMsg.MarshalCBOR()
+	if err != nil {
+		return fmt.Errorf("failed to marshal csr-begin: %w", err)
+	}
+
+	writer := respond("csr-begin")
+	if _, err := writer.Write(beginData); err != nil {
+		return fmt.Errorf("failed to send csr-begin: %w", err)
+	}
+	slog.Debug("fdo.wifi sent csr-begin")
+
+	// Send data message - must be CBOR-encoded
+	writer = respond("csr-data-0")
+	if err := cbor.NewEncoder(writer).Encode(csrData); err != nil {
+		return fmt.Errorf("failed to send csr-data: %w", err)
+	}
+	slog.Debug("fdo.wifi sent csr-data", "size", len(csrData))
+
+	// Send end message
+	endMsg := chunking.EndMessage{}
+	endData, err := endMsg.MarshalCBOR()
+	if err != nil {
+		return fmt.Errorf("failed to marshal csr-end: %w", err)
+	}
+
+	writer = respond("csr-end")
+	if _, err := writer.Write(endData); err != nil {
+		return fmt.Errorf("failed to send csr-end: %w", err)
+	}
+	slog.Debug("fdo.wifi sent csr-end")
+
+	return nil
 }
 
 // handleCSRMessage processes CSR-related messages (device perspective - receiving result).

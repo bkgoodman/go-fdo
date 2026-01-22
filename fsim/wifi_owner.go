@@ -27,9 +27,16 @@ type WiFiOwner struct {
 
 	// Internal state
 	currentNetworkIndex int
+	currentCertIndex    int
+	currentCAIndex      int
 	sentActive          bool
+	waitingForCSR       bool
+	sendingCert         bool
+	certBeginSent       bool
+	certCompleted       bool
+	caBeginSent         bool
 
-	// Chunking senders (for future certificate support)
+	// Chunking senders
 	csrReceiver *chunking.ChunkReceiver
 	certSender  *chunking.ChunkSender
 	caSender    *chunking.ChunkSender
@@ -126,12 +133,22 @@ func (w *WiFiOwner) produceInfo(ctx context.Context, producer *serviceinfo.Produ
 		return false, false, nil
 	}
 
+	// If we're sending a certificate, continue that flow
+	if w.sendingCert {
+		return w.sendCertificate(producer)
+	}
+
+	// If we're waiting for CSR, block until we receive it
+	if w.waitingForCSR {
+		return true, false, nil // Block and wait for CSR
+	}
+
 	// Send networks one at a time
 	if w.currentNetworkIndex < len(w.networks) {
 		network := w.networks[w.currentNetworkIndex]
 
 		// Encode network as CBOR map with integer keys
-		networkMap := make(map[any]any)
+		networkMap := make(map[int]any)
 		networkMap[0] = network.Version
 		networkMap[1] = network.NetworkID
 		networkMap[2] = network.SSID
@@ -177,11 +194,126 @@ func (w *WiFiOwner) produceInfo(ctx context.Context, producer *serviceinfo.Produ
 			"ssid", network.SSID)
 
 		w.currentNetworkIndex++
+
+		// If this is an enterprise network and we have certificates, set flag to wait for CSR
+		// Don't block immediately - wait for next ProduceInfo call
+		if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
+			w.waitingForCSR = true
+			slog.Debug("fdo.wifi will wait for CSR from device on next call")
+		}
+
 		return false, false, nil
 	}
 
 	// All networks sent, we're done
 	return false, true, nil
+}
+
+// sendCertificate sends a certificate and CA bundle using the chunking strategy.
+// Both are sent in the same phase to avoid additional state machine complexity.
+func (w *WiFiOwner) sendCertificate(producer *serviceinfo.Producer) (blockPeer, moduleDone bool, _ error) {
+	if w.currentCertIndex >= len(w.certificates) {
+		w.sendingCert = false
+		return false, false, nil
+	}
+
+	// Initialize cert sender if needed
+	if w.certSender == nil {
+		cert := &w.certificates[w.currentCertIndex]
+		w.certSender = chunking.NewChunkSender("cert", cert.CertData)
+		w.certSender.BeginFields.FSIMFields = make(map[int]any)
+		w.certSender.BeginFields.FSIMFields[-1] = cert.NetworkID
+		if cert.SSID != "" {
+			w.certSender.BeginFields.FSIMFields[-2] = cert.SSID
+		}
+		if cert.Metadata != nil {
+			w.certSender.BeginFields.FSIMFields[-4] = cert.Metadata
+		}
+		w.certBeginSent = false
+		w.certCompleted = false
+		slog.Debug("fdo.wifi initialized cert sender", "network_id", cert.NetworkID)
+	}
+
+	// Send cert begin
+	if !w.certBeginSent {
+		if err := w.certSender.SendBegin(producer); err != nil {
+			return false, false, fmt.Errorf("failed to send cert-begin: %w", err)
+		}
+		w.certBeginSent = true
+		slog.Debug("fdo.wifi sent cert-begin")
+		return false, false, nil
+	}
+
+	// Send cert chunks and end
+	if !w.certCompleted {
+		done, err := w.certSender.SendNextChunk(producer)
+		if err != nil {
+			return false, false, fmt.Errorf("failed to send cert chunk: %w", err)
+		}
+		if done {
+			if err := w.certSender.SendEnd(producer); err != nil {
+				return false, false, fmt.Errorf("failed to send cert-end: %w", err)
+			}
+			w.certCompleted = true
+			slog.Debug("fdo.wifi sent cert-end")
+			return false, false, nil // Don't block yet - send CA bundle next
+		}
+		return false, false, nil
+	}
+
+	// Certificate sent, now send CA bundle if available
+	if w.currentCAIndex < len(w.caBundles) {
+		// Initialize CA sender if needed
+		if w.caSender == nil {
+			ca := &w.caBundles[w.currentCAIndex]
+			w.caSender = chunking.NewChunkSender("ca", ca.CAData)
+			w.caSender.BeginFields.FSIMFields = make(map[int]any)
+			w.caSender.BeginFields.FSIMFields[-1] = ca.NetworkID
+			if ca.BundleID != "" {
+				w.caSender.BeginFields.FSIMFields[-2] = ca.BundleID
+			}
+			if ca.Metadata != nil {
+				w.caSender.BeginFields.FSIMFields[-3] = ca.Metadata
+			}
+			w.caBeginSent = false
+			slog.Debug("fdo.wifi initialized CA sender", "network_id", ca.NetworkID, "bundle_id", ca.BundleID)
+		}
+
+		// Send CA begin
+		if !w.caBeginSent {
+			if err := w.caSender.SendBegin(producer); err != nil {
+				return false, false, fmt.Errorf("failed to send ca-begin: %w", err)
+			}
+			w.caBeginSent = true
+			slog.Debug("fdo.wifi sent ca-begin")
+			return false, false, nil
+		}
+
+		// Send CA chunks and end
+		if !w.caSender.IsCompleted() {
+			done, err := w.caSender.SendNextChunk(producer)
+			if err != nil {
+				return false, false, fmt.Errorf("failed to send ca chunk: %w", err)
+			}
+			if done {
+				if err := w.caSender.SendEnd(producer); err != nil {
+					return false, false, fmt.Errorf("failed to send ca-end: %w", err)
+				}
+				slog.Debug("fdo.wifi sent ca-end")
+				// Both cert and CA sent, now block and wait for results
+				return true, false, nil
+			}
+			return false, false, nil
+		}
+	}
+
+	// Both certificate and CA bundle sent, clean up and move to next
+	w.certSender = nil
+	w.caSender = nil
+	w.currentCertIndex++
+	w.currentCAIndex++
+	w.sendingCert = false
+	return false, false, nil
 }
 
 // receive processes messages from the device.
@@ -199,9 +331,69 @@ func (w *WiFiOwner) receive(ctx context.Context, messageName string, messageBody
 		slog.Debug("fdo.wifi device confirmed active")
 		return nil
 
+	case "csr-begin", "csr-data-0", "csr-data-1", "csr-data-2", "csr-data-3", "csr-data-4",
+		"csr-data-5", "csr-data-6", "csr-data-7", "csr-data-8", "csr-data-9", "csr-end":
+		// Handle CSR chunked messages
+		return w.handleCSR(messageName, messageBody)
+
+	case "cert-result":
+		// Handle certificate result
+		var result chunking.ResultMessage
+		data, err := io.ReadAll(messageBody)
+		if err != nil {
+			return fmt.Errorf("failed to read cert-result: %w", err)
+		}
+		if err := result.UnmarshalCBOR(data); err != nil {
+			return fmt.Errorf("failed to decode cert-result: %w", err)
+		}
+		slog.Debug("fdo.wifi received cert-result", "status", result.StatusCode, "message", result.Message)
+		w.certResult = &result
+		return nil
+
+	case "ca-result":
+		// Handle CA bundle result
+		var result chunking.ResultMessage
+		data, err := io.ReadAll(messageBody)
+		if err != nil {
+			return fmt.Errorf("failed to read ca-result: %w", err)
+		}
+		if err := result.UnmarshalCBOR(data); err != nil {
+			return fmt.Errorf("failed to decode ca-result: %w", err)
+		}
+		slog.Debug("fdo.wifi received ca-result", "status", result.StatusCode, "message", result.Message)
+		w.caResult = &result
+		return nil
+
 	default:
 		// Silently ignore unknown messages for protocol compatibility
 		slog.Debug("fdo.wifi ignoring message from device", "key", messageName)
 		return nil
 	}
+}
+
+// handleCSR processes CSR messages from the device
+func (w *WiFiOwner) handleCSR(messageName string, messageBody io.Reader) error {
+	// Initialize receiver on first message
+	if w.csrReceiver == nil {
+		w.csrReceiver = &chunking.ChunkReceiver{
+			PayloadName: "csr",
+		}
+	}
+
+	// Handle the message
+	if err := w.csrReceiver.HandleMessage(messageName, messageBody); err != nil {
+		w.csrReceiver = nil
+		return err
+	}
+
+	// After successful end, we have the CSR
+	if messageName == "csr-end" && !w.csrReceiver.IsReceiving() {
+		w.lastCSR = w.csrReceiver.GetBuffer()
+		slog.Debug("fdo.wifi received CSR", "size", len(w.lastCSR))
+		w.csrReceiver = nil
+		w.waitingForCSR = false
+		w.sendingCert = true // Start sending certificate
+	}
+
+	return nil
 }

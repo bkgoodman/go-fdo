@@ -435,7 +435,10 @@ func (h *payloadHandler) HandlePayload(ctx context.Context, mimeType, name strin
 
 // wifiHandler implements fsim.WiFiHandler to display WiFi network configuration.
 // For this simple test, we just display the networks received from the server.
-type wifiHandler struct{}
+type wifiHandler struct {
+	lastNetworkID string
+	lastSSID      string
+}
 
 func (h *wifiHandler) AddNetwork(network *fsim.WiFiNetwork) error {
 	fmt.Printf("[fdo.wifi] Received network configuration:\n")
@@ -452,6 +455,7 @@ func (h *wifiHandler) AddNetwork(network *fsim.WiFiNetwork) error {
 		fmt.Printf(" (wpa3-psk)")
 	case 3:
 		fmt.Printf(" (wpa3-enterprise)")
+		fmt.Printf("\n[fdo.wifi] Enterprise network detected - will generate CSR")
 	}
 	fmt.Printf("\n")
 	if len(network.Password) > 0 {
@@ -465,25 +469,53 @@ func (h *wifiHandler) AddNetwork(network *fsim.WiFiNetwork) error {
 		fmt.Printf(" (full-access)")
 	}
 	fmt.Printf("\n")
+
+	// Store network info for CSR generation
+	h.lastNetworkID = network.NetworkID
+	h.lastSSID = network.SSID
+
 	return nil
 }
 
 func (h *wifiHandler) GenerateCSR(networkID, ssid string) (csrData []byte, metadata map[string]any, err error) {
-	// Not implemented for this simple test
-	fmt.Printf("[fdo.wifi] GenerateCSR called (not supported)\n")
-	return nil, nil, fmt.Errorf("CSR generation not supported in this test")
+	// Generate fake CSR data for testing
+	fmt.Printf("[fdo.wifi] Generating fake CSR for network %s (%s)\n", networkID, ssid)
+
+	// Create fake CSR data (just some bytes that look like a CSR)
+	fakeCSR := []byte("-----BEGIN CERTIFICATE REQUEST-----\n" +
+		"MIICvDCCAaQCAQAwdzELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWEx\n" +
+		"FjAUBgNVBAcMDVNhbiBGcmFuY2lzY28xDTALBgNVBAoMBFRlc3QxDTALBgNVBAsM\n" +
+		"BFRlc3QxHTAbBgNVBAMMFHRlc3QtZGV2aWNlLmxvY2FsLmNvbTCCASIwDQYJKoZI\n" +
+		"-----END CERTIFICATE REQUEST-----\n")
+
+	meta := map[string]any{
+		"csr_type": "pkcs10",
+		"key_type": "rsa2048",
+	}
+
+	fmt.Printf("[fdo.wifi] Generated fake CSR (%d bytes)\n", len(fakeCSR))
+	return fakeCSR, meta, nil
 }
 
 func (h *wifiHandler) InstallCertificate(networkID, ssid string, certData []byte, metadata map[string]any) (statusCode int, message string, err error) {
-	// Not implemented for this simple test
-	fmt.Printf("[fdo.wifi] InstallCertificate called (not supported)\n")
-	return 2, "Certificate installation not supported in this test", nil
+	fmt.Printf("[fdo.wifi] Received certificate for network %s (%s)\n", networkID, ssid)
+	fmt.Printf("[fdo.wifi] Certificate size: %d bytes\n", len(certData))
+	if metadata != nil {
+		fmt.Printf("[fdo.wifi] Certificate metadata: %v\n", metadata)
+	}
+	fmt.Printf("[fdo.wifi] Certificate installed successfully (fake)\n")
+	return 0, "Certificate installed", nil
 }
 
 func (h *wifiHandler) InstallCACerts(networkID, bundleID string, caData []byte, metadata map[string]any) (statusCode int, message string, err error) {
-	// Not implemented for this simple test
-	fmt.Printf("[fdo.wifi] InstallCACerts called (not supported)\n")
-	return 2, "CA certificate installation not supported in this test", nil
+	fmt.Printf("[fdo.wifi] Received CA bundle for network %s\n", networkID)
+	fmt.Printf("[fdo.wifi] Bundle ID: %s\n", bundleID)
+	fmt.Printf("[fdo.wifi] CA bundle size: %d bytes\n", len(caData))
+	if metadata != nil {
+		fmt.Printf("[fdo.wifi] CA bundle metadata: %+v\n", metadata)
+	}
+	fmt.Printf("[fdo.wifi] CA bundle installed successfully (fake)\n")
+	return 0, "CA bundle installed successfully", nil
 }
 
 func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose.Sign1[protocol.To1d, []byte], conf fdo.TO2Config) (*fdo.DeviceCredential, error) {

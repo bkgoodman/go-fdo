@@ -17,9 +17,9 @@
   {
     "version": "1.0",
     "network_id": "net-003",
-    "ssid": "Corporate-WiFi",
-    "auth_type": 2,
-    "password": "corporate-pass123",
-    "trust_level": 1
+    "ssid": "Enterprise-WiFi",
+    "auth_type": 3,
+    "trust_level": 1,
+    "needs_cert": true
   }
 ]
