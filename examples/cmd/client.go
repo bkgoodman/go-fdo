@@ -44,20 +44,21 @@ import (
 var clientFlags = flag.NewFlagSet("client", flag.ContinueOnError)
 
 var (
-	blobPath    string
-	diURL       string
-	diKey       string
-	diKeyEnc    string
-	kexSuite    string
-	cipherSuite string
-	tpmPath     string
-	printDevice bool
-	rvOnly      bool
-	dlDir       string
-	echoCmds    bool
-	uploads     = make(fsVar)
-	wgetDir     string
-	fdoVersion  int
+	blobPath       string
+	diURL          string
+	diKey          string
+	diKeyEnc       string
+	kexSuite       string
+	cipherSuite    string
+	tpmPath        string
+	printDevice    bool
+	rvOnly         bool
+	dlDir          string
+	echoCmds       bool
+	uploads        = make(fsVar)
+	wgetDir        string
+	fdoVersion     int
+	registerSSHKey string // SSH public key to register with owner
 )
 
 type fsVar map[string]string
@@ -152,6 +153,7 @@ func init() {
 		"comma-separated and/or flag provided multiple times (FSIM disabled if empty)")
 	clientFlags.StringVar(&wgetDir, "wget-dir", "", "A `dir` to wget files into (FSIM disabled if empty)")
 	clientFlags.IntVar(&fdoVersion, "fdo-version", 101, "FDO protocol version (101 or 200)")
+	clientFlags.StringVar(&registerSSHKey, "register-ssh-key", "", "SSH public `key` to register with owner (format: type:id:username:keydata)")
 }
 
 func client(ctx context.Context) error {
@@ -584,7 +586,7 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	}
 
 	// Add credentials handler to receive and display credentials (using chunked protocol)
-	fsims["fdo.credentials"] = fsim.NewCredentialsDevice(func(id, credType string, data []byte, metadata map[string]any) error {
+	credDevice := fsim.NewCredentialsDevice(func(id, credType string, data []byte, metadata map[string]any) error {
 		fmt.Printf("[fdo.credentials] Received credential:\n")
 		fmt.Printf("  ID:   %s\n", id)
 		fmt.Printf("  Type: %s\n", credType)
@@ -594,6 +596,29 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 		fmt.Printf("  Data: %s (length: %d bytes)\n", string(data), len(data))
 		return nil
 	})
+
+	// Add callback for public key requests (owner-driven Registered Credentials flow)
+	if registerSSHKey != "" {
+		// Format: type:id:username:keydata (e.g., ssh_public_key:my-key:admin:ssh-ed25519 AAAA...)
+		parts := strings.SplitN(registerSSHKey, ":", 4)
+		if len(parts) != 4 {
+			return nil, fmt.Errorf("invalid -register-ssh-key format: expected type:id:username:keydata")
+		}
+		_, credID, username, keyData := parts[0], parts[1], parts[2], parts[3]
+		// Store the key data for the callback
+		sshKeyData := []byte(keyData)
+		credDevice.OnPublicKeyRequested = func(reqCredID, reqCredType string, metadata map[string]any) ([]byte, error) {
+			fmt.Printf("[fdo.credentials] Owner requested public key: %s (type: %s)\n", reqCredID, reqCredType)
+			// Return the configured SSH key if IDs match, or for any request
+			if reqCredID == credID || credID == "*" {
+				fmt.Printf("[fdo.credentials] Returning SSH key for user: %s\n", username)
+				return sshKeyData, nil
+			}
+			return nil, fmt.Errorf("no public key available for credential_id: %s", reqCredID)
+		}
+		fmt.Printf("[fdo.credentials] Configured SSH key: %s (user: %s)\n", credID, username)
+	}
+	fsims["fdo.credentials"] = credDevice
 
 	conf.DeviceModules = fsims
 

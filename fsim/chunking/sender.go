@@ -194,3 +194,101 @@ func (s *ChunkSender) GetProgress() float64 {
 	}
 	return float64(s.bytesSent) / float64(len(s.Data)) * 100.0
 }
+
+// SendBeginToWriter sends the *-begin message using a respond function (for device-side sending).
+func (s *ChunkSender) SendBeginToWriter(respond func(string) io.Writer) error {
+	if s.bytesSent > 0 {
+		return fmt.Errorf("transfer already started")
+	}
+
+	// Encode begin message
+	data, err := s.BeginFields.MarshalCBOR()
+	if err != nil {
+		return fmt.Errorf("failed to encode begin message: %w", err)
+	}
+
+	// Send via respond function
+	w := respond(s.PayloadName + "-begin")
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("failed to send begin message: %w", err)
+	}
+
+	return nil
+}
+
+// SendNextChunkToWriter sends the next data chunk using a respond function. Returns true when all chunks have been sent.
+func (s *ChunkSender) SendNextChunkToWriter(respond func(string) io.Writer) (done bool, err error) {
+	if s.completed {
+		return true, nil
+	}
+
+	if s.bytesSent >= int64(len(s.Data)) {
+		return true, nil
+	}
+
+	// Calculate chunk size
+	remaining := int64(len(s.Data)) - s.bytesSent
+	chunkLen := int64(s.ChunkSize)
+	if chunkLen > remaining {
+		chunkLen = remaining
+	}
+
+	// Extract chunk
+	chunk := s.Data[s.bytesSent : s.bytesSent+chunkLen]
+
+	// Calculate chunk index
+	chunkIndex := s.bytesSent / int64(s.ChunkSize)
+
+	// Encode chunk as CBOR bstr
+	var buf bytes.Buffer
+	if err := cbor.NewEncoder(&buf).Encode(chunk); err != nil {
+		return false, fmt.Errorf("failed to encode chunk: %w", err)
+	}
+
+	// Send chunk with indexed key name
+	chunkKey := fmt.Sprintf("%s-data-%d", s.PayloadName, chunkIndex)
+	w := respond(chunkKey)
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return false, fmt.Errorf("failed to send chunk: %w", err)
+	}
+
+	s.bytesSent += chunkLen
+
+	// Check if done
+	return s.bytesSent >= int64(len(s.Data)), nil
+}
+
+// SendEndToWriter sends the *-end message using a respond function.
+func (s *ChunkSender) SendEndToWriter(respond func(string) io.Writer) error {
+	if s.bytesSent < int64(len(s.Data)) {
+		return fmt.Errorf("not all data has been sent: %d/%d bytes", s.bytesSent, len(s.Data))
+	}
+
+	if s.completed {
+		return fmt.Errorf("transfer already completed")
+	}
+
+	// Auto-compute hash if enabled and hash algorithm was specified
+	if s.AutoComputeHash && s.BeginFields.HashAlg != "" && len(s.EndFields.HashValue) == 0 {
+		hash, err := ComputeHash(s.BeginFields.HashAlg, s.Data)
+		if err != nil {
+			return fmt.Errorf("failed to compute hash: %w", err)
+		}
+		s.EndFields.HashValue = hash
+	}
+
+	// Encode end message
+	data, err := s.EndFields.MarshalCBOR()
+	if err != nil {
+		return fmt.Errorf("failed to encode end message: %w", err)
+	}
+
+	// Send via respond function
+	w := respond(s.PayloadName + "-end")
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("failed to send end message: %w", err)
+	}
+
+	s.completed = true
+	return nil
+}

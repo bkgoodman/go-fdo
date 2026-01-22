@@ -23,11 +23,15 @@ type CredentialsDevice struct {
 	// Callbacks for credential handling
 	OnCredentialReceived func(credentialID, credentialType string, data []byte, metadata map[string]any) error
 
+	// Callback for generating/retrieving public keys (Registered Credentials flow)
+	// Called when owner requests a public key. Returns the public key data.
+	OnPublicKeyRequested func(credentialID, credentialType string, metadata map[string]any) ([]byte, error)
+
 	// Internal state
 	active              bool
 	receivingCredential bool
 
-	// Chunking receiver for credential data
+	// Chunking receiver for credential data (Provisioned flow)
 	credentialReceiver *chunking.ChunkReceiver
 
 	// Current credential being received
@@ -35,6 +39,33 @@ type CredentialsDevice struct {
 	currentCredentialType string
 	currentMetadata       map[string]any
 	currentCredentialData []byte // Store data from OnEnd callback before reset
+
+	// Registered Credentials state (responding to owner requests)
+	pendingPubkeyRequest *pubkeyRequestInfo // Current request from owner
+	pubkeyResults        []RegisteredResult // Results from owner
+}
+
+// pubkeyRequestInfo holds info about a pending pubkey request from owner
+type pubkeyRequestInfo struct {
+	CredentialID   string
+	CredentialType string
+	Metadata       map[string]any
+	PublicKeyData  []byte // Generated/retrieved public key
+}
+
+// RegisteredCredential represents a public key to register with the owner.
+type RegisteredCredential struct {
+	CredentialID   string         // Required: unique identifier (e.g., "ssh-admin-key")
+	CredentialType string         // Required: "ssh_public_key"
+	PublicKeyData  []byte         // Required: public key data (OpenSSH format)
+	Metadata       map[string]any // Optional: username, authorized_hosts, key_type, comment
+}
+
+// RegisteredResult contains the result of a public key registration.
+type RegisteredResult struct {
+	CredentialID string
+	StatusCode   int
+	Message      string
 }
 
 var _ serviceinfo.DeviceModule = (*CredentialsDevice)(nil)
@@ -49,13 +80,62 @@ func (c *CredentialsDevice) Transition(active bool) error {
 		c.currentCredentialID = ""
 		c.currentCredentialType = ""
 		c.currentMetadata = nil
+		c.currentCredentialData = nil
+		// Reset registered credentials state
+		c.pendingPubkeyRequest = nil
 	}
 	return nil
 }
 
 // Yield implements serviceinfo.DeviceModule.
 func (c *CredentialsDevice) Yield(ctx context.Context, respond func(string) io.Writer, yield func()) error {
-	// Nothing to send proactively
+	// Send public key in response to owner's pubkey-request
+	// Note: Yield is only called once, so we must send all messages here
+	if c.pendingPubkeyRequest != nil {
+		req := c.pendingPubkeyRequest
+
+		// Create sender
+		sender := chunking.NewChunkSender("pubkey", req.PublicKeyData)
+		sender.BeginFields.FSIMFields = make(map[int]any)
+		sender.BeginFields.FSIMFields[-1] = req.CredentialID
+		sender.BeginFields.FSIMFields[-2] = req.CredentialType
+		if req.Metadata != nil {
+			sender.BeginFields.FSIMFields[-3] = req.Metadata
+		}
+
+		slog.Debug("[fdo.credentials] Sending public key",
+			"credential_id", req.CredentialID,
+			"credential_type", req.CredentialType,
+			"size", len(req.PublicKeyData))
+
+		// Send begin message
+		if err := sender.SendBeginToWriter(respond); err != nil {
+			return fmt.Errorf("send pubkey-begin: %w", err)
+		}
+		slog.Debug("[fdo.credentials] Sent pubkey-begin")
+
+		// Send all data chunks
+		for {
+			done, err := sender.SendNextChunkToWriter(respond)
+			if err != nil {
+				return fmt.Errorf("send pubkey-data: %w", err)
+			}
+			if done {
+				break
+			}
+			slog.Debug("[fdo.credentials] Sent pubkey-data chunk")
+		}
+
+		// Send end message
+		if err := sender.SendEndToWriter(respond); err != nil {
+			return fmt.Errorf("send pubkey-end: %w", err)
+		}
+		slog.Debug("[fdo.credentials] Sent pubkey-end")
+
+		// Clear pending request
+		c.pendingPubkeyRequest = nil
+	}
+
 	return nil
 }
 
@@ -88,6 +168,14 @@ func (c *CredentialsDevice) Receive(ctx context.Context, messageName string, mes
 		// Owner finishes sending credential
 		return c.handleCredentialEnd(messageBody, respond)
 
+	case "pubkey-request":
+		// Owner requests a public key from device
+		return c.handlePubkeyRequest(messageBody, yield)
+
+	case "pubkey-result":
+		// Owner responds to public key registration
+		return c.handlePubkeyResult(messageBody)
+
 	default:
 		// Check if it's a credential-data-N message
 		if c.credentialReceiver != nil {
@@ -97,6 +185,70 @@ func (c *CredentialsDevice) Receive(ctx context.Context, messageName string, mes
 		}
 		return fmt.Errorf("unexpected message: %s", messageName)
 	}
+}
+
+// handlePubkeyRequest processes the pubkey-request message from the owner.
+func (c *CredentialsDevice) handlePubkeyRequest(messageBody io.Reader, yield func()) error {
+	// Decode request
+	var request map[int]any
+	if err := cbor.NewDecoder(messageBody).Decode(&request); err != nil {
+		return fmt.Errorf("decode pubkey-request: %w", err)
+	}
+
+	credID, _ := request[-1].(string)
+	credType, _ := request[-2].(string)
+	metadata, _ := request[-3].(map[string]any)
+
+	slog.Debug("[fdo.credentials] Received pubkey-request",
+		"credential_id", credID,
+		"credential_type", credType)
+
+	// Call callback to get the public key
+	if c.OnPublicKeyRequested == nil {
+		return fmt.Errorf("no OnPublicKeyRequested callback configured")
+	}
+
+	pubkeyData, err := c.OnPublicKeyRequested(credID, credType, metadata)
+	if err != nil {
+		return fmt.Errorf("failed to get public key: %w", err)
+	}
+
+	// Store pending request - Yield will send the response
+	c.pendingPubkeyRequest = &pubkeyRequestInfo{
+		CredentialID:   credID,
+		CredentialType: credType,
+		Metadata:       metadata,
+		PublicKeyData:  pubkeyData,
+	}
+
+	// Signal that we have data to send
+	yield()
+	return nil
+}
+
+// handlePubkeyResult processes the pubkey-result message from the owner.
+func (c *CredentialsDevice) handlePubkeyResult(messageBody io.Reader) error {
+	var result chunking.ResultMessage
+	if err := cbor.NewDecoder(messageBody).Decode(&result); err != nil {
+		return fmt.Errorf("decode pubkey-result: %w", err)
+	}
+
+	c.pubkeyResults = append(c.pubkeyResults, RegisteredResult{
+		CredentialID: result.Message, // Use message as ID for now
+		StatusCode:   result.StatusCode,
+		Message:      result.Message,
+	})
+
+	if result.StatusCode == 0 {
+		slog.Info("[fdo.credentials] Public key registered successfully",
+			"message", result.Message)
+	} else {
+		slog.Warn("[fdo.credentials] Public key registration failed",
+			"status", result.StatusCode,
+			"message", result.Message)
+	}
+
+	return nil
 }
 
 // handleCredentialBegin processes the credential-begin message.

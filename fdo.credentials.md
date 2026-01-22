@@ -99,6 +99,7 @@ The FSIM supports three distinct message exchange patterns:
 
 | Direction | Key Name | Value Type | Meaning |
 |-----------|----------|------------|---------|
+| o --> d | `fdo.credentials:pubkey-request` | `map` | Owner requests device to send a public key |
 | o <-- d | `fdo.credentials:pubkey-begin` | `map` | Begin public key registration (chunked) |
 | o <-- d | `fdo.credentials:pubkey-data-N` | `bstr` | Public key data chunk N |
 | o <-- d | `fdo.credentials:pubkey-end` | `map` | End public key registration |
@@ -429,11 +430,29 @@ fdo.credentials:response-result = [0, "Certificate installed"]
 ### Message Flow
 
 ```
+Owner → Device: pubkey-request
 Device → Owner: pubkey-begin
 Device → Owner: pubkey-data-0
 Device → Owner: pubkey-data-1 (if needed)
 Device → Owner: pubkey-end
 Owner → Device: pubkey-result
+```
+
+### pubkey-request Message
+
+The owner sends this message to request a public key from the device:
+
+```cddl
+{
+    -1: credential_id: tstr      ; Unique identifier for this key (e.g., "ssh-admin-key")
+    -2: credential_type: tstr    ; "ssh_public_key"
+    ? -3: metadata: {
+        ? username: tstr         ; SSH username to associate with key
+        ? key_type: tstr         ; Requested key type: "rsa" | "ed25519" | "ecdsa"
+        ? key_size: uint         ; Requested key size (e.g., 2048, 4096 for RSA)
+        * tstr => any
+    }
+}
 ```
 
 ### pubkey-begin Message

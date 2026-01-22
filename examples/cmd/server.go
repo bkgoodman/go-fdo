@@ -79,6 +79,7 @@ var (
 	payloadMimeType      string
 	wifiConfigFile       string
 	credentials          stringList
+	pubkeyRequests       stringList
 	initOnly             bool
 )
 
@@ -125,6 +126,7 @@ func init() {
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
 	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
 	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data` format (flag may be used multiple times)")
+	serverFlags.Var(&pubkeyRequests, "request-pubkey", "Request public key from device with `type:id` format (flag may be used multiple times)")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
@@ -918,7 +920,7 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 
-		if slices.Contains(modules, "fdo.credentials") && len(credentials) > 0 {
+		if slices.Contains(modules, "fdo.credentials") {
 			var provisionedCreds []fsim.ProvisionedCredential
 			for _, credSpec := range credentials {
 				parts := strings.SplitN(credSpec, ":", 3)
@@ -958,6 +960,31 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 
 			credentialsOwner := fsim.NewCredentialsOwner(provisionedCreds)
+
+			// Add public key requests (Registered Credentials flow)
+			for _, reqSpec := range pubkeyRequests {
+				parts := strings.SplitN(reqSpec, ":", 2)
+				if len(parts) != 2 {
+					log.Fatalf("invalid pubkey request specification %q: expected type:id format", reqSpec)
+				}
+				credType, credID := parts[0], parts[1]
+				credentialsOwner.PublicKeyRequests = append(credentialsOwner.PublicKeyRequests, fsim.PublicKeyRequest{
+					CredentialID:   credID,
+					CredentialType: credType,
+				})
+			}
+
+			// Add handler for receiving public keys from device
+			credentialsOwner.OnPublicKeyReceived = func(credID, credType string, pubkey []byte, metadata map[string]any) error {
+				fmt.Printf("[fdo.credentials] Received public key registration:\n")
+				fmt.Printf("  ID:   %s\n", credID)
+				fmt.Printf("  Type: %s\n", credType)
+				if metadata != nil {
+					fmt.Printf("  Metadata: %v\n", metadata)
+				}
+				fmt.Printf("  Key:  %s (length: %d bytes)\n", string(pubkey), len(pubkey))
+				return nil
+			}
 			if !yield("fdo.credentials", credentialsOwner) {
 				return
 			}
