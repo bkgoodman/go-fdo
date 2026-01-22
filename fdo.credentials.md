@@ -31,6 +31,7 @@ The credentials FSIM supports three distinct protocol flows:
 3. **Registered Credentials** - Device registers public keys with owner for authenticating to backend services
 
 This specification incorporates and extends concepts from:
+
 - **fdo.csr** - Certificate enrollment and server-generated keys
 - **WiFi FSIM** - Chunked credential transfer patterns
 - **OAuth2/OIDC** - Modern token-based authentication
@@ -50,17 +51,20 @@ This specification incorporates and extends concepts from:
 The FSIM supports three distinct message exchange patterns:
 
 **Provisioned Credentials: Owner → Device (Shared Secrets)**
+
 - Owner provisions credentials that are shared secrets (passwords, API keys, OAuth2 client secrets)
 - One-way message flow
 - No device-generated artifacts required
 
 **Enrolled Credentials: Device ↔ Owner (Asymmetric with Signed Response)**
+
 - Device generates key pair (private key never leaves device)
 - Device sends public key material (CSR, JWK) to owner
 - Owner signs/processes and returns credential
 - Two-way message flow with owner response
 
 **Registered Credentials: Owner ↔ Device (Public Key Registration)**
+
 - Owner requests device's public key for registration with backend services
 - Device generates key pair (private key never leaves device)
 - Device sends public key to owner
@@ -177,6 +181,7 @@ ResultMessage = [
 ## Provisioned Credentials Flow
 
 ### Use Cases
+
 - Username/password for system accounts
 - API keys for cloud services
 - OAuth2 client credentials (client_id + client_secret)
@@ -215,6 +220,7 @@ Device → Owner: credential-result
 ### Credential Data Format
 
 **For password type:**
+
 ```json
 {
     "username": "admin",
@@ -224,6 +230,7 @@ Device → Owner: credential-result
 ```
 
 **For api_key type:**
+
 ```json
 {
     "api_key": "sk_live_abc123...",
@@ -232,6 +239,7 @@ Device → Owner: credential-result
 ```
 
 **For oauth2_client_secret type:**
+
 ```json
 {
     "client_id": "device-12345",
@@ -242,6 +250,7 @@ Device → Owner: credential-result
 ```
 
 **For bearer_token type:**
+
 ```json
 {
     "token": "eyJhbGciOiJSUzI1NiIs...",
@@ -282,6 +291,7 @@ fdo.credentials:credential-result = [0, "OAuth2 credentials stored"]
 ## Enrolled Credentials Flow
 
 ### Use Cases
+
 - X.509 certificate enrollment (CSR-based)
 - OAuth2 with private key JWT authentication
 - Server-generated keys (discouraged but supported)
@@ -322,14 +332,17 @@ Device → Owner: response-result
 ### Request Data Format
 
 **For x509_cert type:**
+
 - CSR in PKCS#10 format (DER or PEM encoded)
 - Device has generated key pair, CSR contains public key
 
 **For oauth2_private_key_jwt type:**
+
 - Public key in JWK (JSON Web Key) format
 - Device has generated key pair, will sign JWTs with private key
 
 **For server_generated_key type:**
+
 - Request parameters (subject DN, key algorithm, etc.)
 - Owner will generate key pair and return both private key and certificate
 
@@ -354,10 +367,12 @@ Device → Owner: response-result
 ### Response Data Format
 
 **For x509_cert type:**
+
 - Signed X.509 certificate (DER or PEM)
 - Optionally followed by CA bundle (concatenated certificates)
 
 **For oauth2_private_key_jwt type:**
+
 ```json
 {
     "client_id": "device-001",
@@ -368,6 +383,7 @@ Device → Owner: response-result
 ```
 
 **For server_generated_key type:**
+
 - Private key (PKCS#8 format)
 - Certificate (X.509 format)
 - CA bundle (optional)
@@ -426,6 +442,7 @@ fdo.credentials:response-result = [0, "Certificate installed"]
 ## Registered Credentials Flow
 
 ### Use Cases
+
 - Device registers SSH public key with management service for subsequent access (e.g., device SSHs into config servers)
 - Device registers public key with any service that uses public key authentication
 - IoT device identity registration with cloud platforms
@@ -477,6 +494,7 @@ The owner sends this message to request a public key from the device. The owner 
 ### Public Key Data Format
 
 **For ssh_public_key type:**
+
 - SSH public key in OpenSSH format (e.g., "ssh-rsa AAAAB3NzaC1...")
 - Or SSH public key in RFC 4716 format
 
@@ -578,10 +596,11 @@ ErrorMessage = {
 ### Chunking Implementation
 
 Implementations SHOULD use the generic chunking helpers provided by the FDO SDK:
-- `ChunkSender` for sending chunked data
-- `ChunkReceiver` for receiving chunked data
 
-See the WiFi FSIM implementation for reference patterns.
+- **ChunkSender** for sending chunked credentials from owner to device
+- **ChunkReceiver** for receiving chunked credentials on device
+- Use negative FSIM keys (-1 to -3) for credential metadata
+- Always include `total_size` in begin messages for progress tracking
 
 ### Credential Type Extensibility
 

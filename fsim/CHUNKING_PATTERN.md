@@ -29,12 +29,14 @@ type UnifiedPayloadHandler interface {
 ```
 
 **Characteristics:**
+
 - Framework buffers all chunks automatically
 - Application receives complete payload at once
 - Simple to implement (similar to `SysConfig`)
 - Suitable for payloads up to ~100MB on typical systems
 
 **Example:**
+
 ```go
 type MyPayloadHandler struct{}
 
@@ -69,12 +71,14 @@ type ChunkedPayloadHandler interface {
 ```
 
 **Characteristics:**
+
 - Framework calls handler for each chunk
 - Application processes chunks as they arrive
 - Suitable for streaming to disk or network
 - Suitable for memory-limited systems
 
 **Example:**
+
 ```go
 type StreamingPayloadHandler struct {
     file *os.File
@@ -159,6 +163,7 @@ if p.receiver == nil {
 ### Callback Implementation
 
 **Unified Mode:**
+
 ```go
 func (p *Payload) onBeginUnified(begin chunking.BeginMessage) error {
     p.begin = begin
@@ -188,6 +193,7 @@ func (p *Payload) onEndUnified(ctx context.Context) func(chunking.EndMessage) er
 ```
 
 **Chunked Mode:**
+
 ```go
 func (p *Payload) onBeginChunked(begin chunking.BeginMessage) error {
     mimeType := begin.FSIMFields[-1].(string)

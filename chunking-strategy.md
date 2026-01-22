@@ -53,7 +53,7 @@ Receivers MUST buffer chunks until all bytes have arrived. The expected byte cou
 1. `total_size` (if provided) – once the sum of chunk lengths equals `total_size`, the payload is complete even if `*-end` has not arrived yet.
 2. `*-end` without `total_size` – the transfer completes when the end message is received.
 
-#### CDDL Example
+### CDDL Example
 
 ```cddl
 payload-data = {
@@ -76,7 +76,7 @@ Reserved Key Policy mirrors the `*-begin` map: non-negative keys are owned by th
 
 An empty map (or even an entirely absent `*-end` body) implies completion with no additional metadata, which most FSIMs interpret as success.
 
-#### CDDL Example
+### CDDL Example
 
 ```cddl
 payload-end = {

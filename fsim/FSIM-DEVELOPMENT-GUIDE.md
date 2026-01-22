@@ -3,6 +3,7 @@
 This guide documents common hurdles, gotchas, and patterns discovered while implementing FSIMs (FDO Service Info Modules). It's not a complete tutorial, but rather a collection of issues that will save you debugging time.
 
 ## Table of Contents
+
 1. [Active Message Handling](#active-message-handling)
 2. [BlockPeer Flag Usage](#blockpeer-flag-usage)
 3. [Chunking and ChunkWriter](#chunking-and-chunkwriter)
@@ -16,9 +17,11 @@ This guide documents common hurdles, gotchas, and patterns discovered while impl
 ## Active Message Handling
 
 ### The Problem
+
 The "active" message is used to activate/deactivate FSIMs, but its handling is **not symmetric** between owner and device.
 
 ### Owner Side (Sending Active)
+
 ```go
 // ProduceInfo - send active message ONCE at the start
 if !w.sentActive && len(w.data) > 0 {
@@ -31,12 +34,14 @@ if !w.sentActive && len(w.data) > 0 {
 ```
 
 **Key Points:**
+
 - Use a `sentActive` boolean flag to send it only once
 - Send `0xf5` (CBOR true) as the value
 - Return immediately after sending - don't try to do more work in the same call
 - Only send if you have actual data to send
 
 ### Device Side (Receiving Active)
+
 ```go
 // Receive - handle active message
 if messageName == "active" {
@@ -53,12 +58,14 @@ if messageName == "active" {
 ```
 
 **Key Points:**
+
 - Device MUST respond to the active message
 - Decode the boolean value from the message
 - Respond with your active state (usually just echo it back)
 - If you don't respond, you'll get: `"owner module did not read full body of message 'fdo.xxx:active'"`
 
 ### Owner Side (Receiving Active Response)
+
 ```go
 // HandleInfo - read the active response
 case "active":
@@ -73,12 +80,15 @@ case "active":
 ```
 
 **Key Points:**
+
 - Owner MUST read the active response from device
 - If you ignore it or don't read the body, the protocol will fail
 - This is the most common cause of "TO2 failed" errors
 
 ### Pattern: Simple FSIMs (like SysConfig)
+
 Some FSIMs don't handle the active message at all on the device side - they just ignore unknown messages. This works because:
+
 - The owner sends active
 - The device ignores it (returns nil for unknown messages)
 - The owner doesn't expect a response
@@ -90,7 +100,9 @@ This pattern works for simple FSIMs that don't need bidirectional active confirm
 ## BlockPeer Flag Usage
 
 ### What BlockPeer Does
+
 When `ProduceInfo` returns `blockPeer=true`, it tells the protocol:
+
 - **Stop calling ProduceInfo** on the owner
 - **Allow the device to send messages** via Yield
 - **Wait for device messages** before continuing
@@ -98,16 +110,19 @@ When `ProduceInfo` returns `blockPeer=true`, it tells the protocol:
 ### When to Use BlockPeer
 
 **✅ Use BlockPeer When:**
+
 - Waiting for device to send data (e.g., CSR, upload data)
 - Device needs to respond before you can continue
 - You need bidirectional communication
 
 **❌ Don't Use BlockPeer When:**
+
 - Just sending data to device (network-add, parameters, etc.)
 - No response needed from device
 - Sending multiple items in sequence
 
 ### Common BlockPeer Mistake
+
 ```go
 // ❌ WRONG - This will hang forever
 if network.AuthType == 3 {
@@ -119,6 +134,7 @@ if network.AuthType == 3 {
 **Problem:** If the device doesn't send CSR (or can't), the protocol hangs forever.
 
 **Solution:** Only block if you're certain the device will respond:
+
 ```go
 // ✅ CORRECT - Only block if we actually expect CSR
 if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
@@ -128,6 +144,7 @@ if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
 ```
 
 ### BlockPeer State Machine Pattern
+
 ```go
 const (
     stateIdle
@@ -150,7 +167,9 @@ func (w *Owner) ProduceInfo(...) (blockPeer, moduleDone bool, _ error) {
 ```
 
 ### Unblocking
+
 To unblock, the owner's `HandleInfo` method receives the device's message:
+
 ```go
 func (w *Owner) HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error {
     if messageName == "csr-end" {
@@ -169,6 +188,7 @@ func (w *Owner) HandleInfo(ctx context.Context, messageName string, messageBody 
 ### Owner Side: Sending Chunks
 
 **Using ChunkSender (Recommended):**
+
 ```go
 // Initialize sender
 sender := chunking.NewChunkSender("cert", certData)
@@ -199,6 +219,7 @@ if !sender.IsCompleted() {
 ```
 
 **Key Points:**
+
 - Send begin, chunks, and end in **separate ProduceInfo calls**
 - Don't try to send everything in one call
 - Return after each step to let the protocol flow
@@ -207,6 +228,7 @@ if !sender.IsCompleted() {
 ### Device Side: Receiving Chunks
 
 **Using ChunkReceiver (Recommended):**
+
 ```go
 // Initialize receiver on first message
 if w.receiver == nil {
@@ -249,6 +271,7 @@ if messageName == "cert-end" && !w.receiver.IsReceiving() {
 ```
 
 **Key Points:**
+
 - Initialize receiver on first message (begin)
 - Use callbacks to process data
 - Send result message after end
@@ -257,6 +280,7 @@ if messageName == "cert-end" && !w.receiver.IsReceiving() {
 ### Device Side: Sending Chunks (in Yield)
 
 **Manual Chunking (for Yield):**
+
 ```go
 func (w *Device) Yield(ctx context.Context, respond func(string) io.Writer, yield func()) error {
     if w.needToSendData {
@@ -290,6 +314,7 @@ func (w *Device) Yield(ctx context.Context, respond func(string) io.Writer, yiel
 ```
 
 **Key Points:**
+
 - Call `yield()` after **every message** you send
 - Don't use ChunkSender in Yield (it expects a Producer interface)
 - Manually construct begin/end messages
@@ -300,14 +325,17 @@ func (w *Device) Yield(ctx context.Context, respond func(string) io.Writer, yiel
 ## Yield Method Patterns
 
 ### What Yield Does
+
 `Yield` is called on the **device** to allow it to send messages to the owner. It's the device's turn to talk.
 
 ### When Yield is Called
+
 - After device processes owner's messages
 - When owner blocks (blockPeer=true)
 - Periodically during TO2 protocol
 
 ### Yield Pattern: Send Data
+
 ```go
 func (w *Device) Yield(ctx context.Context, respond func(string) io.Writer, yield func()) error {
     if w.hasDataToSend {
@@ -321,6 +349,7 @@ func (w *Device) Yield(ctx context.Context, respond func(string) io.Writer, yiel
 ```
 
 ### Yield Pattern: Multi-Step Process
+
 ```go
 func (w *Device) Yield(...) error {
     switch w.yieldState {
@@ -352,6 +381,7 @@ func (w *Device) Yield(...) error {
 ### Common Yield Mistakes
 
 **❌ Forgetting to call yield():**
+
 ```go
 writer := respond("message")
 writer.Write(data)
@@ -359,12 +389,14 @@ writer.Write(data)
 ```
 
 **❌ Trying to send multiple messages without yield():**
+
 ```go
 respond("msg1").Write(data1)
 respond("msg2").Write(data2)  // Won't work - need yield() between
 ```
 
 **✅ Correct:**
+
 ```go
 respond("msg1").Write(data1)
 yield()
@@ -378,6 +410,7 @@ yield()
 ## Owner vs Device Module Differences
 
 ### Owner Module Interface
+
 ```go
 type OwnerModule interface {
     ProduceInfo(ctx context.Context, producer *Producer) (blockPeer, moduleDone bool, err error)
@@ -387,17 +420,20 @@ type OwnerModule interface {
 ```
 
 **ProduceInfo:**
+
 - Owner sends messages to device
 - Returns `blockPeer` to wait for device
 - Returns `moduleDone` when finished
 - Called repeatedly until done
 
 **HandleInfo:**
+
 - Owner receives messages from device
 - Process device responses
 - No return values for flow control
 
 ### Device Module Interface
+
 ```go
 type DeviceModule interface {
     Receive(ctx context.Context, messageName string, messageBody io.Reader, 
@@ -408,11 +444,13 @@ type DeviceModule interface {
 ```
 
 **Receive:**
+
 - Device receives messages from owner
 - Can respond immediately using `respond()`
 - Process owner's data
 
 **Yield:**
+
 - Device sends messages to owner
 - Initiated by device, not in response to owner
 - Must call `yield()` after each message
@@ -438,6 +476,7 @@ type DeviceModule interface {
 **Cause:** Owner sent a message, device responded, but owner's `HandleInfo` didn't read the response body.
 
 **Solution:**
+
 ```go
 // ❌ WRONG
 case "active":
@@ -457,11 +496,13 @@ case "active":
 **Symptom:** Test hangs, no progress, no error.
 
 **Causes:**
+
 - Owner blocking (blockPeer=true) but device never sends message
 - Device waiting for owner but owner is also waiting
 - Yield() not calling yield() after sending message
 
 **Debug:**
+
 - Add `slog.Debug()` statements to track state
 - Check if blockPeer is being used correctly
 - Verify device's Yield is being called
@@ -473,6 +514,7 @@ case "active":
 **Cause:** Device didn't advertise the module in its supported modules list.
 
 **Solution:**
+
 ```go
 // Client must register module in DeviceModules map
 conf.DeviceModules = map[string]serviceinfo.DeviceModule{
@@ -487,11 +529,13 @@ conf.DeviceModules = map[string]serviceinfo.DeviceModule{
 **Symptom:** Large data transfer fails or gets corrupted.
 
 **Causes:**
+
 - Not sending begin/end messages
 - Sending chunks out of order
 - Not using ChunkReceiver/ChunkSender correctly
 
 **Solution:** Use the chunking helpers:
+
 ```go
 // Owner: Use ChunkSender
 sender := chunking.NewChunkSender("data", largeData)
@@ -507,6 +551,7 @@ receiver := &chunking.ChunkReceiver{PayloadName: "data"}
 **Cause:** Not properly tracking state between ProduceInfo/HandleInfo calls.
 
 **Solution:** Use explicit state enums:
+
 ```go
 type myState int
 const (
@@ -527,6 +572,7 @@ type MyOwner struct {
 **Symptom:** "invalid CBOR" errors or wrong data received.
 
 **Common Mistakes:**
+
 ```go
 // ❌ WRONG - Writing raw bytes
 writer.Write([]byte("true"))
@@ -547,6 +593,7 @@ writer.Write(data)
 ## Quick Reference: Message Flow Patterns
 
 ### Pattern 1: Simple Parameter Setting (like SysConfig)
+
 ```
 Owner: active → Device
 Owner: set(param1) → Device
@@ -557,6 +604,7 @@ Owner: done
 **No blocking, no responses needed.**
 
 ### Pattern 2: File Transfer (like Payload)
+
 ```
 Owner: active → Device
 Owner: payload-begin → Device
@@ -570,6 +618,7 @@ Owner: done
 **Block after payload-end to wait for result.**
 
 ### Pattern 3: Bidirectional Exchange (like WiFi with CSR)
+
 ```
 Owner: active → Device
 Owner: network-add → Device
@@ -592,25 +641,30 @@ Owner: done
 ## Testing Tips
 
 ### 1. Start Simple
+
 - Implement basic message sending first (like network-add)
 - Don't add chunking until basic flow works
 - Don't add blocking until simple flow works
 
 ### 2. Add Debug Logging
+
 ```go
 slog.Debug("fdo.mymodule state", "state", w.state, "index", w.currentIndex)
 ```
 
 ### 3. Test Without Blocking First
+
 - Get all messages sending/receiving correctly
 - Add blockPeer only when you need bidirectional flow
 
 ### 4. Use Existing FSIMs as Reference
+
 - **SysConfig**: Simplest pattern, no chunking, no blocking
 - **Payload**: Chunking pattern, simple blocking
 - **WiFi**: Complex bidirectional flow (but has issues!)
 
 ### 5. Common Test Pattern
+
 ```bash
 # Test with debug logging
 go run ./cmd server -db test.db -debug -mymodule-config config.json &
@@ -619,6 +673,7 @@ go run ./cmd client
 ```
 
 ### 6. Add Timeouts to Tests
+
 When testing bidirectional flows with blocking, always add timeouts to prevent hanging forever:
 
 ```bash
@@ -659,6 +714,7 @@ Implementing bidirectional flows (where device sends data to owner, then owner r
 ### Common Mistakes in Bidirectional Flow
 
 **❌ Mistake 1: Sending all messages in one Yield call**
+
 ```go
 // WRONG - Tries to send all messages at once
 func (w *Device) Yield(...) error {
@@ -678,6 +734,7 @@ func (w *Device) Yield(...) error {
 **Problem:** Yield is called multiple times by the protocol. Each call should send ONE message, not all of them.
 
 **✅ Solution: Use state machine**
+
 ```go
 func (w *Device) Yield(...) error {
     if w.needsCSR {
@@ -709,6 +766,7 @@ func (w *Device) Yield(...) error {
 ```
 
 **❌ Mistake 2: Blocking without ensuring device will respond**
+
 ```go
 // WRONG - Blocks forever if device doesn't send CSR
 if network.AuthType == 3 {
@@ -718,6 +776,7 @@ if network.AuthType == 3 {
 ```
 
 **✅ Solution: Only block if you're certain device will respond**
+
 ```go
 // CORRECT - Only block if we have certificates to send (meaning we expect CSR)
 if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
@@ -727,6 +786,7 @@ if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
 ```
 
 **❌ Mistake 3: Not unblocking when device finishes**
+
 ```go
 // WRONG - Receives CSR but doesn't unblock
 case "csr-end":
@@ -736,6 +796,7 @@ case "csr-end":
 ```
 
 **✅ Solution: Unblock in HandleInfo**
+
 ```go
 case "csr-end":
     w.lastCSR = w.csrReceiver.GetBuffer()
@@ -754,6 +815,7 @@ For initial implementation and testing:
 4. **Test with timeouts** to catch hangs early
 
 Example: WiFi FSIM
+
 - ✅ Phase 1: network-add messages (working)
 - ⏸️ Phase 2: CSR exchange (complex, deferred)
 - ⏸️ Phase 3: Certificate installation (depends on Phase 2)
@@ -763,6 +825,7 @@ Example: WiFi FSIM
 If your test hangs:
 
 1. **Add debug logging** to track state:
+
 ```go
 slog.Debug("fdo.wifi owner state", 
     "blocking", w.waitingForCSR,
@@ -774,20 +837,21 @@ slog.Debug("fdo.wifi device state",
     "csr_state", w.csrState)
 ```
 
-2. **Check if owner is blocking:**
+1. **Check if owner is blocking:**
    - Look for `blockPeer=true` returns
    - Verify device's Yield is being called
 
-3. **Check if device is yielding:**
+2. **Check if device is yielding:**
    - Verify `yield()` is called after each message
    - Check state machine advances correctly
 
-4. **Add timeout to test:**
+3. **Add timeout to test:**
+
 ```bash
 timeout 30 go run ./cmd client
 ```
 
-5. **Test each direction separately:**
+1. **Test each direction separately:**
    - Test owner → device first
    - Test device → owner separately
    - Combine only when both work
@@ -805,6 +869,7 @@ This section documents the actual problems encountered while implementing the Wi
 ### Problem 1: Test Hung Forever (No Timeout)
 
 **What Happened:**
+
 - Implemented CSR exchange flow
 - Test started but never completed
 - No error message, just hung forever
@@ -814,6 +879,7 @@ This section documents the actual problems encountered while implementing the Wi
 Owner was blocking (`blockPeer=true`) waiting for device to send CSR, but device's Yield wasn't being called or wasn't sending correctly.
 
 **Solution:**
+
 ```bash
 # Always add timeout to tests with blocking
 timeout 30 go run ./cmd client
@@ -824,6 +890,7 @@ timeout 30 go run ./cmd client
 ### Problem 2: Yield Sent All Messages at Once
 
 **What Happened:**
+
 ```go
 // Device Yield tried to send all CSR messages in one call
 func (w *WiFi) Yield(...) error {
@@ -888,6 +955,7 @@ Owner sent network-add, then blocked waiting for CSR. Device sent CSR successful
 Owner's `HandleInfo` received the CSR messages but didn't set `waitingForCSR = false` to unblock.
 
 **Solution:**
+
 ```go
 func (w *WiFiOwner) handleCSR(messageName string, messageBody io.Reader) error {
     // ... handle CSR messages ...
@@ -906,6 +974,7 @@ func (w *WiFiOwner) handleCSR(messageName string, messageBody io.Reader) error {
 ### Problem 4: Blocking When Device Won't Respond
 
 **What Happened:**
+
 ```go
 // Owner blocks after sending enterprise network
 if network.AuthType == 3 {
@@ -920,6 +989,7 @@ Test hung because we blocked expecting CSR, but we hadn't configured any certifi
 Blocking without verifying the device will actually respond.
 
 **Solution:**
+
 ```go
 // Only block if we have certificates to send (meaning we expect CSR)
 if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
@@ -933,6 +1003,7 @@ if network.AuthType == 3 && w.currentCertIndex < len(w.certificates) {
 ### Problem 5: TO2 Failed After Networks Sent
 
 **What Happened:**
+
 - Networks were received successfully
 - Device displayed all 3 networks
 - Then TO2 failed with generic error
@@ -1010,12 +1081,14 @@ After implementing the WiFi FSIM certificate flow, several critical issues were 
 ### Problem 6: CBOR Integer Type Decoding Failure
 
 **What Happened:**
+
 - All network fields decoded correctly (Version, NetworkID, SSID, Password)
 - But AuthType and TrustLevel always showed as 0, regardless of actual values
 - JSON config had auth_type: 1, 0, 3 but all displayed as 0
 
 **Root Cause:**
 CBOR encodes integers in various types depending on the value:
+
 - Small integers: `uint8`, `int8`
 - Medium integers: `uint16`, `int16`, `uint32`, `int32`
 - Large integers: `uint64`, `int64`
@@ -1067,6 +1140,7 @@ default:
 ### Problem 7: Device Sending Responses - Yield vs Receive
 
 **What Happened:**
+
 - Tried to implement CSR sending using device's Yield method
 - Created state machine to send csr-begin, csr-data, csr-end across multiple Yield calls
 - Yield was called once, sent csr-begin, but never called again
@@ -1074,6 +1148,7 @@ default:
 
 **Root Cause:**
 Misunderstood the FDO protocol pattern:
+
 - **Yield** is for device-initiated messages (rare, mostly returns nil)
 - **Receive** is where device responds to owner messages
 
@@ -1113,6 +1188,7 @@ The `respond` function can be called multiple times within a single Receive call
 ### Problem 8: Data Chunks Must Be CBOR-Encoded
 
 **What Happened:**
+
 ```
 error handling device service info "fdo.wifi:csr-data-0": 
 failed to decode chunk data: unsupported type: []uint8: 
@@ -1123,12 +1199,14 @@ Owner's ChunkReceiver failed when processing csr-data-0 message.
 
 **Root Cause:**
 Sent raw bytes for CSR data chunk:
+
 ```go
 writer := respond("csr-data-0")
 writer.Write(csrData)  // Wrong - raw bytes
 ```
 
 But chunking protocol expects CBOR-encoded byte strings. Looking at ChunkSender code:
+
 ```go
 // ChunkSender encodes chunks as CBOR
 chunk := s.Data[s.bytesSent : s.bytesSent+chunkLen]
@@ -1148,6 +1226,7 @@ cbor.NewEncoder(writer).Encode(csrData)  // Correct - CBOR-encoded
 ### Problem 9: Device Must Handle Certificate Messages
 
 **What Happened:**
+
 - CSR sent successfully (begin, data, end)
 - TO2 immediately failed with generic error
 - No specific error message
@@ -1218,6 +1297,7 @@ func (w *WiFi) handleCertificate(messageName string, messageBody io.Reader, resp
 
 **What Happened:**
 After fixing all previous issues, the certificate flow still failed. Debug logs showed:
+
 ```
 [14:21:05] DEBUG: fdo.wifi sent cert-begin
 [14:21:05] DEBUG: fdo.wifi sent cert-begin  // Duplicate!
@@ -1263,6 +1343,7 @@ if !w.certBeginSent {
 ### Current Status: WiFi Certificate Flow ✅ WORKING
 
 **Complete End-to-End Flow:**
+
 1. ✅ Server loads WiFi config with 3 networks (WPA2-PSK, Open, Enterprise)
 2. ✅ Owner sends network-add for all networks
 3. ✅ Device receives and decodes all fields correctly (AuthType, TrustLevel, etc.)
@@ -1277,6 +1358,7 @@ if !w.certBeginSent {
 12. ✅ **Test PASSES: "WiFi FSIM test PASSED"**
 
 **Test Output:**
+
 ```
 [fdo.wifi] Received certificate for network net-003 (Enterprise-WiFi)
 [fdo.wifi] Certificate size: 249 bytes
@@ -1311,12 +1393,14 @@ ServiceInfoKV = [
 > "ServiceInfo values consist of any single CBOR base type, wrapped in a bstr. The bstr wrapping ensures that the entry can be skipped even if the major type 6 sub-type is unknown."
 
 **What this means:**
+
 - ALL ServiceInfo message values MUST be `bstr .cbor any`
 - This is a CBOR byte string (bstr) containing CBOR-encoded data
 - The inner content can be any CBOR type (int, string, array, map, bytes, etc.)
 - This is a **protocol requirement**, not an implementation choice
 
 **Why the spec requires this:**
+
 - Forward compatibility - unknown message types can be skipped without parsing
 - Protocol parsers can extract the bstr wrapper without understanding inner content
 - Modules can decode their own message formats independently
@@ -1326,6 +1410,7 @@ ServiceInfoKV = [
 **ChunkSender/ChunkReceiver accept:** `[]byte` only
 
 **What you CAN pass:**
+
 - ✅ Binary files (firmware images, videos, archives)
 - ✅ Certificates (DER or PEM encoded)
 - ✅ CSRs (DER or PEM encoded)
@@ -1334,6 +1419,7 @@ ServiceInfoKV = [
 - ✅ Any data already in byte form
 
 **What you CANNOT pass directly:**
+
 - ❌ Go structs
 - ❌ Go maps
 - ❌ Go arrays
@@ -1382,34 +1468,40 @@ producer.WriteChunk("network-add", buf.Bytes())
 ### Common Misconception: "Double Encoding"
 
 **It may look like double encoding:**
+
 ```
 Binary data → CBOR encode → ServiceInfo message → CBOR encode again
 ```
 
 **But this is correct per spec:**
+
 - **Inner encoding:** Your data as CBOR bstr (chunking code does this)
 - **Outer encoding:** ServiceInfo message structure (FDO protocol does this)
 - Both layers are **required by the FDO specification**
 
 **The spec mandates:** `ServiceInfoVal: bstr .cbor any`
+
 - The chunking code creates the `bstr .cbor` part
 - The protocol layer wraps it in the ServiceInfo message
 
 ### Use Cases: When to Use Chunking vs Direct Messages
 
 **Use ChunkSender/ChunkReceiver for:**
+
 - Large binary payloads (>1KB)
 - Files, certificates, firmware images
 - Data that needs to be streamed or buffered
 - Anything that benefits from progress tracking and hash verification
 
 **Use direct ServiceInfo messages for:**
+
 - Small structured data (<1KB)
 - Control messages (active, network-add, etc.)
 - Configuration parameters
 - Status responses
 
 **Example from WiFi FSIM:**
+
 - `network-add`: Direct message (small CBOR map)
 - `csr-data-0`: Chunked (CSR can be large)
 - `cert-data-0`: Chunked (certificate can be large)
@@ -1428,6 +1520,7 @@ This section documents a systematic approach to debugging FSIM failures, based o
 ### The Problem: Cryptic Error Messages
 
 FSIM failures often present as cryptic or seemingly empty errors:
+
 - `TO2 failed` with no details
 - Error messages that appear empty (e.g., `error: { }`)
 - Generic "transfer ownership failed" messages
@@ -1449,6 +1542,7 @@ if err != nil {
 ```
 
 This reveals:
+
 - The actual error message (not formatted by the logger)
 - The error type (helps identify where it originated)
 
@@ -1461,6 +1555,7 @@ This reveals:
 **The Rule:** `HandleInfo` **MUST** read the entire message body before returning, even if ignoring the message.
 
 **Fix:**
+
 ```go
 // ❌ WRONG - doesn't read the body
 func (c *MyOwner) HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error {
@@ -1495,16 +1590,19 @@ func (c *MyOwner) HandleInfo(ctx context.Context, messageName string, messageBod
 FSIM failures can originate from either side:
 
 **Owner-side issues:**
+
 - `HandleInfo` not reading message body
 - `ProduceInfo` returning wrong `blockPeer`/`moduleDone` values
 - Not sending `active` message first
 
 **Device-side issues:**
+
 - `Receive` not responding when expected
 - `Yield` not calling `yield()` after sending
 - Not handling all expected message types
 
 **Debug both sides:**
+
 ```go
 // Owner side
 slog.Debug("[fdo.mymodule] Owner HandleInfo", "message", messageName)
@@ -1585,6 +1683,7 @@ cat /tmp/fdo_server.log | tail -50
 ```
 
 If the server log is empty but the client fails, the error is likely in:
+
 - Client-side message handling
 - Protocol-level validation (like body reading)
 
@@ -1606,6 +1705,7 @@ When an FSIM test fails:
 **Symptom:** Test received 1 of 3 credentials, then failed with empty-looking error.
 
 **Debug steps:**
+
 1. Added `fmt.Fprintf` to see actual error: `"owner module did not read full body of message 'fdo.credentials:active'"`
 2. Checked `SimpleCredentialsOwner.HandleInfo` - it returned without reading the body
 3. Added `io.Copy(io.Discard, messageBody)` to read and discard the body
@@ -1614,6 +1714,7 @@ When an FSIM test fails:
 **Root cause:** The device sends an `active` response, but the owner's `HandleInfo` ignored it without reading the body.
 
 **Fix:** One line addition:
+
 ```go
 func (c *SimpleCredentialsOwner) HandleInfo(..., messageBody io.Reader) error {
     _, _ = io.Copy(io.Discard, messageBody)  // Added this line
