@@ -1,6 +1,6 @@
 # fdo.sysconfig - System Configuration FSIM
 
-Copyright &copy; 2024 FIDO Alliance & Dell Technologies
+Copyright &copy; 2026 Dell Technologies and FIDO Alliance
 Author: Brad Goodman, Dell Technologies
 
 Licensed under the Apache License, Version 2.0 (the "License");

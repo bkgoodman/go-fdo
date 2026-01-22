@@ -985,6 +985,29 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 				fmt.Printf("  Key:  %s (length: %d bytes)\n", string(pubkey), len(pubkey))
 				return nil
 			}
+
+			// Add handler for enrollment requests (CSR signing, etc.)
+			credentialsOwner.OnEnrollmentRequest = func(credID, credType string, requestData []byte, metadata map[string]any) ([]byte, map[string]any, error) {
+				fmt.Printf("[fdo.credentials] SERVER received CSR:\n")
+				fmt.Printf("  ID:   %s\n", credID)
+				fmt.Printf("  Type: %s\n", credType)
+				fmt.Printf("  CSR:  %s\n", string(requestData))
+
+				// For demo purposes, return a fake signed certificate + CA bundle
+				fakeCert := fmt.Sprintf("-----BEGIN CERTIFICATE-----\nSigned certificate for %s\n-----END CERTIFICATE-----\n", credID)
+				fakeCA := "-----BEGIN CERTIFICATE-----\nFake CA Certificate\n-----END CERTIFICATE-----\n"
+				responseData := fakeCert + fakeCA
+
+				fmt.Printf("[fdo.credentials] SERVER sending signed cert + CA:\n")
+				fmt.Printf("  Cert: %d bytes\n", len(fakeCert))
+				fmt.Printf("  CA:   %d bytes\n", len(fakeCA))
+
+				responseMeta := map[string]any{
+					"cert_format":        "pem",
+					"ca_bundle_included": true,
+				}
+				return []byte(responseData), responseMeta, nil
+			}
 			if !yield("fdo.credentials", credentialsOwner) {
 				return
 			}

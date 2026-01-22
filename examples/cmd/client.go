@@ -59,6 +59,7 @@ var (
 	wgetDir        string
 	fdoVersion     int
 	registerSSHKey string // SSH public key to register with owner
+	enrollCSR      string // CSR enrollment request (format: id:csrdata)
 )
 
 type fsVar map[string]string
@@ -154,6 +155,7 @@ func init() {
 	clientFlags.StringVar(&wgetDir, "wget-dir", "", "A `dir` to wget files into (FSIM disabled if empty)")
 	clientFlags.IntVar(&fdoVersion, "fdo-version", 101, "FDO protocol version (101 or 200)")
 	clientFlags.StringVar(&registerSSHKey, "register-ssh-key", "", "SSH public `key` to register with owner (format: id:keydata)")
+	clientFlags.StringVar(&enrollCSR, "enroll-csr", "", "CSR enrollment `request` (format: id:csrdata)")
 }
 
 func client(ctx context.Context) error {
@@ -617,6 +619,34 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 			return nil, fmt.Errorf("no public key available for credential_id: %s", reqCredID)
 		}
 		fmt.Printf("[fdo.credentials] Configured SSH key: %s\n", credID)
+	}
+
+	// Add enrollment requests (device-initiated Enrolled Credentials flow)
+	if enrollCSR != "" {
+		// Format: id:csrdata (e.g., device-mtls-cert:-----BEGIN CERTIFICATE REQUEST-----)
+		parts := strings.SplitN(enrollCSR, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid -enroll-csr format: expected id:csrdata")
+		}
+		credID, csrData := parts[0], parts[1]
+		credDevice.EnrollmentRequests = append(credDevice.EnrollmentRequests, fsim.EnrollmentRequest{
+			CredentialID:   credID,
+			CredentialType: "x509_cert",
+			RequestData:    []byte(csrData),
+		})
+		credDevice.OnEnrolledCredentialReceived = func(credentialID, credentialType string, data []byte, metadata map[string]any) error {
+			fmt.Printf("[fdo.credentials] CLIENT received signed cert + CA:\n")
+			fmt.Printf("  ID:       %s\n", credentialID)
+			fmt.Printf("  Type:     %s\n", credentialType)
+			if metadata != nil {
+				if caIncluded, ok := metadata["ca_bundle_included"].(bool); ok && caIncluded {
+					fmt.Printf("  CA included: yes\n")
+				}
+			}
+			fmt.Printf("  Response:\n%s\n", string(data))
+			return nil
+		}
+		fmt.Printf("[fdo.credentials] Configured CSR enrollment: %s\n", credID)
 	}
 	fsims["fdo.credentials"] = credDevice
 

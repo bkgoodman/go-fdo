@@ -3,7 +3,8 @@
 **Version:** 1.0 (Draft)  
 **Status:** Specification Draft
 
-Copyright &copy; 2026 FIDO Alliance
+Copyright &copy; 2026 Dell Technologies and FIDO Alliance
+Author: Brad Goodman, Dell Technologies
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

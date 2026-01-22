@@ -1,5 +1,20 @@
 # fdo.wifi FSIM Specification
 
+Copyright &copy; 2026 Dell Technologies and FIDO Alliance
+Author: Brad Goodman, Dell Technologies
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 ## Overview
 
 The `fdo.wifi` FSIM provides Wi-Fi network configuration and credential provisioning for FDO devices. This FSIM supports both basic Wi-Fi setup (SSID/password) and certificate-based authentication for WPA3-Enterprise networks in a single, unified interface.

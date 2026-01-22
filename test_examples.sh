@@ -709,6 +709,34 @@ test_credentials() {
 	stop_server
 	log_success "Registered Credentials test PASSED"
 
+	# Test Enrolled Credentials flow (device sends CSR, owner returns signed cert + CA)
+	log_section "TEST: Credentials FSIM (Enrolled Credentials)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	log_step "Starting server with fake CA (will sign CSRs)"
+	start_server ""
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with CSR enrollment"
+	run_cmd go run ./cmd client -enroll-csr "device-mtls-cert:-----BEGIN CERTIFICATE REQUEST-----FAKECSR-----END CERTIFICATE REQUEST-----"
+	log_success "TO1/TO2 completed with CSR enrollment"
+
+	# Show server received CSR
+	echo ">>> SERVER received CSR from CLIENT:"
+	grep -A4 "SERVER received CSR" /tmp/fdo_server.log 2>/dev/null || echo "  (check /tmp/fdo_server.log for details)"
+
+	# Show server sent cert + CA
+	echo ""
+	echo ">>> SERVER sent signed cert + CA to CLIENT:"
+	grep -A3 "SERVER sending signed cert" /tmp/fdo_server.log 2>/dev/null || echo "  (check /tmp/fdo_server.log for details)"
+
+	stop_server
+	log_success "Enrolled Credentials test PASSED"
+
 	log_success "Credentials FSIM test PASSED"
 }
 

@@ -29,6 +29,10 @@ type CredentialsOwner struct {
 	// Callback for public key registration (Registered Credentials flow)
 	OnPublicKeyReceived func(credentialID, credentialType string, publicKey []byte, metadata map[string]any) error
 
+	// Callback for processing enrollment requests (Enrolled Credentials flow)
+	// Called when device sends a CSR or other enrollment request. Returns the signed credential/response.
+	OnEnrollmentRequest func(credentialID, credentialType string, requestData []byte, metadata map[string]any) (responseData []byte, responseMetadata map[string]any, err error)
+
 	// Internal state
 	currentCredentialIndex int
 	sentActive             bool
@@ -50,6 +54,16 @@ type CredentialsOwner struct {
 	currentPubkeyData         []byte
 	pendingPubkeyResult       *chunking.ResultMessage // Result to send back to device
 	waitingForPubkey          bool                    // True when waiting for device to send pubkey
+
+	// Enrolled Credentials state (owner receives request, sends response)
+	enrollmentReceiver       *chunking.ChunkReceiver // Receiver for enrollment request from device
+	currentEnrollmentID      string
+	currentEnrollmentType    string
+	currentEnrollmentMeta    map[string]any
+	currentEnrollmentData    []byte
+	pendingEnrollmentResp    *enrollmentResponseInfo // Pending response to send
+	waitingForEnrollment     bool                    // True when waiting for device request
+	waitingForResponseResult bool                    // True when waiting for device response-result
 }
 
 // PublicKeyRequest represents a request for the device to send a public key.
@@ -66,6 +80,14 @@ type ProvisionedCredential struct {
 	CredentialData []byte         // Required: serialized credential data (JSON or CBOR)
 	Metadata       map[string]any // Optional: type-specific metadata
 	HashAlg        string         // Optional: hash algorithm for verification
+}
+
+// enrollmentResponseInfo holds info about a pending enrollment response to send
+type enrollmentResponseInfo struct {
+	CredentialID   string
+	CredentialType string
+	ResponseData   []byte
+	Metadata       map[string]any
 }
 
 var _ serviceinfo.OwnerModule = (*CredentialsOwner)(nil)
@@ -99,13 +121,22 @@ func (c *CredentialsOwner) Transition(active bool) error {
 		c.currentPubkeyData = nil
 		c.pendingPubkeyResult = nil
 		c.waitingForPubkey = false
+		// Reset enrolled credentials state
+		c.enrollmentReceiver = nil
+		c.currentEnrollmentID = ""
+		c.currentEnrollmentType = ""
+		c.currentEnrollmentMeta = nil
+		c.currentEnrollmentData = nil
+		c.pendingEnrollmentResp = nil
+		c.waitingForEnrollment = false
+		c.waitingForResponseResult = false
 	}
 	return nil
 }
 
 // Yield implements serviceinfo.OwnerModule.
 func (c *CredentialsOwner) Yield(ctx context.Context, producer *serviceinfo.Producer) error {
-	// Send pending pubkey-result if any
+	// Send pending pubkey-result if any (Registered Credentials flow)
 	if c.pendingPubkeyResult != nil {
 		data, err := cbor.Marshal(c.pendingPubkeyResult)
 		if err != nil {
@@ -119,6 +150,51 @@ func (c *CredentialsOwner) Yield(ctx context.Context, producer *serviceinfo.Prod
 			"message", c.pendingPubkeyResult.Message)
 		c.pendingPubkeyResult = nil
 	}
+
+	// Send pending enrollment response if any (Enrolled Credentials flow)
+	if c.pendingEnrollmentResp != nil {
+		resp := c.pendingEnrollmentResp
+
+		// Create sender for response
+		sender := chunking.NewChunkSender("response", resp.ResponseData)
+		sender.BeginFields.FSIMFields = make(map[int]any)
+		sender.BeginFields.FSIMFields[-1] = resp.CredentialID
+		sender.BeginFields.FSIMFields[-2] = resp.CredentialType
+		if resp.Metadata != nil {
+			sender.BeginFields.FSIMFields[-3] = resp.Metadata
+		}
+
+		slog.Debug("[fdo.credentials] Sending enrollment response",
+			"credential_id", resp.CredentialID,
+			"credential_type", resp.CredentialType,
+			"size", len(resp.ResponseData))
+
+		// Send begin
+		if err := sender.SendBegin(producer); err != nil {
+			return fmt.Errorf("send response-begin: %w", err)
+		}
+
+		// Send all data chunks
+		for {
+			done, err := sender.SendNextChunk(producer)
+			if err != nil {
+				return fmt.Errorf("send response-data: %w", err)
+			}
+			if done {
+				break
+			}
+		}
+
+		// Send end
+		if err := sender.SendEnd(producer); err != nil {
+			return fmt.Errorf("send response-end: %w", err)
+		}
+		slog.Debug("[fdo.credentials] Sent enrollment response")
+
+		c.pendingEnrollmentResp = nil
+		c.waitingForResponseResult = true
+	}
+
 	return nil
 }
 
@@ -228,7 +304,58 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 		return false, false, nil
 	}
 
-	// Step 4: All done, send active=false
+	// Step 4: Handle Enrolled Credentials flow (device-initiated)
+	// If we have a pending enrollment response, send it
+	if c.pendingEnrollmentResp != nil {
+		resp := c.pendingEnrollmentResp
+
+		// Create sender for response
+		sender := chunking.NewChunkSender("response", resp.ResponseData)
+		sender.BeginFields.FSIMFields = make(map[int]any)
+		sender.BeginFields.FSIMFields[-1] = resp.CredentialID
+		sender.BeginFields.FSIMFields[-2] = resp.CredentialType
+		if resp.Metadata != nil {
+			sender.BeginFields.FSIMFields[-3] = resp.Metadata
+		}
+
+		slog.Debug("[fdo.credentials] Sending enrollment response",
+			"credential_id", resp.CredentialID,
+			"credential_type", resp.CredentialType,
+			"size", len(resp.ResponseData))
+
+		// Send begin
+		if err := sender.SendBegin(producer); err != nil {
+			return false, false, fmt.Errorf("send response-begin: %w", err)
+		}
+
+		// Send all data chunks
+		for {
+			done, err := sender.SendNextChunk(producer)
+			if err != nil {
+				return false, false, fmt.Errorf("send response-data: %w", err)
+			}
+			if done {
+				break
+			}
+		}
+
+		// Send end
+		if err := sender.SendEnd(producer); err != nil {
+			return false, false, fmt.Errorf("send response-end: %w", err)
+		}
+		slog.Debug("[fdo.credentials] Sent enrollment response")
+
+		c.pendingEnrollmentResp = nil
+		c.waitingForResponseResult = true
+		return false, false, nil
+	}
+
+	// If waiting for device's response-result, block
+	if c.waitingForResponseResult {
+		return true, false, nil
+	}
+
+	// Step 5: All done, send active=false
 	if err := producer.WriteChunk("active", []byte{0xf4}); err != nil { // CBOR false
 		return false, false, fmt.Errorf("write active=false: %w", err)
 	}
@@ -294,10 +421,28 @@ func (c *CredentialsOwner) receive(ctx context.Context, messageName string, mess
 		// Device finishes sending public key
 		return c.handlePubkeyEnd(ctx, messageBody)
 
+	case "request-begin":
+		// Device starts sending an enrollment request (CSR, etc.)
+		return c.handleRequestBegin(messageBody)
+
+	case "request-end":
+		// Device finishes sending enrollment request
+		return c.handleRequestEnd(ctx, messageBody)
+
+	case "response-result":
+		// Device acknowledges enrollment response
+		return c.handleResponseResult(messageBody)
+
 	default:
 		// Check if it's a pubkey-data-N message
 		if c.pubkeyReceiver != nil {
 			if err := c.pubkeyReceiver.HandleMessage(messageName, messageBody); err == nil {
+				return nil
+			}
+		}
+		// Check if it's a request-data-N message
+		if c.enrollmentReceiver != nil {
+			if err := c.enrollmentReceiver.HandleMessage(messageName, messageBody); err == nil {
 				return nil
 			}
 		}
@@ -417,4 +562,130 @@ func NewCredentialsOwner(credentials []ProvisionedCredential) *CredentialsOwner 
 	return &CredentialsOwner{
 		credentials: credentials,
 	}
+}
+
+// handleRequestBegin processes the request-begin message from the device (Enrolled Credentials).
+func (c *CredentialsOwner) handleRequestBegin(messageBody io.Reader) error {
+	// Initialize receiver if needed
+	if c.enrollmentReceiver == nil {
+		c.enrollmentReceiver = &chunking.ChunkReceiver{
+			PayloadName: "request",
+			OnBegin: func(begin chunking.BeginMessage) error {
+				// Extract FSIM-specific fields
+				if credID, ok := begin.FSIMFields[-1].(string); ok {
+					c.currentEnrollmentID = credID
+				}
+				if credType, ok := begin.FSIMFields[-2].(string); ok {
+					c.currentEnrollmentType = credType
+				}
+				if metadata, ok := begin.FSIMFields[-3].(map[string]any); ok {
+					c.currentEnrollmentMeta = metadata
+				}
+
+				slog.Debug("[fdo.credentials] Receiving enrollment request",
+					"credential_id", c.currentEnrollmentID,
+					"credential_type", c.currentEnrollmentType,
+					"total_size", begin.TotalSize)
+				return nil
+			},
+			OnChunk: func(data []byte) error {
+				return nil
+			},
+			OnEnd: func(end chunking.EndMessage) error {
+				// Request fully received - save data before reset
+				c.currentEnrollmentData = make([]byte, len(c.enrollmentReceiver.GetBuffer()))
+				copy(c.currentEnrollmentData, c.enrollmentReceiver.GetBuffer())
+				slog.Debug("[fdo.credentials] Enrollment request received",
+					"credential_id", c.currentEnrollmentID,
+					"size", len(c.currentEnrollmentData))
+				return nil
+			},
+		}
+	}
+
+	// Handle the begin message
+	if err := c.enrollmentReceiver.HandleMessage("request-begin", messageBody); err != nil {
+		return fmt.Errorf("handle request-begin: %w", err)
+	}
+
+	c.waitingForEnrollment = true
+	return nil
+}
+
+// handleRequestEnd processes the request-end message and invokes the callback.
+func (c *CredentialsOwner) handleRequestEnd(ctx context.Context, messageBody io.Reader) error {
+	// Handle the end message
+	if err := c.enrollmentReceiver.HandleMessage("request-end", messageBody); err != nil {
+		return fmt.Errorf("handle request-end: %w", err)
+	}
+
+	// Use the request data saved in OnEnd callback
+	requestData := c.currentEnrollmentData
+
+	// Invoke callback if provided
+	if c.OnEnrollmentRequest != nil {
+		responseData, responseMeta, err := c.OnEnrollmentRequest(
+			c.currentEnrollmentID,
+			c.currentEnrollmentType,
+			requestData,
+			c.currentEnrollmentMeta,
+		)
+		if err != nil {
+			slog.Error("[fdo.credentials] Enrollment request processing failed",
+				"credential_id", c.currentEnrollmentID,
+				"error", err)
+			// TODO: Send error response
+			return nil
+		}
+
+		slog.Info("[fdo.credentials] Enrollment request processed",
+			"credential_id", c.currentEnrollmentID,
+			"credential_type", c.currentEnrollmentType,
+			"response_size", len(responseData))
+
+		// Queue response for sending via Yield
+		c.pendingEnrollmentResp = &enrollmentResponseInfo{
+			CredentialID:   c.currentEnrollmentID,
+			CredentialType: c.currentEnrollmentType,
+			ResponseData:   responseData,
+			Metadata:       responseMeta,
+		}
+	} else {
+		slog.Warn("[fdo.credentials] No OnEnrollmentRequest callback configured",
+			"credential_id", c.currentEnrollmentID)
+	}
+
+	// Reset receiver state (but keep enrollment ID/type for response)
+	c.enrollmentReceiver = nil
+	c.waitingForEnrollment = false
+
+	return nil
+}
+
+// handleResponseResult processes the response-result message from the device.
+func (c *CredentialsOwner) handleResponseResult(messageBody io.Reader) error {
+	var result chunking.ResultMessage
+	if err := cbor.NewDecoder(messageBody).Decode(&result); err != nil {
+		return fmt.Errorf("decode response-result: %w", err)
+	}
+
+	if result.StatusCode == 0 {
+		slog.Info("[fdo.credentials] Device confirmed enrollment credential installed",
+			"credential_id", c.currentEnrollmentID,
+			"message", result.Message)
+	} else {
+		slog.Warn("[fdo.credentials] Device failed to install enrollment credential",
+			"credential_id", c.currentEnrollmentID,
+			"status", result.StatusCode,
+			"message", result.Message)
+	}
+
+	// Reset enrollment state
+	c.currentEnrollmentID = ""
+	c.currentEnrollmentType = ""
+	c.currentEnrollmentMeta = nil
+	c.currentEnrollmentData = nil
+	c.waitingForResponseResult = false
+
+	return nil
 }
