@@ -665,6 +665,28 @@ test_wifi() {
 	log_success "WiFi FSIM test PASSED"
 }
 
+# Test: Credentials FSIM
+# This test demonstrates the fdo.credentials FSIM by provisioning various credential types
+test_credentials() {
+	log_section "TEST: Credentials FSIM (Provisioned Credentials)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	log_step "Starting server with credential provisioning"
+	start_server "-credential password:admin-creds:admin:SecurePass123 -credential api_key:prod-api:sk_live_abc123xyz -credential oauth2_client_secret:oauth-app:client_secret_xyz789"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with credential provisioning"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with credentials provisioned"
+
+	stop_server
+	log_success "Credentials FSIM test PASSED"
+}
+
 # Test: Bad Delegate Rejection (Security Test)
 # This test verifies that a delegate chain created with a DIFFERENT owner key
 # (simulating an attacker) cannot be used for onboarding.
@@ -727,6 +749,7 @@ test_all() {
 	test_sysconfig || failed=1
 	test_payload || failed=1
 	test_wifi || failed=1
+	test_credentials || failed=1
 	test_bad_delegate || failed=1
 
 	echo ""
@@ -804,12 +827,15 @@ main() {
 	wifi)
 		test_wifi
 		;;
+	credentials)
+		test_credentials
+		;;
 	all)
 		test_all
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, credentials, all"
 		exit 1
 		;;
 	esac

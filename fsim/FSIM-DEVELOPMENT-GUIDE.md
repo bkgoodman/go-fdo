@@ -9,6 +9,7 @@ This guide documents common hurdles, gotchas, and patterns discovered while impl
 4. [Yield Method Patterns](#yield-method-patterns)
 5. [Owner vs Device Module Differences](#owner-vs-device-module-differences)
 6. [Common Pitfalls](#common-pitfalls)
+7. [Debugging FSIM Failures: Systematic Approach](#debugging-fsim-failures-systematic-approach)
 
 ---
 
@@ -1287,15 +1288,352 @@ Success
 
 ---
 
+---
+
+## CBOR Encoding in Chunking: Protocol Requirement
+
+### Why Chunking Code Always Uses CBOR
+
+**Question:** Why does the chunking code CBOR-encode data chunks? Can't we just send raw binary?
+
+**Answer:** No. The FDO protocol **mandates** CBOR encoding for all ServiceInfo values.
+
+**FDO Specification (FIDO-IoT-spec.bs, lines 5668-5687):**
+
+```cddl
+ServiceInfoKV = [
+    ServiceInfoKey: tstr,
+    ServiceInfoVal: bstr .cbor any
+]
+```
+
+**Spec text:**
+> "ServiceInfo values consist of any single CBOR base type, wrapped in a bstr. The bstr wrapping ensures that the entry can be skipped even if the major type 6 sub-type is unknown."
+
+**What this means:**
+- ALL ServiceInfo message values MUST be `bstr .cbor any`
+- This is a CBOR byte string (bstr) containing CBOR-encoded data
+- The inner content can be any CBOR type (int, string, array, map, bytes, etc.)
+- This is a **protocol requirement**, not an implementation choice
+
+**Why the spec requires this:**
+- Forward compatibility - unknown message types can be skipped without parsing
+- Protocol parsers can extract the bstr wrapper without understanding inner content
+- Modules can decode their own message formats independently
+
+### What Data Can Be Passed to Chunking Code?
+
+**ChunkSender/ChunkReceiver accept:** `[]byte` only
+
+**What you CAN pass:**
+- ✅ Binary files (firmware images, videos, archives)
+- ✅ Certificates (DER or PEM encoded)
+- ✅ CSRs (DER or PEM encoded)
+- ✅ Text files
+- ✅ Pre-serialized CBOR data
+- ✅ Any data already in byte form
+
+**What you CANNOT pass directly:**
+- ❌ Go structs
+- ❌ Go maps
+- ❌ Go arrays
+- ❌ Any structured data that isn't already serialized
+
+**Why this restriction?**
+Chunking is designed for **bulk binary data transfer**. Structured control messages (like `network-add`, `active`, etc.) should be sent as single ServiceInfo messages without chunking.
+
+### How Data Flows Through Chunking
+
+**For chunked binary data (certificates, firmware, etc.):**
+
+```go
+// 1. Start with binary data
+certData := []byte("-----BEGIN CERTIFICATE-----\n...")
+
+// 2. Pass to chunking code
+sender := chunking.NewChunkSender("cert", certData)
+
+// 3. Chunking code does:
+chunk := certData[0:1014]                    // Extract chunk
+cbor.Encode(chunk)                           // Encode as CBOR bstr (protocol requirement)
+producer.WriteChunk("cert-data-0", encoded)  // Send as ServiceInfo value
+
+// 4. On wire: bstr .cbor bstr (outer wrapper + inner chunk bytes)
+```
+
+**For structured messages (network configuration, etc.):**
+
+```go
+// 1. Create structured data
+networkMap := make(map[int]any)
+networkMap[0] = "1.0"
+networkMap[3] = 3  // AuthType
+
+// 2. Serialize to bytes FIRST
+var buf bytes.Buffer
+cbor.NewEncoder(&buf).Encode(networkMap)
+
+// 3. Send as single ServiceInfo message (no chunking)
+producer.WriteChunk("network-add", buf.Bytes())
+
+// 4. On wire: bstr .cbor map (wrapper + CBOR map)
+```
+
+### Common Misconception: "Double Encoding"
+
+**It may look like double encoding:**
+```
+Binary data → CBOR encode → ServiceInfo message → CBOR encode again
+```
+
+**But this is correct per spec:**
+- **Inner encoding:** Your data as CBOR bstr (chunking code does this)
+- **Outer encoding:** ServiceInfo message structure (FDO protocol does this)
+- Both layers are **required by the FDO specification**
+
+**The spec mandates:** `ServiceInfoVal: bstr .cbor any`
+- The chunking code creates the `bstr .cbor` part
+- The protocol layer wraps it in the ServiceInfo message
+
+### Use Cases: When to Use Chunking vs Direct Messages
+
+**Use ChunkSender/ChunkReceiver for:**
+- Large binary payloads (>1KB)
+- Files, certificates, firmware images
+- Data that needs to be streamed or buffered
+- Anything that benefits from progress tracking and hash verification
+
+**Use direct ServiceInfo messages for:**
+- Small structured data (<1KB)
+- Control messages (active, network-add, etc.)
+- Configuration parameters
+- Status responses
+
+**Example from WiFi FSIM:**
+- `network-add`: Direct message (small CBOR map)
+- `csr-data-0`: Chunked (CSR can be large)
+- `cert-data-0`: Chunked (certificate can be large)
+- `cert-result`: Direct message (small status response)
+
+### Key Takeaway
+
+The CBOR encoding in chunking code is **not wasteful or redundant** - it's a **protocol requirement** mandated by the FDO specification. The chunking code correctly implements `bstr .cbor any` for all data chunks, ensuring protocol compliance and forward compatibility.
+
+---
+
+## Debugging FSIM Failures: Systematic Approach
+
+This section documents a systematic approach to debugging FSIM failures, based on real debugging sessions.
+
+### The Problem: Cryptic Error Messages
+
+FSIM failures often present as cryptic or seemingly empty errors:
+- `TO2 failed` with no details
+- Error messages that appear empty (e.g., `error: { }`)
+- Generic "transfer ownership failed" messages
+
+**Key Insight:** The actual error is often hidden by logging formatters or error wrapping. Always dig deeper.
+
+### Step 1: Get the Real Error Message
+
+**Problem:** Some logging libraries (like `devlog`) format errors in ways that hide the actual message.
+
+**Solution:** Use `fmt.Fprintf` to stderr to see the actual error:
+
+```go
+// Temporary debug code
+if err != nil {
+    fmt.Fprintf(os.Stderr, "TO2 failed: %v (type: %T)\n", err, err)
+    return nil, err
+}
+```
+
+This reveals:
+- The actual error message (not formatted by the logger)
+- The error type (helps identify where it originated)
+
+### Step 2: Common Error Messages and Their Causes
+
+#### "owner module did not read full body of message 'fdo.xxx:yyy'"
+
+**Cause:** The owner's `HandleInfo` method returned without reading the entire `messageBody`.
+
+**The Rule:** `HandleInfo` **MUST** read the entire message body before returning, even if ignoring the message.
+
+**Fix:**
+```go
+// ❌ WRONG - doesn't read the body
+func (c *MyOwner) HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error {
+    slog.Debug("ignoring message", "name", messageName)
+    return nil  // Body not read!
+}
+
+// ✅ CORRECT - reads and discards the body
+func (c *MyOwner) HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error {
+    _, _ = io.Copy(io.Discard, messageBody)  // MUST read the body
+    slog.Debug("ignoring message", "name", messageName)
+    return nil
+}
+```
+
+**Why this matters:** The TO2 protocol verifies that all message bodies are fully consumed. If not, it fails with this error.
+
+#### "NextModule not called"
+
+**Cause:** The module state machine wasn't properly initialized before `Module()` was called.
+
+**Fix:** Ensure `NextModule()` is called to initialize the first module after devmod completes.
+
+#### "device has not activated module 'fdo.xxx'"
+
+**Cause:** Owner sent a non-active message to a module that hasn't been activated yet.
+
+**Fix:** Always send `active=true` before any other messages.
+
+### Step 3: Check Both Sides
+
+FSIM failures can originate from either side:
+
+**Owner-side issues:**
+- `HandleInfo` not reading message body
+- `ProduceInfo` returning wrong `blockPeer`/`moduleDone` values
+- Not sending `active` message first
+
+**Device-side issues:**
+- `Receive` not responding when expected
+- `Yield` not calling `yield()` after sending
+- Not handling all expected message types
+
+**Debug both sides:**
+```go
+// Owner side
+slog.Debug("[fdo.mymodule] Owner HandleInfo", "message", messageName)
+
+// Device side  
+slog.Debug("[fdo.mymodule] Device Receive", "message", messageName)
+```
+
+### Step 4: Trace the Message Flow
+
+Add logging to trace the exact sequence of messages:
+
+```go
+// In ProduceInfo
+slog.Debug("[fdo.mymodule] ProduceInfo", 
+    "state", w.state,
+    "blockPeer", blockPeer,
+    "moduleDone", moduleDone)
+
+// In HandleInfo
+slog.Debug("[fdo.mymodule] HandleInfo",
+    "message", messageName,
+    "bodySize", /* read and count bytes */)
+
+// In Receive
+slog.Debug("[fdo.mymodule] Receive",
+    "message", messageName,
+    "responding", /* true if calling respond() */)
+```
+
+### Step 5: The HandleInfo Body Reading Rule
+
+**This is the most common cause of FSIM failures.**
+
+Every `HandleInfo` implementation must follow this pattern:
+
+```go
+func (c *MyOwner) HandleInfo(ctx context.Context, messageName string, messageBody io.Reader) error {
+    switch messageName {
+    case "expected-message":
+        // Decode the message (this reads the body)
+        var data MyDataType
+        if err := cbor.NewDecoder(messageBody).Decode(&data); err != nil {
+            return fmt.Errorf("decode %s: %w", messageName, err)
+        }
+        // Process data...
+        return nil
+        
+    default:
+        // CRITICAL: Even for ignored messages, MUST read the body
+        _, _ = io.Copy(io.Discard, messageBody)
+        slog.Debug("[fdo.mymodule] ignoring message", "name", messageName)
+        return nil
+    }
+}
+```
+
+**Why decoding reads the body:** When you call `cbor.NewDecoder(messageBody).Decode(&data)`, the decoder reads from `messageBody`. This satisfies the "must read full body" requirement.
+
+**Why ignoring still needs to read:** If you return without reading, the protocol detects unread bytes and fails.
+
+### Step 6: Verify Test Output Carefully
+
+When a test fails:
+
+1. **Check which credential/message was last received** - This tells you where the failure occurred
+2. **Look for partial success** - "Received credential: admin-creds" followed by failure means the first message worked
+3. **Count the messages** - If you expected 3 credentials but only 1 was received, the failure is after the first
+
+### Step 7: Server Log Analysis
+
+The server log often contains more detail than the client error:
+
+```bash
+# Run test and capture server log
+./test_examples.sh mytest 2>&1
+cat /tmp/fdo_server.log | tail -50
+```
+
+If the server log is empty but the client fails, the error is likely in:
+- Client-side message handling
+- Protocol-level validation (like body reading)
+
+### Debugging Checklist
+
+When an FSIM test fails:
+
+- [ ] Get the real error message (use `fmt.Fprintf` if needed)
+- [ ] Check if `HandleInfo` reads the full message body
+- [ ] Verify `active` message is sent first
+- [ ] Check `blockPeer` usage (only block if device will respond)
+- [ ] Verify device handles all expected message types
+- [ ] Add debug logging to trace message flow
+- [ ] Check server log for additional details
+- [ ] Count messages received vs expected
+
+### Real Example: Credentials FSIM Debugging
+
+**Symptom:** Test received 1 of 3 credentials, then failed with empty-looking error.
+
+**Debug steps:**
+1. Added `fmt.Fprintf` to see actual error: `"owner module did not read full body of message 'fdo.credentials:active'"`
+2. Checked `SimpleCredentialsOwner.HandleInfo` - it returned without reading the body
+3. Added `io.Copy(io.Discard, messageBody)` to read and discard the body
+4. Test passed with all 3 credentials received
+
+**Root cause:** The device sends an `active` response, but the owner's `HandleInfo` ignored it without reading the body.
+
+**Fix:** One line addition:
+```go
+func (c *SimpleCredentialsOwner) HandleInfo(..., messageBody io.Reader) error {
+    _, _ = io.Copy(io.Discard, messageBody)  // Added this line
+    slog.Debug("[fdo.credentials] Received message (ignoring)", "name", messageName)
+    return nil
+}
+```
+
+---
+
 ## Summary: The Golden Rules
 
 1. **Active Message**: Owner sends, device responds, owner reads response
-2. **BlockPeer**: Only use when you're certain device will respond
-3. **Yield**: Always call `yield()` after sending a message
-4. **Chunking**: Use ChunkSender/ChunkReceiver helpers
-5. **State**: Track state explicitly with enums
-6. **CBOR**: Always encode/decode properly
-7. **Start Simple**: Get basic flow working before adding complexity
-8. **Debug**: Add logging to track state and message flow
+2. **HandleInfo MUST Read Body**: Always read the full `messageBody`, even when ignoring messages
+3. **BlockPeer**: Only use when you're certain device will respond
+4. **Yield**: Always call `yield()` after sending a message
+5. **Chunking**: Use ChunkSender/ChunkReceiver for binary data ([]byte only)
+6. **State**: Track state explicitly with enums
+7. **CBOR**: Always encode/decode properly - it's a protocol requirement
+8. **Start Simple**: Get basic flow working before adding complexity
+9. **Debug**: Use `fmt.Fprintf` to see real errors, add logging to trace message flow
 
 When in doubt, look at **SysConfig** for the simplest working pattern, or **Payload** for a chunking example that works.

@@ -583,6 +583,18 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 		Handler: &wifiHandler{},
 	}
 
+	// Add credentials handler to receive and display credentials
+	fsims["fdo.credentials"] = fsim.NewSimpleCredentialsDevice(func(id, credType string, data []byte, metadata map[string]any) error {
+		fmt.Printf("[fdo.credentials] Received credential:\n")
+		fmt.Printf("  ID:   %s\n", id)
+		fmt.Printf("  Type: %s\n", credType)
+		if metadata != nil {
+			fmt.Printf("  Metadata: %v\n", metadata)
+		}
+		fmt.Printf("  Data: %s (length: %d bytes)\n", string(data), len(data))
+		return nil
+	})
+
 	conf.DeviceModules = fsims
 
 	// Call version-specific TO2 function

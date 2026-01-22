@@ -78,6 +78,7 @@ var (
 	payloadFile          string
 	payloadMimeType      string
 	wifiConfigFile       string
+	credentials          stringList
 	initOnly             bool
 )
 
@@ -123,6 +124,7 @@ func init() {
 	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
 	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
+	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data` format (flag may be used multiple times)")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
@@ -807,6 +809,7 @@ func (s moduleStateMachines) NextModule(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("error getting devmod: %w", err)
 		}
+		fmt.Printf("[DEBUG] Device declared modules: %v\n", modules)
 		next, stop := iter.Pull2(ownerModules(modules))
 		module = &moduleStateMachineState{
 			Next: next,
@@ -911,6 +914,51 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 				log.Fatalf("error loading WiFi config from %q: %v", wifiConfigFile, err)
 			}
 			if !yield("fdo.wifi", wifiOwner) {
+				return
+			}
+		}
+
+		if slices.Contains(modules, "fdo.credentials") && len(credentials) > 0 {
+			var simpleCreds []fsim.SimpleCredential
+			for _, credSpec := range credentials {
+				parts := strings.SplitN(credSpec, ":", 3)
+				if len(parts) != 3 {
+					log.Fatalf("invalid credential specification %q: expected type:id:data format", credSpec)
+				}
+				credType, credID, credData := parts[0], parts[1], parts[2]
+
+				// Validate credential type
+				validTypes := []string{"password", "api_key", "oauth2_client_secret", "bearer_token"}
+				if !slices.Contains(validTypes, credType) {
+					log.Fatalf("invalid credential type %q: must be one of %v", credType, validTypes)
+				}
+
+				// For password type, create metadata with username
+				var data []byte
+				var metadata map[string]any
+				if credType == "password" {
+					// credData format for password: "username:password"
+					userPass := strings.SplitN(credData, ":", 2)
+					if len(userPass) == 2 {
+						metadata = map[string]any{"username": userPass[0]}
+						data = []byte(userPass[1])
+					} else {
+						data = []byte(credData)
+					}
+				} else {
+					data = []byte(credData)
+				}
+
+				simpleCreds = append(simpleCreds, fsim.SimpleCredential{
+					ID:       credID,
+					Type:     credType,
+					Data:     data,
+					Metadata: metadata,
+				})
+			}
+
+			credentialsOwner := fsim.NewSimpleCredentialsOwner(simpleCreds)
+			if !yield("fdo.credentials", credentialsOwner) {
 				return
 			}
 		}
