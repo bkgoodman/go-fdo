@@ -46,6 +46,13 @@ spec:webidl; type:interface; text:Promise
 		],
 		"href": "https://tools.ietf.org/html/rfc2132",
 		"title": "DHCP Options and BOOTP Vendor Extensions"
+	},
+	"WiFi-FSIM": {
+		"authors": [
+			"Brad Goodman"
+		],
+		"href": "https://github.com/fido-alliance/internet-of-things-specs",
+		"title": "fdo.wifi FSIM Specification"
 	}
 }
 </pre>
@@ -214,7 +221,7 @@ Wi-Fi Setup Services SHALL implement a **single-sided mode** of the FDO 2.0 prot
 
 1. **Device Authentication**: The device proves its identity using standard FDO device certificate and cryptographic mechanisms
 2. **Owner Verification Indication**: The service provides explicit indication that it cannot verify Owner credentials through protocol signaling
-3. **Credential Delivery**: Wi-Fi credentials are provided via the standard `fdo.sysconfig` FSIM mechanism
+3. **Credential Delivery**: Wi-Fi credentials are provided via the `fdo.wifi` FSIM [[WiFi-FSIM]]
 
 #### Single-Sided Attestation Signaling
 
@@ -382,7 +389,7 @@ Isolated Network Setup:
     "port": 8080,
     "attestation_mode": "single-sided",
     "trust_level": "untrusted",
-    "fsim_module": "fdo.wifi-config"
+    "fsim_module": "fdo.wifi"
   }
 }
 ```
@@ -658,47 +665,48 @@ The credential conveyance mechanism defines how Wi-Fi credentials are transferre
 
 ## FSIM-Based Credential Provisioning
 
-### Standard FSIM Protocol
+### The fdo.wifi FSIM
 
-Wi-Fi credentials SHALL be provided using the existing FDO FSIM (FIDO Device Onboard Service Module) protocol:
+Wi-Fi credentials SHALL be provided using the `fdo.wifi` FSIM [[WiFi-FSIM]]. This FSIM provides a unified interface for Wi-Fi network configuration supporting both basic (SSID/password) and advanced (certificate-based) authentication methods.
 
-#### fdo.sysconfig FSIM
-The standard `fdo.sysconfig` FSIM SHALL be used for basic Wi-Fi credential provisioning:
+#### Conceptual Example
 
-```json
-{
-  "wifi": {
-    "ssid": "NetworkName",
-    "password": "cleartext-password",
-    "security": "auto"
-  }
-}
+The following illustrates the conceptual content of a basic Wi-Fi configuration (actual wire format uses CBOR encoding per [[WiFi-FSIM]]):
+
+```
+Network Configuration:
+- Network ID: "net-001"
+- SSID: "NetworkName"
+- Authentication: WPA2-PSK
+- Password: "secure-password"
+- Trust Level: onboard-only
 ```
 
-#### fdo.wifi-config FSIM (Single-Sided Only)
-For single-sided attestation scenarios, a dedicated `fdo.wifi-config` FSIM SHALL be used to provide Wi-Fi credentials only:
+#### Advanced Capabilities
 
-```json
-{
-  "ssid": "NetworkName",
-  "password": "cleartext-password",
-  "security": "auto",
-  "trust_level": "untrusted"
-}
-```
+The `fdo.wifi` FSIM also supports:
+
+- **WPA3-Enterprise**: Certificate-based authentication with EAP-TLS, EAP-PEAP, EAP-TTLS
+- **CSR/Certificate Enrollment**: Device-generated CSRs with chunked certificate delivery
+- **CA Bundle Provisioning**: Separate CA chain delivery for enterprise networks
+- **Fast Roaming (802.11r)**: Mobility domain configuration for seamless roaming
+- **Hotspot 2.0 (Passpoint)**: Roaming consortium and operator configuration
+
+See [[WiFi-FSIM]] for complete message formats and protocol details.
 
 ### FSIM Access Control
 
-#### Single-Sided Mode FSIM Filtering
+#### Single-Sided Mode
 In single-sided attestation mode, devices SHALL only accept:
-- **fdo.wifi-config**: Wi-Fi credentials only
-- **All other FSIMs**: Blocked to prevent information leakage
+- **Basic Wi-Fi configuration**: SSID, password, trust level
+- **Trust level**: Limited to `onboard-only` networks
+- **No certificate provisioning**: Certificate-based authentication not available
 
-#### Owner/Delegate Mode FSIM Access
+#### Owner/Delegate Mode
 In Owner/Delegate attestation mode, devices SHALL accept:
-- **fdo.sysconfig**: Full system configuration including Wi-Fi
-- **fdo.wifi-config**: Wi-Fi credentials (alternative)
-- **All other FSIMs**: As appropriate for full onboarding
+- **Full Wi-Fi configuration**: Basic and certificate-based networks
+- **Certificate provisioning**: CSR/certificate enrollment supported
+- **Trust levels**: Both `onboard-only` and `full-access` networks
 
 ## Advanced Authentication Methods
 
@@ -710,37 +718,32 @@ The Wi-Fi credential conveyance system SHALL support advanced authentication met
 
 ##### WPA3-Enterprise (Certificate-Based)
 - **Authentication**: X.509 certificates for device authentication
-- **Security Model**: MUST use Owner/Delegate attestation (trusted)
-- **Credential Format**: Certificate provisioning through FSIM
+- **Security Model**: MUST use Owner/Delegate attestation (`full-access` trust level)
+- **Credential Format**: Certificate provisioning via `fdo.wifi` CSR/cert flows
 
 ##### WPA3-Enterprise (Username/Password)
 - **Authentication**: RADIUS-based username/password authentication
-- **Security Model**: SHOULD use Owner/Delegate attestation (trusted)
-- **Credential Format**: Username/password through FSIM
+- **Security Model**: SHOULD use Owner/Delegate attestation (`full-access` trust level)
+- **Credential Format**: EAP credentials via `fdo.wifi` network-add message
 
 ##### 802.1X/EAP-TLS
 - **Authentication**: Extensible Authentication Protocol with Transport Layer Security
-- **Security Model**: MUST use Owner/Delegate attestation (trusted)
-- **Credential Format**: Certificate provisioning through FSIM
+- **Security Model**: MUST use Owner/Delegate attestation (`full-access` trust level)
+- **Credential Format**: Certificate provisioning via `fdo.wifi` CSR/cert flows
 
 ### Certificate Provisioning Flows
 
-#### CSR/Certificate Signing Ceremony
-For certificate-based Wi-Fi authentication, additional provisioning steps may be required:
+The `fdo.wifi` FSIM [[WiFi-FSIM]] defines a complete CSR/certificate enrollment flow using chunked transfer for large payloads:
 
-```
-Advanced Wi-Fi Certificate Provisioning:
-1. Device generates Certificate Signing Request (CSR)
-2. Device sends CSR to Wi-Fi setup service
-3. Service (or Owner) signs CSR with appropriate CA
-4. Service returns signed certificate to device
-5. Device installs certificate for Wi-Fi authentication
-6. Device connects to Wi-Fi using certificate authentication
-```
+1. Device receives network metadata via `network-add`
+2. Device generates CSR and sends via chunked `csr-begin`/`csr-data`/`csr-end` messages
+3. Service signs CSR and returns certificate via chunked `cert-begin`/`cert-data`/`cert-end` messages
+4. Optionally, service sends CA bundle via `ca-begin`/`ca-data`/`ca-end` messages
+5. Device installs certificate and connects using certificate authentication
 
 #### Trust Requirements for Certificate Provisioning
-- **Single-Sided Attestation**: Certificate provisioning NOT recommended
-- **Owner/Delegate Attestation**: Certificate provisioning fully supported
+- **Single-Sided Attestation**: Certificate provisioning NOT available (limited to `onboard-only`)
+- **Owner/Delegate Attestation**: Certificate provisioning fully supported (`full-access`)
 - **Delegate Authority**: Delegate must have explicit certificate provisioning permission
 
 ## Wi-Fi Network Trust Levels
@@ -749,7 +752,7 @@ Advanced Wi-Fi Certificate Provisioning:
 
 Wi-Fi onboarding operates at two distinct trust levels based on the **Owner's declaration of network trustworthiness**, not the authentication method used:
 
-#### Level 1: Untrusted Network Hint
+#### Level 1: Onboard-Only (`onboard-only`)
 
 **Characteristics**:
 - **Trust Declaration**: Owner has NOT declared the network as trustworthy
@@ -763,7 +766,7 @@ Wi-Fi onboarding operates at two distinct trust levels based on the **Owner's de
 - **Final Verification**: Trust is established only after successful onboarding with legitimate Owner service
 - **Temporary Access**: Network access is considered provisional and untrusted
 
-#### Level 2: Owner-Trusted Network
+#### Level 2: Full-Access (`full-access`)
 
 **Characteristics**:
 - **Trust Declaration**: Owner has explicitly declared the network as trustworthy
@@ -980,12 +983,12 @@ Certificate validation SHALL follow standard FDO 2.0 requirements:
 
 #### Credential Provisioning
 
-Wi-Fi credentials SHALL be provided via the standard `fdo.sysconfig` FSIM mechanism:
+Wi-Fi credentials SHALL be provided via the `fdo.wifi` FSIM [[WiFi-FSIM]]:
 
 - **WPA2-PSK**: Pre-shared key for WPA2 networks
 - **WPA3-SAE**: Simultaneous Authentication of Equals for WPA3 networks
 - **Open Network**: No authentication required
-- **Enterprise**: 802.1X credentials if supported
+- **WPA3-Enterprise**: Certificate-based or EAP credentials
 
 #### Rate Limiting
 
@@ -997,25 +1000,25 @@ Wi-Fi Setup Services SHOULD implement standard FDO rate limiting:
 
 ## Wi-Fi Credential Provisioning
 
-During TO2 protocol execution, server-side FSIMs MAY provide Wi-Fi credentials to the device using the existing `fdo.sysconfig` FSIM with the `wifi` parameter.
+During TO2 protocol execution, server-side FSIMs MAY provide Wi-Fi credentials to the device using the `fdo.wifi` FSIM [[WiFi-FSIM]].
 
 ### Credential Format
 
-Wi-Fi credentials SHALL be provided in the JSON format defined by the `fdo.sysconfig` specification:
+Wi-Fi credentials are provided via the `fdo.wifi:network-add` message using CBOR encoding. Conceptually, a basic configuration includes:
 
-```
-{
-  "ssid": "NetworkName",
-  "password": "cleartext-password",
-  "security": "auto"
-}
-```
+- **Network ID**: Unique identifier for the network
+- **SSID**: Network name
+- **Authentication Type**: open, wpa2-psk, wpa3-psk, or wpa3-enterprise
+- **Password/Credentials**: Authentication credentials (binary)
+- **Trust Level**: `onboard-only` or `full-access`
+
+See [[WiFi-FSIM]] for complete CBOR message format and field definitions.
 
 ### Security Considerations
 
-- Passwords are transmitted over the already-encrypted FDO channel
-- Devices MUST validate and format passwords for OS-specific configuration
-- Devices SHOULD support at least WPA2-PSK and open networks
+- All credentials are transmitted over the already-encrypted FDO TO2 channel
+- Devices MUST validate configuration against their capabilities
+- Devices MUST enforce trust level policies
 
 ## SSID Priority and Hidden SSID Optimization
 
@@ -1076,7 +1079,7 @@ Devices SHALL actively scan for and attempt to connect to a hidden SSID named "F
 3. Device connects to an open network (or uses existing connection)
 4. Device receives DHCP options (if available)
 5. Device attempts onboarding with discovered Primary Onboarding Service
-6. Device receives Wi-Fi credentials via `fdo.sysconfig` FSIM
+6. Device receives Wi-Fi credentials via `fdo.wifi` FSIM
 7. Device connects to target Wi-Fi network
 8. Device completes onboarding process
 9. Device reboots if necessary
@@ -1088,7 +1091,7 @@ Devices SHALL actively scan for and attempt to connect to a hidden SSID named "F
 3. Device connects to an open network
 4. Device receives DHCP options (if available)
 5. Device attempts onboarding with Wi-Fi Setup Service
-6. Device receives Wi-Fi credentials via `fdo.sysconfig` FSIM
+6. Device receives Wi-Fi credentials via `fdo.wifi` FSIM
 7. Device connects to target Wi-Fi network
 8. Device marks itself as "Wi-Fi Configured"
 9. Device re-attempts onboarding process from step 2
@@ -1353,8 +1356,8 @@ Upon connection to open network, the endpoint will:
    - Service validates device is not compromised
 
 3. **Get Real Wi-Fi Credentials**
-   - Receive credentials via `fdo.sysconfig` FSIM
-   - Credentials include SSID, password, and security type
+   - Receive credentials via `fdo.wifi` FSIM [[WiFi-FSIM]]
+   - Credentials include SSID, authentication type, password, and trust level
    - Service provides credentials for target production network
 
 4. **Switch to Production Wi-Fi Network**
@@ -1445,7 +1448,7 @@ Attackers may attempt to impersonate legitimate onboarding services. Mitigations
 
 - Open network scanning and connection
 - DHCP option parsing for service discovery
-- `fdo.sysconfig` FSIM support for Wi-Fi configuration
+- `fdo.wifi` FSIM support for Wi-Fi configuration [[WiFi-FSIM]]
 - State management for onboarding phases
 - Loop prevention logic
 - Hierarchical retry mechanisms
