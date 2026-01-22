@@ -27,7 +27,7 @@ The credentials FSIM supports three distinct protocol flows:
 
 1. **Provisioned Credentials** - Owner provisions shared secrets or pre-generated credentials to device
 2. **Enrolled Credentials** - Device generates key material, requests signed credentials, and receives response
-3. **Registered Credentials** - Device registers public keys with owner for authentication
+3. **Registered Credentials** - Device registers public keys with owner for authenticating to backend services
 
 This specification incorporates and extends concepts from:
 - **fdo.csr** - Certificate enrollment and server-generated keys
@@ -59,11 +59,12 @@ The FSIM supports three distinct message exchange patterns:
 - Owner signs/processes and returns credential
 - Two-way message flow with owner response
 
-**Registered Credentials: Device → Owner (Public Key Registration)**
+**Registered Credentials: Owner ↔ Device (Public Key Registration)**
+- Owner requests device's public key for registration with backend services
 - Device generates key pair (private key never leaves device)
-- Device sends public key to owner for registration
-- Owner stores/registers public key (no signed credential returned)
-- One-way message flow from device
+- Device sends public key to owner
+- Owner registers key with backend services so device can authenticate to them post-onboarding
+- Use case: Device needs to SSH into config servers, access APIs with key-based auth, etc.
 
 ## Message Definitions
 
@@ -424,8 +425,9 @@ fdo.credentials:response-result = [0, "Certificate installed"]
 ## Registered Credentials Flow
 
 ### Use Cases
-- SSH public key registration for remote access
-- Public key registration for any authentication system that doesn't return signed credentials
+- Device registers SSH public key with management service for subsequent access (e.g., device SSHs into config servers)
+- Device registers public key with any service that uses public key authentication
+- IoT device identity registration with cloud platforms
 
 ### Message Flow
 
@@ -440,14 +442,14 @@ Owner → Device: pubkey-result
 
 ### pubkey-request Message
 
-The owner sends this message to request a public key from the device:
+The owner sends this message to request a public key from the device. The owner will register this key with backend services so the device can authenticate to them after onboarding.
 
 ```cddl
 {
-    -1: credential_id: tstr      ; Unique identifier for this key (e.g., "ssh-admin-key")
+    -1: credential_id: tstr      ; Unique identifier for this key (e.g., "device-mgmt-key")
     -2: credential_type: tstr    ; "ssh_public_key"
     ? -3: metadata: {
-        ? username: tstr         ; SSH username to associate with key
+        ? service_name: tstr     ; Name of service device will access (e.g., "config-server")
         ? key_type: tstr         ; Requested key type: "rsa" | "ed25519" | "ecdsa"
         ? key_size: uint         ; Requested key size (e.g., 2048, 4096 for RSA)
         * tstr => any
@@ -461,13 +463,11 @@ The owner sends this message to request a public key from the device:
 {
     0: total_size: uint
     ? 1: hash_alg: tstr
-    -1: credential_id: tstr      ; e.g., "ssh-admin-key"
+    -1: credential_id: tstr      ; e.g., "device-mgmt-key"
     -2: credential_type: tstr    ; "ssh_public_key"
     ? -3: metadata: {
-        username: tstr           ; SSH username
-        ? authorized_hosts: [* tstr]  ; Hosts where key should be authorized
         ? key_type: tstr         ; "rsa" | "ed25519" | "ecdsa"
-        ? comment: tstr          ; SSH key comment
+        ? comment: tstr          ; Key comment/description
         * tstr => any
     }
 }
@@ -481,18 +481,28 @@ The owner sends this message to request a public key from the device:
 
 ### Example: Registered Credentials - SSH Public Key
 
+Device registers its SSH public key so it can later SSH into management servers.
+
 ```
-Device → Owner:
-fdo.credentials:pubkey-begin = {
-    0: 564,
-    1: "sha256",
-    -1: "ssh-admin-key",
+Owner → Device:
+fdo.credentials:pubkey-request = {
+    -1: "device-config-access",
     -2: "ssh_public_key",
     -3: {
-        "username": "admin",
-        "authorized_hosts": ["server1.example.com", "server2.example.com"],
+        "service_name": "config-server.example.com",
+        "key_type": "ed25519"
+    }
+}
+
+Device → Owner:
+fdo.credentials:pubkey-begin = {
+    0: 68,
+    1: "sha256",
+    -1: "device-config-access",
+    -2: "ssh_public_key",
+    -3: {
         "key_type": "ed25519",
-        "comment": "device-001 admin key"
+        "comment": "device-001 config access key"
     }
 }
 
@@ -506,7 +516,7 @@ fdo.credentials:pubkey-end = {
 }
 
 Owner → Device:
-fdo.credentials:pubkey-result = [0, "Public key registered on 2 hosts"]
+fdo.credentials:pubkey-result = [0, "Public key registered with config-server"]
 ```
 
 ## Error Handling

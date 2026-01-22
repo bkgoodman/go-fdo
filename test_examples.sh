@@ -684,6 +684,31 @@ test_credentials() {
 	log_success "TO1/TO2 completed with credentials provisioned"
 
 	stop_server
+	log_success "Provisioned Credentials test PASSED"
+
+	# Test Registered Credentials flow (device sends public key to owner)
+	log_section "TEST: Credentials FSIM (Registered Credentials)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	log_step "Starting server requesting SSH public key"
+	start_server "-request-pubkey ssh_public_key:device-ssh-key"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with SSH public key registration"
+	run_cmd go run ./cmd client -register-ssh-key "device-ssh-key:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDevicePublicKeyExample"
+	log_success "TO1/TO2 completed with public key registered"
+
+	# Show server log to verify public key was received
+	echo ">>> Server received public key:"
+	grep -A5 "Received public key" /tmp/fdo_server.log 2>/dev/null || echo "  (check /tmp/fdo_server.log for details)"
+
+	stop_server
+	log_success "Registered Credentials test PASSED"
+
 	log_success "Credentials FSIM test PASSED"
 }
 
