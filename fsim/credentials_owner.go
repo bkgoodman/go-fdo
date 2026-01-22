@@ -27,6 +27,7 @@ type CredentialsOwner struct {
 	currentCredentialIndex int
 	sentActive             bool
 	sendingCredential      bool
+	sentBegin              bool // Track if credential-begin has been sent
 
 	// Chunking sender for credential data
 	credentialSender *chunking.ChunkSender
@@ -63,6 +64,7 @@ func (c *CredentialsOwner) Transition(active bool) error {
 		c.currentCredentialIndex = 0
 		c.sentActive = false
 		c.sendingCredential = false
+		c.sentBegin = false
 		c.credentialSender = nil
 		c.credentialResult = nil
 	}
@@ -116,10 +118,11 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 		}
 
 		// Send begin message
-		if c.credentialSender.GetBytesSent() == 0 {
+		if !c.sentBegin {
 			if err := c.credentialSender.SendBegin(producer); err != nil {
 				return false, false, fmt.Errorf("send credential-begin: %w", err)
 			}
+			c.sentBegin = true
 			slog.Debug("[fdo.credentials] Sent credential-begin")
 			return false, false, nil
 		}
@@ -162,6 +165,18 @@ func (c *CredentialsOwner) receive(ctx context.Context, messageName string, mess
 	slog.Debug("[fdo.credentials] Received message", "name", messageName)
 
 	switch messageName {
+	case "active":
+		// Device responds with active status
+		var deviceActive bool
+		if err := cbor.NewDecoder(messageBody).Decode(&deviceActive); err != nil {
+			return fmt.Errorf("decode active response: %w", err)
+		}
+		if !deviceActive {
+			return fmt.Errorf("device module is not active")
+		}
+		slog.Debug("[fdo.credentials] Device confirmed active")
+		return nil
+
 	case "credential-result":
 		// Device acknowledges credential provisioning
 		var result chunking.ResultMessage
@@ -188,6 +203,7 @@ func (c *CredentialsOwner) receive(ctx context.Context, messageName string, mess
 		c.currentCredentialIndex++
 		c.credentialSender = nil
 		c.sendingCredential = false
+		c.sentBegin = false
 		c.credentialResult = nil
 
 		return nil

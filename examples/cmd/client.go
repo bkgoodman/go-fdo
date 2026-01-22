@@ -583,8 +583,8 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 		Handler: &wifiHandler{},
 	}
 
-	// Add credentials handler to receive and display credentials
-	fsims["fdo.credentials"] = fsim.NewSimpleCredentialsDevice(func(id, credType string, data []byte, metadata map[string]any) error {
+	// Add credentials handler to receive and display credentials (using chunked protocol)
+	fsims["fdo.credentials"] = fsim.NewCredentialsDevice(func(id, credType string, data []byte, metadata map[string]any) error {
 		fmt.Printf("[fdo.credentials] Received credential:\n")
 		fmt.Printf("  ID:   %s\n", id)
 		fmt.Printf("  Type: %s\n", credType)

@@ -919,7 +919,7 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 		}
 
 		if slices.Contains(modules, "fdo.credentials") && len(credentials) > 0 {
-			var simpleCreds []fsim.SimpleCredential
+			var provisionedCreds []fsim.ProvisionedCredential
 			for _, credSpec := range credentials {
 				parts := strings.SplitN(credSpec, ":", 3)
 				if len(parts) != 3 {
@@ -949,15 +949,15 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 					data = []byte(credData)
 				}
 
-				simpleCreds = append(simpleCreds, fsim.SimpleCredential{
-					ID:       credID,
-					Type:     credType,
-					Data:     data,
-					Metadata: metadata,
+				provisionedCreds = append(provisionedCreds, fsim.ProvisionedCredential{
+					CredentialID:   credID,
+					CredentialType: credType,
+					CredentialData: data,
+					Metadata:       metadata,
 				})
 			}
 
-			credentialsOwner := fsim.NewSimpleCredentialsOwner(simpleCreds)
+			credentialsOwner := fsim.NewCredentialsOwner(provisionedCreds)
 			if !yield("fdo.credentials", credentialsOwner) {
 				return
 			}

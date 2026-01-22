@@ -34,6 +34,7 @@ type CredentialsDevice struct {
 	currentCredentialID   string
 	currentCredentialType string
 	currentMetadata       map[string]any
+	currentCredentialData []byte // Store data from OnEnd callback before reset
 }
 
 var _ serviceinfo.DeviceModule = (*CredentialsDevice)(nil)
@@ -65,13 +66,18 @@ func (c *CredentialsDevice) Receive(ctx context.Context, messageName string, mes
 	switch messageName {
 	case "active":
 		// Owner activates or deactivates the module
-		// Just store the state, don't respond (like sysconfig pattern)
 		var active bool
 		if err := cbor.NewDecoder(messageBody).Decode(&active); err != nil {
 			return fmt.Errorf("decode active: %w", err)
 		}
 		c.active = active
 		slog.Debug("[fdo.credentials] Module active", "active", active)
+
+		// Respond with active state (required by protocol)
+		w := respond("active")
+		if err := cbor.NewEncoder(w).Encode(c.active); err != nil {
+			return fmt.Errorf("encode active response: %w", err)
+		}
 		return nil
 
 	case "credential-begin":
@@ -122,10 +128,12 @@ func (c *CredentialsDevice) handleCredentialBegin(messageBody io.Reader) error {
 				return nil
 			},
 			OnEnd: func(end chunking.EndMessage) error {
-				// Credential fully received
+				// Credential fully received - save data before reset clears buffer
+				c.currentCredentialData = make([]byte, len(c.credentialReceiver.GetBuffer()))
+				copy(c.currentCredentialData, c.credentialReceiver.GetBuffer())
 				slog.Debug("[fdo.credentials] Credential received completely",
 					"credential_id", c.currentCredentialID,
-					"size", c.credentialReceiver.GetTotalBytes())
+					"size", len(c.currentCredentialData))
 				return nil
 			},
 		}
@@ -142,13 +150,13 @@ func (c *CredentialsDevice) handleCredentialBegin(messageBody io.Reader) error {
 
 // handleCredentialEnd processes the credential-end message and invokes the callback.
 func (c *CredentialsDevice) handleCredentialEnd(messageBody io.Reader, respond func(string) io.Writer) error {
-	// Handle the end message
+	// Handle the end message (this calls OnEnd which saves the data before reset)
 	if err := c.credentialReceiver.HandleMessage("credential-end", messageBody); err != nil {
 		return fmt.Errorf("handle credential-end: %w", err)
 	}
 
-	// Get the complete credential data
-	credentialData := c.credentialReceiver.GetBuffer()
+	// Use the credential data saved in OnEnd callback (buffer is reset after HandleMessage)
+	credentialData := c.currentCredentialData
 
 	// Invoke callback if provided
 	if c.OnCredentialReceived != nil {
@@ -180,6 +188,7 @@ func (c *CredentialsDevice) handleCredentialEnd(messageBody io.Reader, respond f
 	c.currentCredentialID = ""
 	c.currentCredentialType = ""
 	c.currentMetadata = nil
+	c.currentCredentialData = nil
 
 	return nil
 }
