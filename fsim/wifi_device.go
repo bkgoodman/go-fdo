@@ -4,7 +4,6 @@
 package fsim
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -113,7 +112,7 @@ func (w *WiFi) Receive(ctx context.Context, messageName string, messageBody io.R
 
 	// Handle network-add messages
 	if messageName == "network-add" {
-		return w.handleNetworkAdd(messageBody, respond)
+		return w.handleNetworkAdd(messageBody, respond, yield)
 	}
 
 	// Handle certificate messages
@@ -146,7 +145,7 @@ func (w *WiFi) reset() {
 }
 
 // handleNetworkAdd processes network-add messages.
-func (w *WiFi) handleNetworkAdd(messageBody io.Reader, respond func(string) io.Writer) error {
+func (w *WiFi) handleNetworkAdd(messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
 	if w.Handler == nil {
 		return fmt.Errorf("no WiFi handler configured")
 	}
@@ -294,10 +293,10 @@ func (w *WiFi) handleNetworkAdd(messageBody io.Reader, respond func(string) io.W
 			return nil // Don't fail the protocol
 		}
 
-		fmt.Printf("[fdo.wifi] Generated CSR (%d bytes), sending via chunking\n", len(csrData))
+		fmt.Printf("[fdo.wifi] Generated CSR (%d), sending via chunking\n", len(csrData))
 
 		// Send CSR using chunking pattern
-		if err := w.sendCSR(respond, csrData, metadata, network.NetworkID, network.SSID); err != nil {
+		if err := w.sendCSR(respond, yield, csrData, metadata, network.NetworkID, network.SSID); err != nil {
 			return fmt.Errorf("failed to send CSR: %w", err)
 		}
 
@@ -391,49 +390,41 @@ func (w *WiFi) handleCABundle(messageName string, messageBody io.Reader, respond
 	return nil
 }
 
-// sendCSR sends a CSR to the owner using the chunking pattern
-func (w *WiFi) sendCSR(respond func(string) io.Writer, csrData []byte, metadata map[string]any, networkID, ssid string) error {
-	// Send begin message
-	beginMsg := chunking.BeginMessage{
-		TotalSize:  uint64(len(csrData)),
-		FSIMFields: make(map[int]any),
-	}
-	beginMsg.FSIMFields[-1] = networkID
+// sendCSR sends a CSR to the owner using the chunking library.
+// Uses yield() between chunks to ensure each chunk goes in a separate FDO message.
+func (w *WiFi) sendCSR(respond func(string) io.Writer, yield func(), csrData []byte, metadata map[string]any, networkID, ssid string) error {
+	// Create chunk sender
+	sender := chunking.NewChunkSender("csr", csrData)
+	sender.BeginFields.FSIMFields = make(map[int]any)
+	sender.BeginFields.FSIMFields[-1] = networkID
 	if ssid != "" {
-		beginMsg.FSIMFields[-2] = ssid
+		sender.BeginFields.FSIMFields[-2] = ssid
 	}
 	if metadata != nil {
-		beginMsg.FSIMFields[-4] = metadata
+		sender.BeginFields.FSIMFields[-4] = metadata
 	}
 
-	beginData, err := beginMsg.MarshalCBOR()
-	if err != nil {
-		return fmt.Errorf("failed to marshal csr-begin: %w", err)
-	}
-
-	writer := respond("csr-begin")
-	if _, err := writer.Write(beginData); err != nil {
-		return fmt.Errorf("failed to send csr-begin: %w", err)
+	// Send begin message
+	if err := sender.SendBeginToWriter(respond); err != nil {
+		return fmt.Errorf("send csr-begin: %w", err)
 	}
 	slog.Debug("fdo.wifi sent csr-begin")
 
-	// Send data message - must be CBOR-encoded
-	writer = respond("csr-data-0")
-	if err := cbor.NewEncoder(writer).Encode(csrData); err != nil {
-		return fmt.Errorf("failed to send csr-data: %w", err)
+	// Send all data chunks with yield() between each
+	for {
+		done, err := sender.SendNextChunkToWriter(respond)
+		if err != nil {
+			return fmt.Errorf("send csr-data: %w", err)
+		}
+		if done {
+			break
+		}
+		slog.Debug("fdo.wifi sent csr-data chunk")
 	}
-	slog.Debug("fdo.wifi sent csr-data", "size", len(csrData))
 
 	// Send end message
-	endMsg := chunking.EndMessage{}
-	endData, err := endMsg.MarshalCBOR()
-	if err != nil {
-		return fmt.Errorf("failed to marshal csr-end: %w", err)
-	}
-
-	writer = respond("csr-end")
-	if _, err := writer.Write(endData); err != nil {
-		return fmt.Errorf("failed to send csr-end: %w", err)
+	if err := sender.SendEndToWriter(respond); err != nil {
+		return fmt.Errorf("send csr-end: %w", err)
 	}
 	slog.Debug("fdo.wifi sent csr-end")
 
@@ -646,86 +637,6 @@ func (w *WiFi) onCAEnd(end chunking.EndMessage) error {
 
 	w.caResultStatus = statusCode
 	w.caResultMsg = message
-
-	return nil
-}
-
-// SendCSR sends a CSR to the owner using the chunking strategy.
-// This should be called by the application after receiving a network-add for an enterprise network.
-func (w *WiFi) SendCSR(ctx context.Context, networkID, ssid string, respond func(string) io.Writer, yield func()) error {
-	if w.Handler == nil {
-		return fmt.Errorf("no WiFi handler configured")
-	}
-
-	// Generate CSR via application handler
-	csrData, metadata, err := w.Handler.GenerateCSR(networkID, ssid)
-	if err != nil {
-		return fmt.Errorf("failed to generate CSR: %w", err)
-	}
-
-	// Create sender
-	sender := chunking.NewChunkSender("csr", csrData)
-	sender.BeginFields.HashAlg = "sha256"
-	sender.BeginFields.FSIMFields[-1] = networkID
-	sender.BeginFields.FSIMFields[-2] = ssid
-	sender.BeginFields.FSIMFields[-3] = 0 // csr_type: eap-tls
-	if metadata != nil {
-		sender.BeginFields.FSIMFields[-4] = metadata
-	}
-
-	// Send begin
-	beginData, err := sender.BeginFields.MarshalCBOR()
-	if err != nil {
-		return fmt.Errorf("failed to encode csr-begin: %w", err)
-	}
-	writer := respond("csr-begin")
-	if _, err := writer.Write(beginData); err != nil {
-		return fmt.Errorf("failed to send csr-begin: %w", err)
-	}
-	yield()
-
-	// Send chunks
-	chunkIndex := 0
-	bytesSent := int64(0)
-	for bytesSent < int64(len(csrData)) {
-		chunkKey := fmt.Sprintf("csr-data-%d", chunkIndex)
-
-		// Calculate chunk
-		remaining := int64(len(csrData)) - bytesSent
-		chunkLen := int64(sender.ChunkSize)
-		if chunkLen > remaining {
-			chunkLen = remaining
-		}
-		chunk := csrData[bytesSent : bytesSent+chunkLen]
-
-		// Encode and send
-		var buf bytes.Buffer
-		if err := cbor.NewEncoder(&buf).Encode(chunk); err != nil {
-			return fmt.Errorf("failed to encode chunk: %w", err)
-		}
-
-		writer := respond(chunkKey)
-		if _, err := writer.Write(buf.Bytes()); err != nil {
-			return fmt.Errorf("failed to send chunk: %w", err)
-		}
-
-		bytesSent += chunkLen
-		chunkIndex++
-		yield()
-	}
-
-	// Send end
-	hash, _ := chunking.ComputeHash("sha256", csrData)
-	sender.EndFields.HashValue = hash
-	endData, err := sender.EndFields.MarshalCBOR()
-	if err != nil {
-		return fmt.Errorf("failed to encode csr-end: %w", err)
-	}
-	writer = respond("csr-end")
-	if _, err := writer.Write(endData); err != nil {
-		return fmt.Errorf("failed to send csr-end: %w", err)
-	}
-	yield()
 
 	return nil
 }
