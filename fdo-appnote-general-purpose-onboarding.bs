@@ -1674,12 +1674,23 @@ Device → Server: fdo.credentials:response-result [0]
 
 **Key architectural points:**
 
-1. **Same FDO credentials** - All five stages use the same device identity from TPM
-2. **Flexible control plane deployment** - Each stage can be served by different services, or consolidated into one; the protocol doesn't care
-3. **Increasing service complexity** - Early stages (Wi-Fi, BMO) can use simple off-the-shelf services; later stages (credentials) require enterprise integration
-4. **Four different component vendors** - Platform vendor, OS vendor, ecosystem contributor, application vendor - none coordinate directly
-5. **Implicit phase detection** - Server knows stage by which FSIMs client advertises
-6. **Credential scoping** - Application gets only its credentials, not system credentials or other apps' credentials
+1. **Single standardized specification format** - All configuration data (Wi-Fi credentials, boot images, system config, payloads, application credentials) is specified in ONE standardized way. A complete device deployment can be expressed as: Ownership Voucher + boot image + configuration data. This bundle is portable across any control plane.
+
+2. **Phase-appropriate data consumption** - Each onboarding phase inherently pulls only the subset of configuration data applicable to it. Firmware extracts Wi-Fi and BMO data; the installer extracts sysconfig and payload data; applications extract their credentials. No explicit coordination required - each component consumes what it understands.
+
+3. **Control plane agnostic** - A device specified this way (voucher + configs + boot image) is deployable by ANY control plane that understands these standardized formats, to ANY device that implements the corresponding FSIMs. Control planes need no device-specific knowledge; devices need no control-plane-specific adapters.
+
+4. **Same FDO credentials** - All five stages use the same device identity from TPM
+
+5. **Flexible control plane deployment** - Each stage can be served by different services, or consolidated into one; the protocol doesn't care
+
+6. **Increasing service complexity** - Early stages (Wi-Fi, BMO) can use simple off-the-shelf services; later stages (credentials) require enterprise integration
+
+7. **Four different component vendors** - Platform vendor, OS vendor, ecosystem contributor, application vendor - none coordinate directly
+
+8. **Implicit phase detection** - Server knows stage by which FSIMs client advertises
+
+9. **Credential scoping** - Application gets only its credentials, not system credentials or other apps' credentials
 
 **Control plane deployment patterns:**
 
@@ -1752,15 +1763,46 @@ Custom firmware implementations **MAY** define their own imaging formats but:
 
 This ensures that even if a control plane has no specific knowledge of a device, it can be given an opaque image and MIME type to pass through to the device for execution.
 
-### MIME Type Conventions
+### MIME Type Conventions (Examples)
 
-| MIME Type | Description | Platform |
-|-----------|-------------|----------|
-| `application/efi` | UEFI application | UEFI |
-| `application/x-iso9660-image` | Bootable ISO | Universal |
-| `application/x-raw-disk-image` | Raw disk/partition image | Various |
-| `application/x-linux-kernel` | Linux kernel image | Linux-capable |
-| `application/octet-stream` | Opaque binary | Fallback |
+The following MIME types are provided as **examples and recommendations only** - they are not requirements. Control planes and devices MAY use any MIME types appropriate to their deployment.
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>MIME Type</th>
+      <th>Description</th>
+      <th>Platform</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>application/efi</code></td>
+      <td>UEFI application</td>
+      <td>UEFI</td>
+    </tr>
+    <tr>
+      <td><code>application/x-iso9660-image</code></td>
+      <td>Bootable ISO</td>
+      <td>Universal</td>
+    </tr>
+    <tr>
+      <td><code>application/x-raw-disk-image</code></td>
+      <td>Raw disk/partition image</td>
+      <td>Various</td>
+    </tr>
+    <tr>
+      <td><code>application/x-linux-kernel</code></td>
+      <td>Linux kernel image</td>
+      <td>Linux-capable</td>
+    </tr>
+    <tr>
+      <td><code>application/octet-stream</code></td>
+      <td>Opaque binary</td>
+      <td>Fallback</td>
+    </tr>
+  </tbody>
+</table>
 
 Custom formats SHOULD use vendor-prefixed MIME types (e.g., `application/vnd.vendor.custom-boot`).
 
@@ -1768,26 +1810,77 @@ Custom formats SHOULD use vendor-prefixed MIME types (e.g., `application/vnd.ven
 
 ### Required (Certification Baseline)
 
-| FSIM | Requirement | Rationale |
-|------|-------------|-----------|
-| `devmod` | **REQUIRED** | FDO protocol mandates device capability reporting |
-| `fdo.bmo` | **REQUIRED** | Core BMO functionality - receiving and booting images |
+<table class="data">
+  <thead>
+    <tr>
+      <th>FSIM</th>
+      <th>Requirement</th>
+      <th>Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>devmod</code></td>
+      <td><strong>REQUIRED</strong></td>
+      <td>FDO protocol mandates device capability reporting</td>
+    </tr>
+    <tr>
+      <td><code>fdo.bmo</code></td>
+      <td><strong>REQUIRED</strong></td>
+      <td>Core BMO functionality - receiving and booting images</td>
+    </tr>
+  </tbody>
+</table>
 
-### Recommended (Interoperability)
+### Recommended (Smart/Self-Configuring Installers)
 
-| FSIM | Requirement | Rationale |
-|------|-------------|-----------|
-| `fdo.sysconfig` | **RECOMMENDED** | Enables generic configuration services to provision the device; critical for OS-agnostic management |
-| `fdo.payload` | **RECOMMENDED** | Enables post-boot payload delivery for installer customization; important for "smart installer" architectures |
+<table class="data">
+  <thead>
+    <tr>
+      <th>FSIM</th>
+      <th>Requirement</th>
+      <th>Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>fdo.sysconfig</code></td>
+      <td><strong>RECOMMENDED</strong></td>
+      <td>Simple system configuration (hostname, SSH keys, locale, timezone); enables OS-agnostic management without vendor-specific logic</td>
+    </tr>
+    <tr>
+      <td><code>fdo.payload</code></td>
+      <td><strong>RECOMMENDED</strong></td>
+      <td>Complex configuration delivery (cloud-init configs, containers, Ansible playbooks, application packages); enables sophisticated "smart installer" architectures</td>
+    </tr>
+  </tbody>
+</table>
 
-Devices implementing these FSIMs gain interoperability with generic configuration services - any management plane can configure any device without vendor-specific logic.
+Devices implementing these FSIMs gain interoperability with generic configuration services. Together, `fdo.sysconfig` handles basic system identity while `fdo.payload` handles arbitrarily complex provisioning scenarios.
 
 ### Optional (Convenience/Enhancement)
 
-| FSIM | Requirement | Rationale |
-|------|-------------|-----------|
-| `fdo.wifi` | **OPTIONAL** | Only needed for devices requiring Wi-Fi connectivity during onboarding |
-| `fdo.credentials` | **OPTIONAL** | Provided as a convenience for service and device implementors; encourages standardized credential provisioning but not mandated |
+<table class="data">
+  <thead>
+    <tr>
+      <th>FSIM</th>
+      <th>Requirement</th>
+      <th>Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>fdo.wifi</code></td>
+      <td><strong>OPTIONAL</strong></td>
+      <td>Only needed for devices requiring Wi-Fi connectivity during onboarding</td>
+    </tr>
+    <tr>
+      <td><code>fdo.credentials</code></td>
+      <td><strong>OPTIONAL</strong></td>
+      <td>For <strong>applications</strong> (not OS) to receive application-specific credentials (API keys, certificates, tokens) via a standardized interface; encourages consistent credential provisioning patterns across application vendors</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Certification Scope
 
@@ -1855,17 +1948,17 @@ Interoperability certification verifies that:
     <tr>
       <td>fdo.sysconfig FSIM</td>
       <td>❌ Not required</td>
-      <td>✅ Recommended for interop</td>
+      <td>✅ Recommended (simple configs: hostname, SSH keys, locale)</td>
     </tr>
     <tr>
       <td>fdo.payload FSIM</td>
       <td>❌ Not required</td>
-      <td>✅ Recommended for smart installers</td>
+      <td>✅ Recommended (complex configs: cloud-init, containers, playbooks)</td>
     </tr>
     <tr>
       <td>fdo.credentials FSIM</td>
       <td>❌ Not required</td>
-      <td>✅ Encouraged for standardization</td>
+      <td>✅ For applications to receive app-specific credentials</td>
     </tr>
     <tr>
       <td>Boot image formats</td>
