@@ -298,6 +298,120 @@ This approach provides clear protocol semantics:
 
 This implementation provides clear, unambiguous signaling of single-sided attestation mode while maintaining protocol compatibility and security boundaries.
 
+### Single-Sided Client Profile Requirements
+
+When a device detects single-sided attestation (algorithm=0, empty signature), it MUST enter a **single-sided profile** with the following constraints. These constraints protect device privacy and enforce appropriate security boundaries when the owner has not been verified.
+
+#### 1. FSIM Restrictions
+
+In single-sided mode, the device MUST restrict available FSIMs:
+
+```text
+Single-Sided Profile - Available FSIMs:
+├── devmod       ✅ (minimal data only - see below)
+├── fdo.wifi     ✅ (untrusted networks only - see below)
+├── fdo.bmo      ❌ BLOCKED
+├── fdo.payload  ❌ BLOCKED
+├── fdo.sysconfig ❌ BLOCKED
+└── fdo.credentials ❌ BLOCKED
+```
+
+The device:
+- MUST NOT advertise blocked FSIMs in `devmod:modules`
+- MUST reject attempts by the server to use blocked FSIMs
+- SHOULD silently ignore unsolicited messages for blocked FSIMs
+
+**Rationale**: An unverified owner should not receive boot images, configuration payloads, or credentials. Wi-Fi hints are the only appropriate data to exchange with an untrusted service.
+
+#### 2. Minimal devmod Reporting
+
+The device MUST provide only the minimum `devmod` information necessary for FSIM discovery:
+
+```text
+REQUIRED (for FSIM discovery):
+- devmod:active = true
+- devmod:nummodules = 1  
+- devmod:modules = [0, 0, "fdo.wifi"]
+- devmod:sep = ";"
+
+OMIT OR EMPTY (identifying information):
+- devmod:device = ""
+- devmod:serial = ""    ← CRITICAL: never expose serial to untrusted owner
+- devmod:os = ""
+- devmod:version = ""
+- devmod:arch = ""
+```
+
+**Rationale**: Identifying information (serial numbers, device type, OS version) could be used to fingerprint or track devices. An untrusted service has no legitimate need for this data when providing only Wi-Fi hints.
+
+**Note**: For UEFI firmware implementations, reporting empty `devmod:os` is genuinely accurate - there is no OS running yet. This is not deceptive; it reflects reality.
+
+#### 3. Trust Level Enforcement
+
+**Critical**: In single-sided mode, the device MUST treat ALL received networks as **untrusted** (`trust_level = 0` / `onboard-only`), regardless of what the server specifies:
+
+```text
+Server sends:   trust_level = 1 (full-access)
+Device applies: trust_level = 0 (onboard-only)
+```
+
+This is **not an error condition**. The server MAY believe the network is trusted (from its perspective), but the device cannot verify this claim without owner attestation. The device:
+
+- SHOULD silently downgrade `trust_level` to 0
+- SHOULD NOT reject the network or report an error
+- MUST use the network only for further onboarding, not for general connectivity
+
+```go
+func applySingleSidedProfile(network *WiFiNetwork, mode AttestationMode) {
+    if mode == ModeSingleSided && network.TrustLevel > 0 {
+        // Silently downgrade - not an error, just enforcing security boundary
+        log.Debug("Single-sided mode: downgrading trust_level from %d to 0", 
+                  network.TrustLevel)
+        network.TrustLevel = 0
+    }
+}
+```
+
+**Rationale**: Trust level indicates whether the owner vouches for the network. Without owner verification, the device has no basis to trust anything the service claims about network trustworthiness.
+
+#### 4. Expected Two-Phase Flow
+
+The single-sided profile enables a secure two-phase onboarding pattern:
+
+```text
+Phase 1: Single-Sided (WiFi Hints)
+1. Device connects to bootstrap network (open or known)
+2. Device performs single-sided attestation with Wi-Fi Setup Service
+3. Device enters single-sided profile:
+   - Advertises only: devmod (minimal), fdo.wifi
+   - Reports no identifying information
+4. Server sends: fdo.wifi:network-add (trust_level may be 1)
+5. Device applies network with trust_level=0 (downgraded)
+6. Device disconnects from bootstrap network
+7. Device connects to new network (treated as untrusted/onboard-only)
+
+Phase 2: Full Owner (Complete Onboarding)
+1. Device performs full owner attestation with Primary Onboarding Service
+2. Device exits single-sided profile, enters full owner profile:
+   - Advertises all supported FSIMs
+   - Reports complete devmod data
+3. Server sends: fdo.wifi, fdo.bmo, fdo.payload, etc.
+4. Device applies networks with trust levels as specified
+5. Device receives boot image and/or payloads
+6. Onboarding complete
+```
+
+#### Profile Summary Table
+
+| Aspect | Single-Sided Profile | Full Owner Profile |
+|--------|---------------------|-------------------|
+| **FSIMs Available** | devmod, fdo.wifi only | All supported FSIMs |
+| **devmod Data** | Minimal (no identifying info) | Complete |
+| **Trust Levels** | Always downgrade to 0 | Honor as specified |
+| **Use Case** | Wi-Fi hints for bootstrap | Complete onboarding |
+
+See [[WiFi-FSIM]] for complete specification of attestation modes and client implementation requirements.
+
 ## Standalone Wi-Fi Setup Service Deployment
 
 ### Concept
