@@ -323,10 +323,12 @@ func (c *CredentialsDevice) handlePubkeyRequest(messageBody io.Reader, yield fun
 	credID, _ := request[-1].(string)
 	credType, _ := request[-2].(string)
 	metadata, _ := request[-3].(map[string]any)
+	endpointURL, _ := request[-4].(string)
 
 	slog.Debug("[fdo.credentials] Received pubkey-request",
 		"credential_id", credID,
-		"credential_type", credType)
+		"credential_type", credType,
+		"endpoint_url", endpointURL)
 
 	// Call callback to get the public key
 	if c.OnPublicKeyRequested == nil {
@@ -393,10 +395,15 @@ func (c *CredentialsDevice) handleCredentialBegin(messageBody io.Reader) error {
 				if metadata, ok := begin.FSIMFields[-3].(map[string]any); ok {
 					c.currentMetadata = metadata
 				}
+				var endpointURL string
+				if url, ok := begin.FSIMFields[-4].(string); ok {
+					endpointURL = url
+				}
 
 				slog.Debug("[fdo.credentials] Receiving credential",
 					"credential_id", c.currentCredentialID,
 					"credential_type", c.currentCredentialType,
+					"endpoint_url", endpointURL,
 					"total_size", begin.TotalSize)
 				return nil
 			},
@@ -511,10 +518,15 @@ func (c *CredentialsDevice) handleResponseBegin(messageBody io.Reader) error {
 				if metadata, ok := begin.FSIMFields[-3].(map[string]any); ok {
 					c.currentMetadata = metadata
 				}
+				var endpointURL string
+				if url, ok := begin.FSIMFields[-4].(string); ok {
+					endpointURL = url
+				}
 
 				slog.Debug("[fdo.credentials] Receiving enrolled credential response",
 					"credential_id", c.currentCredentialID,
 					"credential_type", c.currentCredentialType,
+					"endpoint_url", endpointURL,
 					"total_size", begin.TotalSize)
 				return nil
 			},

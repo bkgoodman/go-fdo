@@ -46,6 +46,59 @@ This specification incorporates and extends concepts from:
 3. **Credentials MUST include metadata** specifying scope, expiration, and usage context
 4. **Devices MUST validate** credential integrity using hash verification when provided
 
+### Service Endpoint Association
+
+A fundamental purpose of FDO is to set up devices to communicate with management services. This requires both:
+
+1. **Credentials** - Authentication material (passwords, API keys, certificates, tokens)
+2. **Endpoint URL** - The service location where credentials are used
+
+The `endpoint_url` field in credential messages binds credentials to their target services. This enables:
+
+- **Multiple service credentials** - Device receives credentials for different services (monitoring, configuration, telemetry) in a single onboarding session
+- **Credential-endpoint pairing** - Each credential explicitly identifies which service it authenticates to
+- **Service discovery** - Device knows where to connect without additional configuration
+
+### Credential Scope for Multi-Application Disambiguation
+
+In multi-stage onboarding, **multiple applications** may each run their own FDO client to obtain credentials. Without disambiguation, all applications would receive all credentials - creating security and complexity issues.
+
+The `credential_scope` field solves this by allowing:
+
+1. **Server-side scoping** - Owner tags each credential with a scope identifier
+2. **Client-side filtering** - Applications advertise which scope(s) they handle
+3. **Selective delivery** - Server only sends credentials matching the client's advertised scope
+
+**Example Scenario:**
+
+A device runs three applications, each with its own FDO client:
+- **Monitoring agent** - needs credentials for `monitoring.example.com`
+- **Config manager** - needs credentials for `config.example.com`  
+- **Custom app** - needs credentials for `app.vendor.com`
+
+The onboarding service has credentials for all three, tagged with scopes:
+- `credential_scope: "monitoring"` → monitoring API key
+- `credential_scope: "config"` → config service certificate
+- `credential_scope: "vendor-app"` → vendor app OAuth token
+
+When each application's FDO client connects:
+- Monitoring agent advertises `fdo.credentials` with scope filter `"monitoring"` → receives only monitoring credentials
+- Config manager advertises scope filter `"config"` → receives only config credentials
+- Custom app advertises scope filter `"vendor-app"` → receives only its credentials
+
+**Scope Filtering Mechanism:**
+
+Clients indicate their scope filter in the `fdo.credentials:active` message:
+
+```cddl
+ActiveMessage = {
+    0: active: bool,
+    ? -1: scope_filter: tstr / [* tstr]  ; Single scope or list of scopes
+}
+```
+
+If `scope_filter` is omitted, the client receives ALL credentials (backward compatible).
+
 ### Protocol Flows
 
 The FSIM supports three distinct message exchange patterns:
@@ -137,6 +190,8 @@ BeginMessage = {
     -1: credential_id: tstr      ; Unique credential identifier
     -2: credential_type: tstr    ; Credential type (see Credential Types)
     ? -3: metadata: {* tstr => any}  ; Type-specific metadata
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where credential is used
+    ? -5: credential_scope: tstr ; Scope/domain identifier for multi-app disambiguation
 }
 ```
 
@@ -208,12 +263,12 @@ Device → Owner: credential-result
     ? -3: metadata: {
         ? username: tstr         ; For password type
         ? scope: tstr            ; Usage scope (e.g., "sudoers", "api.example.com")
-        ? service_endpoint: tstr ; API endpoint
         ? expires_at: tstr       ; ISO 8601 timestamp
         ? client_id: tstr        ; For OAuth2 client_secret type
         ? token_endpoint: tstr   ; For OAuth2 client_secret type
         * tstr => any            ; Additional type-specific fields
     }
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where credential is used
 }
 ```
 
@@ -272,7 +327,8 @@ fdo.credentials:credential-begin = {
         "client_id": "device-001",
         "token_endpoint": "https://auth.example.com/token",
         "scope": "device:read device:write"
-    }
+    },
+    -4: "https://api.example.com/v1"
 }
 
 Owner → Device:
@@ -326,6 +382,7 @@ Device → Owner: response-result
         ? scope: tstr            ; For oauth2_private_key_jwt
         * tstr => any
     }
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where credential is used
 }
 ```
 
@@ -361,6 +418,7 @@ Device → Owner: response-result
         ? token_endpoint: tstr   ; For oauth2_private_key_jwt
         * tstr => any
     }
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where credential is used
 }
 ```
 
@@ -401,7 +459,8 @@ fdo.credentials:request-begin = {
         "subject_dn": "CN=device-001,O=Example Corp",
         "san": ["device-001.example.com", "192.168.1.100"],
         "key_usage": ["digitalSignature", "keyEncipherment"]
-    }
+    },
+    -4: "https://api.example.com/v1"
 }
 
 Device → Owner:
@@ -472,6 +531,7 @@ The owner sends this message to request a public key from the device. The owner 
         ? key_size: uint         ; Requested key size (e.g., 2048, 4096 for RSA)
         * tstr => any
     }
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where public key will be used
 }
 ```
 
@@ -488,6 +548,7 @@ The owner sends this message to request a public key from the device. The owner 
         ? comment: tstr          ; Key comment/description
         * tstr => any
     }
+    ? -4: endpoint_url: tstr     ; Service endpoint URL where public key will be used
 }
 ```
 
@@ -510,7 +571,8 @@ fdo.credentials:pubkey-request = {
     -3: {
         "service_name": "config-server.example.com",
         "key_type": "ed25519"
-    }
+    },
+    -4: "ssh://config-server.example.com:22"
 }
 
 Device → Owner:

@@ -34,6 +34,7 @@ type payloadSendState int
 const (
 	stateIdle payloadSendState = iota
 	stateSendingBegin
+	stateWaitingAck
 	stateSendingChunks
 	stateSendingEnd
 	stateWaitingResult
@@ -41,11 +42,12 @@ const (
 
 // PayloadToSend represents a payload to be sent to the device per fdo.payload.md.
 type PayloadToSend struct {
-	MimeType string         // Required: MIME type (field -1)
-	Name     string         // Optional: Payload name (field -2)
-	Data     []byte         // Payload data
-	Metadata map[string]any // Optional: Metadata map (field -3)
-	HashAlg  string         // Optional: Hash algorithm (e.g., "sha256")
+	MimeType   string         // Required: MIME type (field -1)
+	Name       string         // Optional: Payload name (field -2)
+	Data       []byte         // Payload data
+	Metadata   map[string]any // Optional: Metadata map (field -3)
+	HashAlg    string         // Optional: Hash algorithm (e.g., "sha256")
+	RequireAck bool           // Optional: Request ack before sending data (default: false)
 }
 
 // PayloadResult represents the result received from the device.
@@ -82,6 +84,19 @@ func (p *PayloadOwner) AddPayload(mimeType, name string, data []byte, metadata m
 		Data:     data,
 		Metadata: metadata,
 		HashAlg:  "sha256", // Default hash algorithm
+	})
+}
+
+// AddPayloadWithAck adds a payload that requires acknowledgment before data transfer.
+// This allows the device to reject the payload based on MIME type before receiving data.
+func (p *PayloadOwner) AddPayloadWithAck(mimeType, name string, data []byte, metadata map[string]any) {
+	p.payloads = append(p.payloads, PayloadToSend{
+		MimeType:   mimeType,
+		Name:       name,
+		Data:       data,
+		Metadata:   metadata,
+		HashAlg:    "sha256",
+		RequireAck: true,
 	})
 }
 
@@ -137,6 +152,11 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 			p.currentSender.BeginFields.FSIMFields[-3] = payload.Metadata
 		}
 
+		// Set RequireAck if requested
+		if payload.RequireAck {
+			p.currentSender.BeginFields.RequireAck = true
+		}
+
 		p.sendState = stateSendingBegin
 	}
 
@@ -149,10 +169,45 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 		}
 		slog.Debug("fdo.payload sent begin",
 			"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
-			"size", len(p.currentSender.Data))
+			"size", len(p.currentSender.Data),
+			"require_ack", p.currentSender.BeginFields.RequireAck)
+
+		// If RequireAck, wait for payload-ack before sending chunks
+		if p.currentSender.IsWaitingForAck() {
+			fmt.Printf("[PayloadOwner] RequireAck set, waiting for payload-ack\n")
+			p.sendState = stateWaitingAck
+			return false, false, nil
+		}
+
 		p.sendState = stateSendingChunks
 		fmt.Printf("[PayloadOwner] Sent begin, continuing to send chunks\n")
 		// Fall through to send chunks in same call
+		fallthrough
+
+	case stateWaitingAck:
+		// Waiting for device to send payload-ack
+		// This state is entered when RequireAck=true and we're waiting for ack
+		// We transition out when we receive payload-ack in HandleInfo
+		if p.currentSender.IsWaitingForAck() {
+			// Still waiting
+			return false, false, nil
+		}
+		// Check if rejected
+		if p.currentSender.IsRejected() {
+			reason, msg := p.currentSender.GetRejectReason()
+			slog.Warn("fdo.payload rejected by device",
+				"mime_type", p.currentSender.BeginFields.FSIMFields[-1],
+				"reason_code", reason,
+				"message", msg)
+			// Move to next payload
+			p.currentSender = nil
+			p.currentIndex++
+			p.sendState = stateIdle
+			return false, false, nil
+		}
+		// Ack received, proceed to send chunks
+		fmt.Printf("[PayloadOwner] payload-ack received, proceeding to send chunks\n")
+		p.sendState = stateSendingChunks
 		fallthrough
 
 	case stateSendingChunks:
@@ -223,6 +278,23 @@ func (p *PayloadOwner) receive(ctx context.Context, key string, messageBody io.R
 			return fmt.Errorf("device payload module is not active")
 		}
 		slog.Debug("fdo.payload device active status received")
+		return nil
+
+	case "payload-ack":
+		// Device responds to RequireAck with accept/reject
+		if p.currentSender == nil {
+			return fmt.Errorf("received ack without active transfer")
+		}
+		if !p.currentSender.IsWaitingForAck() {
+			return fmt.Errorf("received unexpected ack")
+		}
+
+		if err := p.currentSender.HandleAck(messageBody); err != nil {
+			// HandleAck returns error if rejected, but that's not a protocol error
+			slog.Debug("fdo.payload ack received", "error", err)
+		}
+
+		// State machine will handle the transition in ProduceInfo
 		return nil
 
 	case "payload-result":

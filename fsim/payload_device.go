@@ -57,6 +57,23 @@ type ChunkedPayloadHandler interface {
 	CancelPayload() error
 }
 
+// PayloadAckHandler is called when the owner sends a payload-begin with RequireAck=true.
+// It allows the application to accept or reject the payload before data transfer.
+type PayloadAckHandler interface {
+	// AcceptPayload decides whether to accept or reject a payload based on metadata.
+	// mimeType: MIME type from field -1
+	// name: Optional payload name from field -2
+	// size: Total size in bytes (0 if not provided)
+	// metadata: Optional metadata map from field -3
+	// Returns: (accepted, reasonCode, message)
+	// If accepted is false, reasonCode should be one of:
+	//   1 = Unsupported MIME Type
+	//   2 = Size Exceeded
+	//   3 = Not Applicable
+	//   4 = Policy Violation
+	AcceptPayload(mimeType, name string, size uint64, metadata map[string]any) (accepted bool, reasonCode int, message string)
+}
+
 // Payload implements the fdo.payload FSIM for device-side payload delivery.
 // It follows the specification in fdo.payload.md and uses the generic chunking strategy.
 // Applications can use either UnifiedPayloadHandler (simple, buffered) or ChunkedPayloadHandler (streaming).
@@ -68,6 +85,10 @@ type Payload struct {
 	// Option 2: Chunked handler (app handles chunks individually)
 	// Use for memory-constrained scenarios or streaming processing.
 	ChunkedHandler ChunkedPayloadHandler
+
+	// Optional: Handler for accept/reject decision when RequireAck=true
+	// If nil and RequireAck=true, payloads are automatically accepted.
+	AckHandler PayloadAckHandler
 
 	// Active indicates if the module is active
 	Active bool
@@ -131,6 +152,11 @@ func (p *Payload) handleChunkedMessage(ctx context.Context, messageName string, 
 			PayloadName: "payload",
 		}
 
+		// Set up ack callback if handler provided
+		if p.AckHandler != nil {
+			p.receiver.OnBeginAck = p.onBeginAck
+		}
+
 		// Set up callbacks based on handler mode
 		if p.UnifiedHandler != nil {
 			// Unified mode: buffer everything
@@ -160,6 +186,19 @@ func (p *Payload) handleChunkedMessage(ctx context.Context, messageName string, 
 		return nil
 	}
 
+	// After begin message with RequireAck, send payload-ack
+	if strings.HasSuffix(messageName, "-begin") && p.receiver.IsAckPending() {
+		fmt.Printf("[PayloadDevice] Sending payload-ack (accepted=%v)\n", p.receiver.IsAckAccepted())
+		if err := p.receiver.SendAck(respond); err != nil {
+			return fmt.Errorf("failed to send ack: %w", err)
+		}
+		// If rejected, we're done with this payload
+		if !p.receiver.IsAckAccepted() {
+			p.receiver = nil
+			return nil
+		}
+	}
+
 	// After successful end message, send result per fdo.payload.md
 	if strings.HasSuffix(messageName, "-end") && !p.receiver.IsReceiving() {
 		fmt.Printf("[PayloadDevice] Received end message, sending result\n")
@@ -185,6 +224,36 @@ func (p *Payload) handleChunkedMessage(ctx context.Context, messageName string, 
 	}
 
 	return nil
+}
+
+// onBeginAck is called when payload-begin with RequireAck=true is received.
+// It delegates to the AckHandler to decide whether to accept or reject.
+func (p *Payload) onBeginAck(begin chunking.BeginMessage) (accepted bool, reasonCode int, message string) {
+	if p.AckHandler == nil {
+		// No handler, accept by default
+		return true, 0, ""
+	}
+
+	// Extract MIME type from field -1 (required per fdo.payload.md)
+	mimeType, _ := begin.FSIMFields[-1].(string)
+
+	// Extract optional name from field -2
+	name, _ := begin.FSIMFields[-2].(string)
+
+	// Extract optional metadata from field -3
+	var metadata map[string]any
+	if m, ok := begin.FSIMFields[-3].(map[string]any); ok {
+		metadata = m
+	} else if m, ok := begin.FSIMFields[-3].(map[any]any); ok {
+		metadata = make(map[string]any)
+		for k, v := range m {
+			if ks, ok := k.(string); ok {
+				metadata[ks] = v
+			}
+		}
+	}
+
+	return p.AckHandler.AcceptPayload(mimeType, name, begin.TotalSize, metadata)
 }
 
 // Unified mode callbacks - buffer all chunks and call handler once

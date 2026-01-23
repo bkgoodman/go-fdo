@@ -665,6 +665,110 @@ test_wifi() {
 	log_success "WiFi FSIM test PASSED"
 }
 
+# Test: BMO FSIM
+# This test demonstrates the fdo.bmo FSIM by sending a boot image and verifying it's received correctly
+test_bmo() {
+	log_section "TEST: BMO FSIM (Bare Metal Onboarding)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create a random test file (10KB to test multi-chunk transfer)
+	BMO_FILE="test_bmo_image.bin"
+	RECEIVED_FILE="test_bmo_image.bin"
+	log_step "Creating random test boot image (10KB for multi-chunk transfer)"
+	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=10 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
+	log_success "Created test boot image: $BMO_FILE (hash: $ORIGINAL_HASH)"
+
+	start_server "-bmo-file ../$BMO_FILE -bmo-type application/x-iso9660-image"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with BMO boot image transfer"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with BMO boot image transfer"
+
+	stop_server
+
+	# Verify the received file matches the original
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found: $RECEIVED_FILE"
+		rm -f "$BMO_FILE"
+		return 1
+	fi
+
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	log_step "Verifying boot image integrity"
+	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
+		log_success "Boot image hashes match! BMO transfer successful"
+		log_success "  Original:  $ORIGINAL_HASH"
+		log_success "  Received:  $RECEIVED_HASH"
+	else
+		log_error "Boot image hashes DO NOT match!"
+		log_error "  Original:  $ORIGINAL_HASH"
+		log_error "  Received:  $RECEIVED_HASH"
+		rm -f "$BMO_FILE" "$RECEIVED_FILE"
+		return 1
+	fi
+
+	# Cleanup
+	rm -f "$BMO_FILE" "$RECEIVED_FILE"
+	log_success "BMO FSIM test PASSED"
+}
+
+# Test: BMO FSIM with EFI application type
+# This test verifies BMO can handle EFI application transfers
+test_bmo_efi() {
+	log_section "TEST: BMO FSIM (EFI Application)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create a small test file simulating an EFI app
+	BMO_FILE="test_boot.efi"
+	RECEIVED_FILE="test_boot.efi"
+	log_step "Creating test EFI application (5KB)"
+	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=5 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
+	log_success "Created test EFI app: $BMO_FILE (hash: $ORIGINAL_HASH)"
+
+	start_server "-bmo-file ../$BMO_FILE -bmo-type application/efi"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with EFI application transfer"
+	run_cmd go run ./cmd client
+	log_success "TO1/TO2 completed with EFI application"
+
+	stop_server
+
+	# Verify the received file matches the original
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found: $RECEIVED_FILE"
+		rm -f "$BMO_FILE"
+		return 1
+	fi
+
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	log_step "Verifying EFI application integrity"
+	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
+		log_success "EFI app hashes match!"
+		log_success "  Original:  $ORIGINAL_HASH"
+		log_success "  Received:  $RECEIVED_HASH"
+	else
+		log_error "EFI app hashes DO NOT match!"
+		rm -f "$BMO_FILE" "$RECEIVED_FILE"
+		return 1
+	fi
+
+	# Cleanup
+	rm -f "$BMO_FILE" "$RECEIVED_FILE"
+	log_success "BMO FSIM (EFI Application) test PASSED"
+}
+
 # Test: Credentials FSIM
 # This test demonstrates the fdo.credentials FSIM by provisioning various credential types
 test_credentials() {
@@ -673,7 +777,7 @@ test_credentials() {
 	rm -f "$DB_FILE" "$CRED_FILE"
 
 	log_step "Starting server with credential provisioning"
-	start_server "-credential password:admin-creds:admin:SecurePass123 -credential api_key:prod-api:sk_live_abc123xyz -credential oauth2_client_secret:oauth-app:client_secret_xyz789"
+	start_server "-credential password:admin-creds:admin:SecurePass123:https://mgmt.example.com/api -credential api_key:prod-api:sk_live_abc123xyz:https://api.example.com/v1 -credential oauth2_client_secret:oauth-app:client_secret_xyz789:https://oauth.example.com/token"
 
 	log_step "Running DI"
 	run_cmd go run ./cmd client -di "$SERVER_URL"
@@ -692,7 +796,7 @@ test_credentials() {
 	rm -f "$DB_FILE" "$CRED_FILE"
 
 	log_step "Starting server requesting SSH public key"
-	start_server "-request-pubkey ssh_public_key:device-ssh-key"
+	start_server "-request-pubkey ssh_public_key:device-ssh-key:ssh://admin.example.com:22"
 
 	log_step "Running DI"
 	run_cmd go run ./cmd client -di "$SERVER_URL"
@@ -802,6 +906,8 @@ test_all() {
 	test_sysconfig || failed=1
 	test_payload || failed=1
 	test_wifi || failed=1
+	test_bmo || failed=1
+	test_bmo_efi || failed=1
 	test_credentials || failed=1
 	test_bad_delegate || failed=1
 
@@ -880,6 +986,12 @@ main() {
 	wifi)
 		test_wifi
 		;;
+	bmo)
+		test_bmo
+		;;
+	bmo-efi)
+		test_bmo_efi
+		;;
 	credentials)
 		test_credentials
 		;;
@@ -888,7 +1000,7 @@ main() {
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, credentials, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, bmo, bmo-efi, credentials, all"
 		exit 1
 		;;
 	esac

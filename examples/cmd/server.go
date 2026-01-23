@@ -77,6 +77,8 @@ var (
 	sysconfig            stringList
 	payloadFile          string
 	payloadMimeType      string
+	bmoFile              string
+	bmoImageType         string
 	wifiConfigFile       string
 	credentials          stringList
 	pubkeyRequests       stringList
@@ -124,9 +126,11 @@ func init() {
 	serverFlags.Var(&sysconfig, "sysconfig", "Use fdo.sysconfig FSIM with `key=value` pairs (flag may be used multiple times)")
 	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
+	serverFlags.StringVar(&bmoFile, "bmo-file", "", "Use fdo.bmo FSIM to send boot image `file` to device")
+	serverFlags.StringVar(&bmoImageType, "bmo-type", "application/x-iso9660-image", "Image type for BMO file")
 	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
-	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data` format (flag may be used multiple times)")
-	serverFlags.Var(&pubkeyRequests, "request-pubkey", "Request public key from device with `type:id` format (flag may be used multiple times)")
+	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data[:endpoint_url]` format (flag may be used multiple times)")
+	serverFlags.Var(&pubkeyRequests, "request-pubkey", "Request public key from device with `type:id[:endpoint_url]` format (flag may be used multiple times)")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
 }
 
@@ -910,6 +914,18 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 
+		if slices.Contains(modules, "fdo.bmo") && bmoFile != "" {
+			data, err := os.ReadFile(bmoFile)
+			if err != nil {
+				log.Fatalf("error reading BMO file %q: %v", bmoFile, err)
+			}
+			bmoOwner := &fsim.BMOOwner{}
+			bmoOwner.AddImage(bmoImageType, filepath.Base(bmoFile), data, nil)
+			if !yield("fdo.bmo", bmoOwner) {
+				return
+			}
+		}
+
 		if slices.Contains(modules, "fdo.wifi") && wifiConfigFile != "" {
 			wifiOwner, err := loadWiFiConfig(wifiConfigFile)
 			if err != nil {
@@ -923,11 +939,15 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 		if slices.Contains(modules, "fdo.credentials") {
 			var provisionedCreds []fsim.ProvisionedCredential
 			for _, credSpec := range credentials {
-				parts := strings.SplitN(credSpec, ":", 3)
-				if len(parts) != 3 {
-					log.Fatalf("invalid credential specification %q: expected type:id:data format", credSpec)
+				parts := strings.SplitN(credSpec, ":", 4)
+				if len(parts) < 3 {
+					log.Fatalf("invalid credential specification %q: expected type:id:data[:endpoint_url] format", credSpec)
 				}
 				credType, credID, credData := parts[0], parts[1], parts[2]
+				var endpointURL string
+				if len(parts) == 4 {
+					endpointURL = parts[3]
+				}
 
 				// Validate credential type
 				validTypes := []string{"password", "api_key", "oauth2_client_secret", "bearer_token"}
@@ -956,6 +976,7 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 					CredentialType: credType,
 					CredentialData: data,
 					Metadata:       metadata,
+					EndpointURL:    endpointURL,
 				})
 			}
 
@@ -963,14 +984,19 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 
 			// Add public key requests (Registered Credentials flow)
 			for _, reqSpec := range pubkeyRequests {
-				parts := strings.SplitN(reqSpec, ":", 2)
-				if len(parts) != 2 {
-					log.Fatalf("invalid pubkey request specification %q: expected type:id format", reqSpec)
+				parts := strings.SplitN(reqSpec, ":", 3)
+				if len(parts) < 2 {
+					log.Fatalf("invalid pubkey request specification %q: expected type:id[:endpoint_url] format", reqSpec)
 				}
 				credType, credID := parts[0], parts[1]
+				var endpointURL string
+				if len(parts) == 3 {
+					endpointURL = parts[2]
+				}
 				credentialsOwner.PublicKeyRequests = append(credentialsOwner.PublicKeyRequests, fsim.PublicKeyRequest{
 					CredentialID:   credID,
 					CredentialType: credType,
+					EndpointURL:    endpointURL,
 				})
 			}
 

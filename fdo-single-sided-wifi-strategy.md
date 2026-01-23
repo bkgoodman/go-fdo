@@ -25,30 +25,99 @@ Create a **single-sided FDO client mode** that:
 
 ### Security Approach
 
-#### Separate Wi-Fi Config FSIM
+#### Single-Sided Profile
 
-Create a dedicated `fdo.wifi-config` FSIM that:
+When a device detects it has undergone single-sided attestation (device proved legitimacy, but owner was not verified), it MUST enter a **single-sided profile** with the following constraints:
 
-- **Exclusive Operation**: Only runs in single-sided mode
-- **Limited Scope**: Solely provides Wi-Fi configuration
-- **Security Boundary**: Cannot leak device information
-- **Isolation**: Separate from other FSIMs (devmod, sysconfig, etc.)
+##### 1. FSIM Restrictions
 
-#### FSIM Access Control
+Only `devmod` and `fdo.wifi` FSIMs are available:
 
 ```text
-Single-Sided Mode (Owner Not Attested):
-├── fdo.wifi-config    ✅ ALLOWED
-├── fdo.sysconfig      ❌ BLOCKED
-├── fdo.devmod         ❌ BLOCKED
-└── fdo.payload        ❌ BLOCKED
-
-Double-Sided Mode (Owner Attested):
-├── fdo.wifi-config    ✅ ALLOWED
-├── fdo.sysconfig      ✅ ALLOWED
-├── fdo.devmod         ✅ ALLOWED
-└── fdo.payload        ✅ ALLOWED
+Single-Sided Profile - Available FSIMs:
+├── devmod       ✅ (minimal data only - see below)
+├── fdo.wifi     ✅ (untrusted networks only - see below)
+├── fdo.bmo      ❌ BLOCKED
+├── fdo.payload  ❌ BLOCKED
+├── fdo.sysconfig ❌ BLOCKED
+└── fdo.credentials ❌ BLOCKED
 ```
+
+The device MUST NOT advertise other FSIMs in `devmod:modules` and MUST reject attempts by the server to use blocked FSIMs.
+
+##### 2. Minimal devmod Data
+
+The device SHOULD report only the fields necessary for FSIM discovery:
+
+```text
+REQUIRED (for FSIM discovery):
+- devmod:active = true
+- devmod:nummodules = 1  
+- devmod:modules = [0, 0, "fdo.wifi"]
+- devmod:sep = ";"
+
+OMIT OR EMPTY (identifying information):
+- devmod:device = ""
+- devmod:serial = ""  (CRITICAL: never expose serial to untrusted owner)
+- devmod:os = ""
+- devmod:version = ""
+- devmod:arch = ""
+```
+
+This protects device identity from untrusted owner services while remaining FDO-compliant.
+
+##### 3. Trust Level Enforcement
+
+**Critical**: The device MUST treat ALL received networks as **untrusted** (`trust_level = 0`), regardless of what the server specifies:
+
+```text
+Server sends:  trust_level = 1 (full-access)
+Device applies: trust_level = 0 (onboard-only)
+```
+
+This is **not an error condition**. The server MAY believe the network is trusted (from its perspective), but the device cannot verify this claim without owner attestation. The device:
+
+- SHOULD silently downgrade `trust_level` to 0
+- SHOULD NOT reject the network or report an error
+- MUST use the network only for further onboarding, not for general connectivity
+
+#### Full Owner Profile
+
+When a device undergoes full owner/delegate attestation (mutual verification), all restrictions are lifted:
+
+```text
+Full Owner Profile - Available FSIMs:
+├── devmod        ✅ (full data)
+├── fdo.wifi      ✅ (trusted networks allowed)
+├── fdo.bmo       ✅
+├── fdo.payload   ✅
+├── fdo.sysconfig ✅
+└── fdo.credentials ✅
+```
+
+- **Complete devmod**: Report all applicable fields including serial numbers
+- **Trust levels honored**: Networks can be marked as `full-access` for general connectivity
+- **All FSIMs available**: BMO, payloads, credentials, etc.
+
+#### Service Deployment Models
+
+##### WiFi-Only Service (Single-Sided)
+
+For operators who want to provide Wi-Fi hints without requiring trust:
+
+- Deploy single-sided attestation service
+- Expect clients to provide minimal devmod data
+- Expect clients to downgrade all trust levels
+- Do NOT attempt to use BMO, payload, or other FSIMs
+
+##### Full Onboarding Service (Full Owner)
+
+For operators providing complete device provisioning:
+
+- Deploy full owner/delegate attestation service
+- Expect clients to provide complete devmod data
+- Trust levels will be honored as specified
+- All FSIMs available based on client capabilities
 
 ## Implementation Plan
 
@@ -102,51 +171,86 @@ type DeviceState struct {
 
 ### Phase 2: FSIM Layer Changes
 
-#### 2.1 Create fdo.wifi-config FSIM
+#### 2.1 Use Existing fdo.wifi FSIM
 
-New FSIM specification:
+The existing `fdo.wifi` FSIM (see [[WiFi-FSIM]]) is used for both single-sided and full owner modes. No separate FSIM is needed - the client's profile determines behavior:
 
-```json
-{
-  "name": "fdo.wifi-config",
-  "description": "Wi-Fi configuration for single-sided onboarding",
-  "parameters": {
-    "ssid": "string",
-    "password": "string", 
-    "security": "string"
-  },
-  "security_level": "single-sided-only"
-}
-```
+| Mode | fdo.wifi Behavior |
+|------|-------------------|
+| Single-Sided | Accept networks but downgrade all trust levels to 0 |
+| Full Owner | Accept networks with trust levels as specified |
 
 #### 2.2 FSIM Access Control
 
-Implement FSIM filtering:
+Implement FSIM filtering based on attestation mode:
 
 ```go
 type FSIMFilter struct {
-    mode OnboardingMode
+    mode AttestationMode
 }
 
 func (f *FSIMFilter) AllowFSIM(fsimName string) bool {
     if f.mode == ModeSingleSided {
-        return fsimName == "fdo.wifi-config"
+        // Only devmod and fdo.wifi allowed in single-sided mode
+        return fsimName == "devmod" || fsimName == "fdo.wifi"
     }
-    return true // All FSIMs allowed in double-sided mode
+    return true // All FSIMs allowed in full owner mode
+}
+
+func (f *FSIMFilter) AdvertisedModules() []string {
+    if f.mode == ModeSingleSided {
+        return []string{"fdo.wifi"}  // Only advertise WiFi
+    }
+    return f.allSupportedModules()   // Advertise all capabilities
 }
 ```
 
-#### 2.3 Update Existing FSIMs
+#### 2.3 Trust Level Enforcement
 
-Modify existing FSIMs to check mode:
+Implement trust level downgrade for single-sided mode:
 
 ```go
-// In each FSIM handler
-func (f *SysconfigFSIM) Execute(state *DeviceState) error {
-    if state.OnboardingMode == ModeSingleSided {
-        return errors.New("sysconfig FSIM not allowed in single-sided mode")
+func (f *WiFiFSIM) ApplyNetwork(state *DeviceState, network *WiFiNetwork) error {
+    // In single-sided mode, always downgrade trust level
+    if state.AttestationMode == ModeSingleSided && network.TrustLevel > 0 {
+        log.Debug("Single-sided mode: downgrading trust_level from %d to 0", network.TrustLevel)
+        network.TrustLevel = 0  // Silently downgrade, not an error
     }
-    // Existing implementation...
+    
+    return f.configureNetwork(network)
+}
+```
+
+#### 2.4 Minimal devmod Implementation
+
+Implement devmod data filtering for single-sided mode:
+
+```go
+func (d *DevmodFSIM) ReportDeviceInfo(state *DeviceState) map[string]any {
+    info := map[string]any{
+        "active":     true,
+        "nummodules": len(state.AdvertisedModules),
+        "modules":    state.AdvertisedModules,
+        "sep":        ";",
+    }
+    
+    if state.AttestationMode == ModeSingleSided {
+        // Minimal profile: omit identifying information
+        info["device"]  = ""
+        info["serial"]  = ""
+        info["os"]      = ""
+        info["version"] = ""
+        info["arch"]    = ""
+    } else {
+        // Full profile: report all device information
+        info["device"]  = state.DeviceType
+        info["serial"]  = state.SerialNumber
+        info["os"]      = state.OS
+        info["version"] = state.OSVersion
+        info["arch"]    = state.Architecture
+    }
+    
+    return info
 }
 ```
 

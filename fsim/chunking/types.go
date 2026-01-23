@@ -16,9 +16,10 @@ import (
 // It contains generic fields (non-negative keys) and FSIM-specific fields (negative keys).
 type BeginMessage struct {
 	// Generic fields (keys 0-127 reserved by chunking spec)
-	TotalSize uint64         // Key 0: Total bytes that will be transmitted (optional)
-	HashAlg   string         // Key 1: Hash algorithm identifier (e.g., "sha256", "sha384")
-	Metadata  map[string]any // Key 2: Optional FSIM-specific metadata
+	TotalSize  uint64         // Key 0: Total bytes that will be transmitted (optional)
+	HashAlg    string         // Key 1: Hash algorithm identifier (e.g., "sha256", "sha384")
+	Metadata   map[string]any // Key 2: Optional FSIM-specific metadata
+	RequireAck bool           // Key 3: If true, sender waits for *-ack before sending data
 
 	// FSIM-specific fields use negative integer keys to avoid collisions
 	// Example: -1 for network_id, -2 for ssid, etc.
@@ -38,6 +39,9 @@ func (b *BeginMessage) MarshalCBOR() ([]byte, error) {
 	}
 	if len(b.Metadata) > 0 {
 		m[2] = b.Metadata
+	}
+	if b.RequireAck {
+		m[3] = true
 	}
 
 	// Add FSIM-specific fields (negative keys)
@@ -81,6 +85,10 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 				if v, ok := val.(map[any]any); ok {
 					b.Metadata = convertToStringMap(v)
 				}
+			case 3:
+				if v, ok := val.(bool); ok {
+					b.RequireAck = v
+				}
 			default:
 				// Negative keys are FSIM-specific
 				if k < 0 {
@@ -108,6 +116,10 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 				if v, ok := val.(map[any]any); ok {
 					b.Metadata = convertToStringMap(v)
 				}
+			case 3:
+				if v, ok := val.(bool); ok {
+					b.RequireAck = v
+				}
 			default:
 				// Negative keys are FSIM-specific
 				if ki < 0 {
@@ -133,6 +145,10 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 			case 2:
 				if v, ok := val.(map[any]any); ok {
 					b.Metadata = convertToStringMap(v)
+				}
+			case 3:
+				if v, ok := val.(bool); ok {
+					b.RequireAck = v
 				}
 			}
 		}
@@ -264,6 +280,68 @@ func (r *ResultMessage) UnmarshalCBOR(data []byte) error {
 	if len(arr) > 1 {
 		if v, ok := arr[1].(string); ok {
 			r.Message = v
+		}
+	}
+
+	return nil
+}
+
+// AckMessage represents the *-ack message structure from chunking-strategy.md.
+// This is sent by the receiver in response to *-begin when RequireAck is true.
+// It allows the receiver to accept or reject the transfer before data is sent.
+type AckMessage struct {
+	Accepted   bool   // Whether the transfer is accepted
+	ReasonCode int    // Optional reason code if rejected (FSIM-specific)
+	Message    string // Optional human-readable message
+}
+
+// Standard reason codes for rejection (FSIMs may define additional codes)
+const (
+	AckReasonUnsupportedType = 1 // MIME type or format not supported
+	AckReasonSizeExceeded    = 2 // Payload too large
+	AckReasonNotApplicable   = 3 // Payload not applicable to current state
+	AckReasonPolicyViolation = 4 // Rejected by policy
+)
+
+// MarshalCBOR encodes AckMessage to CBOR array format: [accepted, ?reason_code, ?message]
+func (a *AckMessage) MarshalCBOR() ([]byte, error) {
+	if a.Accepted {
+		// Accepted: just [true]
+		return cbor.Marshal([]any{true})
+	}
+	// Rejected: include reason code and optional message
+	if a.Message == "" {
+		return cbor.Marshal([]any{false, a.ReasonCode})
+	}
+	return cbor.Marshal([]any{false, a.ReasonCode, a.Message})
+}
+
+// UnmarshalCBOR decodes AckMessage from CBOR array format.
+func (a *AckMessage) UnmarshalCBOR(data []byte) error {
+	var arr []any
+	if err := cbor.Unmarshal(data, &arr); err != nil {
+		return err
+	}
+
+	if len(arr) > 0 {
+		if v, ok := arr[0].(bool); ok {
+			a.Accepted = v
+		}
+	}
+
+	if len(arr) > 1 {
+		if v, ok := arr[1].(int); ok {
+			a.ReasonCode = v
+		} else if v, ok := arr[1].(uint64); ok {
+			a.ReasonCode = int(v)
+		} else if v, ok := arr[1].(int64); ok {
+			a.ReasonCode = int(v)
+		}
+	}
+
+	if len(arr) > 2 {
+		if v, ok := arr[2].(string); ok {
+			a.Message = v
 		}
 	}
 

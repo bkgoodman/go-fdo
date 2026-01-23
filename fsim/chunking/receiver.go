@@ -24,13 +24,23 @@ type ChunkReceiver struct {
 	OnChunk func(data []byte) error        // Called for each *-data-<n> chunk
 	OnEnd   func(end EndMessage) error     // Called when *-end is received
 
+	// OnBeginAck is called when *-begin with RequireAck=true is received.
+	// Returns (accepted, reasonCode, message). If accepted is false, the transfer is rejected.
+	// If this callback is nil and RequireAck is true, the transfer is automatically accepted.
+	OnBeginAck func(begin BeginMessage) (accepted bool, reasonCode int, message string)
+
 	// Internal state
 	buffer       bytes.Buffer
 	totalBytes   int64
 	expectedSize uint64
 	hashAlg      string
 	receiving    bool
-	nextChunk    int // Expected next chunk index
+	nextChunk    int          // Expected next chunk index
+	ackPending   bool         // Whether *-ack needs to be sent
+	ackAccepted  bool         // Whether the pending ack is an accept or reject
+	ackReason    int          // Reason code for rejection
+	ackMessage   string       // Message for rejection
+	beginMsg     BeginMessage // Stored begin message for ack handling
 }
 
 // HandleMessage processes incoming chunking messages.
@@ -68,10 +78,27 @@ func (r *ChunkReceiver) handleBegin(messageBody io.Reader) error {
 	// Store state
 	r.expectedSize = begin.TotalSize
 	r.hashAlg = begin.HashAlg
-	r.receiving = true
 	r.totalBytes = 0
 	r.nextChunk = 0
 	r.buffer.Reset()
+	r.beginMsg = begin
+
+	// Handle RequireAck - check with callback if provided
+	if begin.RequireAck {
+		r.ackPending = true
+		if r.OnBeginAck != nil {
+			r.ackAccepted, r.ackReason, r.ackMessage = r.OnBeginAck(begin)
+		} else {
+			// Default: accept if no callback provided
+			r.ackAccepted = true
+		}
+		// If rejected, don't set receiving=true
+		if !r.ackAccepted {
+			return nil
+		}
+	}
+
+	r.receiving = true
 
 	// Call FSIM-specific handler
 	if r.OnBegin != nil {
@@ -201,6 +228,54 @@ func (r *ChunkReceiver) SendResult(respond func(string) io.Writer, statusCode in
 	return nil
 }
 
+// SendAck sends a *-ack message in response to *-begin with RequireAck=true.
+// This should be called after HandleMessage for *-begin when IsAckPending() returns true.
+func (r *ChunkReceiver) SendAck(respond func(string) io.Writer) error {
+	if !r.ackPending {
+		return fmt.Errorf("no ack pending")
+	}
+
+	ack := AckMessage{
+		Accepted:   r.ackAccepted,
+		ReasonCode: r.ackReason,
+		Message:    r.ackMessage,
+	}
+
+	data, err := ack.MarshalCBOR()
+	if err != nil {
+		return fmt.Errorf("failed to encode ack: %w", err)
+	}
+
+	w := respond(r.PayloadName + "-ack")
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("failed to send ack: %w", err)
+	}
+
+	r.ackPending = false
+
+	// If rejected, reset state
+	if !r.ackAccepted {
+		r.reset()
+	}
+
+	return nil
+}
+
+// IsAckPending returns true if a *-ack message needs to be sent.
+func (r *ChunkReceiver) IsAckPending() bool {
+	return r.ackPending
+}
+
+// IsAckAccepted returns true if the pending ack is an accept (not reject).
+func (r *ChunkReceiver) IsAckAccepted() bool {
+	return r.ackAccepted
+}
+
+// GetBeginMessage returns the stored begin message (useful for ack callback context).
+func (r *ChunkReceiver) GetBeginMessage() BeginMessage {
+	return r.beginMsg
+}
+
 // GetBuffer returns the accumulated payload data.
 // This should be called after all chunks have been received.
 func (r *ChunkReceiver) GetBuffer() []byte {
@@ -230,4 +305,9 @@ func (r *ChunkReceiver) reset() {
 	r.hashAlg = ""
 	r.nextChunk = 0
 	r.buffer.Reset()
+	r.ackPending = false
+	r.ackAccepted = false
+	r.ackReason = 0
+	r.ackMessage = ""
+	r.beginMsg = BeginMessage{}
 }

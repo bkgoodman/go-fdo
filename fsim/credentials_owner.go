@@ -71,6 +71,7 @@ type PublicKeyRequest struct {
 	CredentialID   string         // Required: unique identifier (e.g., "ssh-admin-key")
 	CredentialType string         // Required: "ssh_public_key"
 	Metadata       map[string]any // Optional: username, key_type, key_size hints
+	EndpointURL    string         // Optional: service endpoint URL where public key will be used
 }
 
 // ProvisionedCredential represents a credential to provision to the device.
@@ -80,6 +81,7 @@ type ProvisionedCredential struct {
 	CredentialData []byte         // Required: serialized credential data (JSON or CBOR)
 	Metadata       map[string]any // Optional: type-specific metadata
 	HashAlg        string         // Optional: hash algorithm for verification
+	EndpointURL    string         // Optional: service endpoint URL where credential is used
 }
 
 // enrollmentResponseInfo holds info about a pending enrollment response to send
@@ -88,6 +90,7 @@ type enrollmentResponseInfo struct {
 	CredentialType string
 	ResponseData   []byte
 	Metadata       map[string]any
+	EndpointURL    string
 }
 
 var _ serviceinfo.OwnerModule = (*CredentialsOwner)(nil)
@@ -163,10 +166,14 @@ func (c *CredentialsOwner) Yield(ctx context.Context, producer *serviceinfo.Prod
 		if resp.Metadata != nil {
 			sender.BeginFields.FSIMFields[-3] = resp.Metadata
 		}
+		if resp.EndpointURL != "" {
+			sender.BeginFields.FSIMFields[-4] = resp.EndpointURL
+		}
 
 		slog.Debug("[fdo.credentials] Sending enrollment response",
 			"credential_id", resp.CredentialID,
 			"credential_type", resp.CredentialType,
+			"endpoint_url", resp.EndpointURL,
 			"size", len(resp.ResponseData))
 
 		// Send begin
@@ -229,6 +236,9 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 			if cred.Metadata != nil {
 				c.credentialSender.BeginFields.FSIMFields[-3] = cred.Metadata
 			}
+			if cred.EndpointURL != "" {
+				c.credentialSender.BeginFields.FSIMFields[-4] = cred.EndpointURL
+			}
 			if cred.HashAlg != "" {
 				c.credentialSender.BeginFields.HashAlg = cred.HashAlg
 			}
@@ -236,6 +246,7 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 			slog.Debug("[fdo.credentials] Starting credential provisioning",
 				"credential_id", cred.CredentialID,
 				"credential_type", cred.CredentialType,
+				"endpoint_url", cred.EndpointURL,
 				"size", len(cred.CredentialData))
 		}
 
@@ -289,6 +300,9 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 		if req.Metadata != nil {
 			requestMsg[-3] = req.Metadata
 		}
+		if req.EndpointURL != "" {
+			requestMsg[-4] = req.EndpointURL
+		}
 		data, err := cbor.Marshal(requestMsg)
 		if err != nil {
 			return false, false, fmt.Errorf("encode pubkey-request: %w", err)
@@ -298,7 +312,8 @@ func (c *CredentialsOwner) produceInfo(ctx context.Context, producer *serviceinf
 		}
 		slog.Debug("[fdo.credentials] Sent pubkey-request",
 			"credential_id", req.CredentialID,
-			"credential_type", req.CredentialType)
+			"credential_type", req.CredentialType,
+			"endpoint_url", req.EndpointURL)
 
 		c.waitingForPubkey = true
 		return false, false, nil

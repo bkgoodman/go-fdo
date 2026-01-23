@@ -39,8 +39,14 @@ type ChunkSender struct {
 	AutoComputeHash bool
 
 	// Internal state
-	bytesSent int64
-	completed bool
+	bytesSent     int64
+	completed     bool
+	beginSent     bool   // Whether begin message has been sent
+	waitingForAck bool   // Whether we're waiting for *-ack response
+	ackReceived   bool   // Whether ack has been received (only relevant if RequireAck)
+	ackRejected   bool   // Whether the transfer was rejected
+	rejectReason  int    // Reason code if rejected
+	rejectMsg     string // Message if rejected
 }
 
 // NewChunkSender creates a new ChunkSender with default settings.
@@ -62,7 +68,11 @@ func NewChunkSender(payloadName string, data []byte) *ChunkSender {
 }
 
 // SendBegin sends the *-begin message to initiate the transfer.
+// If RequireAck is set, the sender will wait for an *-ack message before sending data.
 func (s *ChunkSender) SendBegin(producer ProducerWriter) error {
+	if s.beginSent {
+		return fmt.Errorf("begin already sent")
+	}
 	if s.bytesSent > 0 {
 		return fmt.Errorf("transfer already started")
 	}
@@ -78,13 +88,31 @@ func (s *ChunkSender) SendBegin(producer ProducerWriter) error {
 		return fmt.Errorf("failed to send begin message: %w", err)
 	}
 
+	s.beginSent = true
+
+	// If RequireAck is set, we need to wait for ack before sending data
+	if s.BeginFields.RequireAck {
+		s.waitingForAck = true
+	}
+
 	return nil
 }
 
 // SendNextChunk sends the next data chunk. Returns true when all chunks have been sent.
+// Returns an error if waiting for ack or if transfer was rejected.
 func (s *ChunkSender) SendNextChunk(producer ProducerWriter) (done bool, err error) {
 	if s.completed {
 		return true, nil
+	}
+
+	// Check if we're waiting for ack
+	if s.waitingForAck {
+		return false, fmt.Errorf("waiting for ack before sending data")
+	}
+
+	// Check if transfer was rejected
+	if s.ackRejected {
+		return false, fmt.Errorf("transfer rejected: code=%d, message=%s", s.rejectReason, s.rejectMsg)
 	}
 
 	if s.bytesSent >= int64(len(s.Data)) {
@@ -175,11 +203,64 @@ func (s *ChunkSender) HandleResult(messageBody io.Reader) (*ResultMessage, error
 func (s *ChunkSender) Reset() {
 	s.bytesSent = 0
 	s.completed = false
+	s.beginSent = false
+	s.waitingForAck = false
+	s.ackReceived = false
+	s.ackRejected = false
+	s.rejectReason = 0
+	s.rejectMsg = ""
 }
 
 // IsCompleted returns true if the transfer has been completed.
 func (s *ChunkSender) IsCompleted() bool {
 	return s.completed
+}
+
+// IsWaitingForAck returns true if sender is waiting for *-ack response.
+func (s *ChunkSender) IsWaitingForAck() bool {
+	return s.waitingForAck
+}
+
+// IsRejected returns true if the transfer was rejected by the receiver.
+func (s *ChunkSender) IsRejected() bool {
+	return s.ackRejected
+}
+
+// GetRejectReason returns the rejection reason code and message.
+func (s *ChunkSender) GetRejectReason() (int, string) {
+	return s.rejectReason, s.rejectMsg
+}
+
+// HandleAck processes a *-ack message from the receiver.
+// Returns nil if accepted, or an error with the rejection details if rejected.
+func (s *ChunkSender) HandleAck(messageBody io.Reader) error {
+	if !s.waitingForAck {
+		return fmt.Errorf("not waiting for ack")
+	}
+
+	data, err := io.ReadAll(messageBody)
+	if err != nil {
+		return fmt.Errorf("failed to read ack message: %w", err)
+	}
+
+	var ack AckMessage
+	if err := ack.UnmarshalCBOR(data); err != nil {
+		return fmt.Errorf("failed to decode ack message: %w", err)
+	}
+
+	s.waitingForAck = false
+	s.ackReceived = true
+
+	if ack.Accepted {
+		return nil
+	}
+
+	// Transfer was rejected
+	s.ackRejected = true
+	s.rejectReason = ack.ReasonCode
+	s.rejectMsg = ack.Message
+
+	return fmt.Errorf("transfer rejected: code=%d, message=%s", ack.ReasonCode, ack.Message)
 }
 
 // GetBytesSent returns the number of bytes sent so far.

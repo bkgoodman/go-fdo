@@ -19,6 +19,7 @@ func TestCredentialsOwnerBasic(t *testing.T) {
 			CredentialData: []byte("test-password"),
 			Metadata:       map[string]any{"username": "testuser"},
 			HashAlg:        "sha256",
+			EndpointURL:    "https://api.example.com/v1",
 		},
 	}
 

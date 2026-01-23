@@ -25,6 +25,7 @@ The `*-begin` value is a CBOR map that uses small unsigned integer keys for comp
 | 0 | `total_size` | `uint` | Total bytes that will be transmitted. If omitted, receivers treat the transfer as open-ended until `*-end` arrives. |
 | 1 | `hash_alg` | `tstr` | Hash algorithm identifier (e.g., `"sha256"`, `"sha384"`). |
 | 2 | `metadata` | `map` | Optional FSIM-specific metadata (format undefined at this layer). |
+| 3 | `require_ack` | `bool` | If true, sender waits for `*-ack` before sending data chunks. See [Acknowledgment Gate](#acknowledgment-gate). |
 
 Reserved Key Policy:
 
@@ -37,7 +38,8 @@ Reserved Key Policy:
 payload-begin = {
   ? 0: uint,        ; total_size
   ? 1: tstr,        ; hash_alg
-  ? 2: any          ; metadata map (FSIM-defined)
+  ? 2: any,         ; metadata map (FSIM-defined)
+  ? 3: bool         ; require_ack
 }
 ```
 
@@ -131,6 +133,92 @@ payload-result = [
 - FSIMs can extend this structure (e.g., add more array items) but SHOULD preserve the leading status/message order for consistency.
 - Interpretation of `status_code`/`message` is FSIM-specific; e.g., "setting not applied" or "certificate rejected" are defined by that FSIM's spec.
 - These `*-result` errors MUST NOT be confused with the generic FDO TO2 ServiceInfoModule error mechanism, which is reserved for protocol-level failures (timeouts, transport errors, etc.). Use TO2 errors only when the entire ServiceInfo exchange is compromised, not when a specific FSIM payload fails validation.
+
+## Acknowledgment Gate
+
+Some transfers benefit from explicit acceptance before data transmission begins. This is particularly useful when:
+
+- The payload is large and the receiver may not support the content type
+- The receiver needs to validate metadata (MIME type, size, permissions) before accepting data
+- Multi-stage onboarding scenarios where payloads intended for one stage should not be sent to another
+
+### Enabling the Gate
+
+When `require_ack` (key 3) is set to `true` in the `*-begin` message, the sender MUST wait for a `*-ack` message before sending any `*-data-<n>` chunks.
+
+### Ack Message Structure
+
+The `*-ack` message uses a CBOR array format:
+
+```cddl
+payload-ack = [
+  accepted: bool,       ; true = proceed with transfer, false = rejected
+  ? reason_code: uint,  ; FSIM-specific rejection reason (when accepted=false)
+  ? message: tstr       ; Human-readable explanation
+]
+```
+
+| Index | Field | Type | Description |
+| ----- | ----- | ---- | ----------- |
+| 0 | `accepted` | `bool` | `true` to proceed, `false` to reject |
+| 1 | `reason_code` | `uint` | Optional FSIM-specific code explaining rejection |
+| 2 | `message` | `tstr` | Optional human-readable explanation |
+
+### Protocol Flow
+
+**With acknowledgment (accepted):**
+
+```
+Sender → Receiver: payload-begin { 3: true, ... }
+Receiver → Sender: payload-ack [true]
+Sender → Receiver: payload-data-0
+Sender → Receiver: payload-data-1
+...
+Sender → Receiver: payload-end
+Receiver → Sender: payload-result
+```
+
+**With acknowledgment (rejected):**
+
+```
+Sender → Receiver: payload-begin { 3: true, -1: "application/x-iso9660-image" }
+Receiver → Sender: payload-ack [false, 1, "Unsupported MIME type"]
+                   ; Transfer cancelled - no data chunks sent
+```
+
+**Without acknowledgment (backward compatible):**
+
+```
+Sender → Receiver: payload-begin { ... }  ; require_ack absent or false
+Sender → Receiver: payload-data-0         ; proceeds immediately
+...
+```
+
+### Requirements
+
+- Senders MUST NOT send `*-data-<n>` chunks until `*-ack` is received when `require_ack` is true
+- Receivers MUST send `*-ack` promptly after receiving a `*-begin` with `require_ack: true`
+- If `*-ack` contains `accepted: false`, the sender MUST NOT send any data chunks
+- The sender MAY attempt a different payload (new `*-begin`) after rejection
+- Reason codes are FSIM-specific; common codes should be documented in each FSIM spec
+
+### Implementation Notes
+
+For library/framework implementations, this feature implies an **accept/reject callback** that applications can use to validate incoming transfers before data arrives:
+
+```
+// Pseudocode for device-side FSIM handler
+type PayloadHandler interface {
+    // Called when begin message arrives with require_ack=true
+    // Return (true, 0, "") to accept, or (false, code, msg) to reject
+    OnPayloadBeginAck(metadata BeginMessage) (accept bool, reasonCode uint, message string)
+    
+    // Called after transfer completes (existing callback)
+    OnPayloadComplete(data []byte) error
+}
+```
+
+This allows application code to inspect MIME types, sizes, or other metadata and reject transfers that don't apply to the current execution context.
 
 ## Integration Notes
 

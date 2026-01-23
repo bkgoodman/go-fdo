@@ -437,6 +437,26 @@ func (h *payloadHandler) HandlePayload(ctx context.Context, mimeType, name strin
 	return 0, fmt.Sprintf("saved to %s", filename), nil
 }
 
+// bmoHandler implements fsim.UnifiedImageHandler to receive boot images.
+// The framework handles all chunking transparently - we just receive the complete image.
+type bmoHandler struct{}
+
+func (h *bmoHandler) HandleImage(ctx context.Context, imageType, name string, size uint64, metadata map[string]any, image []byte) (statusCode int, message string, err error) {
+	fmt.Printf("[fdo.bmo] HandleImage called: name=%s, type=%s, size=%d, received=%d bytes\n", name, imageType, size, len(image))
+
+	// Save image to file
+	filename := name
+	if filename == "" {
+		filename = "received_image.bin"
+	}
+	if err := os.WriteFile(filename, image, 0644); err != nil {
+		fmt.Printf("[fdo.bmo] ERROR: failed to save file: %v\n", err)
+		return 2, fmt.Sprintf("failed to save image: %v", err), err
+	}
+	fmt.Printf("[fdo.bmo] Saved image to: %s (%d bytes)\n", filename, len(image))
+	return 0, fmt.Sprintf("saved to %s", filename), nil
+}
+
 // wifiHandler implements fsim.WiFiHandler to display WiFi network configuration.
 // For this simple test, we just display the networks received from the server.
 type wifiHandler struct {
@@ -580,6 +600,12 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	// Using UnifiedHandler - the framework handles chunking transparently
 	fsims["fdo.payload"] = &fsim.Payload{
 		UnifiedHandler: &payloadHandler{},
+	}
+
+	// Add BMO handler to receive boot images
+	// Using UnifiedHandler - the framework handles chunking transparently
+	fsims["fdo.bmo"] = &fsim.BMO{
+		UnifiedHandler: &bmoHandler{},
 	}
 
 	// Add WiFi handler to display network configuration

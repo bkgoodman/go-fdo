@@ -33,8 +33,42 @@ Common use cases include:
 - Custom JSON/YAML configuration
 - Binary firmware updates
 - Container images or manifests
+- EFI applications for Bare Metal Orchestration (BMO)
+- Bootable ISO images for OS installation
 
 The device interprets the payload based on the MIME type and applies it according to its implementation. The module supports chunked transfer for large payloads and provides detailed error reporting.
+
+## Relationship to fdo.bmo
+
+**`fdo.payload` and `fdo.bmo` are functionally identical.** Both FSIMs use the same chunking strategy, message formats, acknowledgment gate, and result handling. The *only* difference is practical deployment semantics:
+
+| FSIM | Client Type | Payload Purpose |
+|------|-------------|-----------------|
+| `fdo.payload` | OS/Installer/Application | Scripts, configs, packages to execute/apply |
+| `fdo.bmo` | UEFI firmware | Boot images (EFI, ISO) to chainload |
+
+### Why Separate FSIMs?
+
+The separation leverages **client-side FSIM advertisement as implicit phase detection**:
+
+- A client advertising `fdo.payload` has already booted past the firmware stage and is looking for configuration data
+- A client advertising `fdo.bmo` is still in firmware, looking for an OS installer boot image
+
+This simplifies both client and server implementations:
+
+- **OS/application clients** only implement `fdo.payload` - they don't need boot image handling logic
+- **Firmware clients** only implement `fdo.bmo` - they don't need to parse or handle configuration payloads they would never use
+- **Servers** can determine the client's provisioning phase purely from which FSIMs are advertised, without explicit phase negotiation
+
+### Implementation Note
+
+Because `fdo.payload` and `fdo.bmo` are wire-compatible, implementations MAY:
+
+- Share underlying chunking code between both FSIMs
+- Use a single generic payload delivery library with different FSIM name prefixes
+- Theoretically merge them into a single FSIM (though this loses the phase detection benefit)
+
+The MIME type (`mime_type` in `fdo.payload`, `image_type` in `fdo.bmo`) provides the semantic distinction between configuration payloads and boot images.
 
 ## Key-Value Pairs
 
@@ -43,6 +77,7 @@ The device interprets the payload based on the MIME type and applies it accordin
 | --- | --------- | ---- | ----------- |
 | `fdo.payload:active` | Bidirectional | Boolean | Module activation status |
 | `fdo.payload:payload-begin` | Owner → Device | Map | Announces payload transfer (per chunking strategy) |
+| `fdo.payload:payload-ack` | Device → Owner | Array | Accept/reject payload before transfer (when `require_ack` is set) |
 | `fdo.payload:payload-data-<n>` | Owner → Device | Byte string | Payload data chunk `n` (0-based) |
 | `fdo.payload:payload-end` | Owner → Device | Map | Signals completion of payload transfer |
 | `fdo.payload:payload-result` | Device → Owner | Array | Final result with status/message |
@@ -147,7 +182,65 @@ Indicates whether the payload module is active.
 
 **Direction**: Owner → Device
 
-Announces a payload transfer by sending the `payload-begin` map described above (generic chunk fields plus MIME metadata). Devices MUST validate the MIME type (`-1` key) before accepting data. If the MIME type is unsupported, they SHOULD immediately return `fdo.payload:error` with code `1`.
+Announces a payload transfer by sending the `payload-begin` map described above (generic chunk fields plus MIME metadata).
+
+When the owner sets `require_ack` (key 3) to `true`, the device MUST respond with `payload-ack` before any data chunks are sent. This allows the device to validate the MIME type and other metadata before committing to receive a potentially large transfer.
+
+### fdo.payload:payload-ack
+
+**Direction**: Device → Owner
+
+Accepts or rejects a payload transfer when `require_ack` is set in `payload-begin`. Uses the standard acknowledgment gate format from `chunking-strategy.md`:
+
+```cddl
+PayloadAck = [
+    accepted: bool,        ; true = proceed, false = rejected
+    ? reason_code: uint,   ; Rejection reason (see table below)
+    ? message: tstr        ; Human-readable explanation
+]
+```
+
+**Payload-Specific Reason Codes**:
+
+| Code | Name | Description |
+| ---- | ---- | ----------- |
+| 1 | Unsupported MIME Type | Device does not support this payload type |
+| 2 | Size Exceeded | Payload too large for available resources |
+| 3 | Not Applicable | Payload not relevant to this client/phase |
+| 4 | Policy Violation | Security policy prevents acceptance |
+
+**Example - Rejecting Boot Image in OS Context**:
+
+```
+Owner → Device: fdo.payload:payload-begin {
+  0: 524288000,
+  3: true,
+  -1: "application/x-iso9660-image",
+  -2: "installer.iso"
+}
+Device → Owner: fdo.payload:payload-ack [false, 3, "Boot images not applicable to OS context"]
+```
+
+**Example - Accepting Configuration Payload**:
+
+```
+Owner → Device: fdo.payload:payload-begin {
+  0: 4096,
+  3: true,
+  -1: "text/cloud-config"
+}
+Device → Owner: fdo.payload:payload-ack [true]
+Owner → Device: fdo.payload:payload-data-0
+...
+```
+
+**Processing**:
+
+- Owner SHOULD set `require_ack: true` when sending large payloads or payloads that may not apply to all client types
+- Device MUST send `payload-ack` promptly after receiving `payload-begin` with `require_ack: true`
+- Owner MUST NOT send `payload-data-*` chunks until `payload-ack` is received (when `require_ack` is set)
+- If `payload-ack` contains `accepted: false`, owner MUST NOT send any data chunks
+- Owner MAY attempt a different payload (new `payload-begin`) after rejection
 
 ### fdo.payload:payload-data-\<n\>
 
@@ -218,6 +311,21 @@ The following MIME types are **non-normative** examples of formats a device MAY 
 
 - `application/vnd.docker.distribution.manifest.v2+json` - Docker manifest
 - `application/vnd.kubernetes.yaml` - Kubernetes manifest
+
+### Boot Images and EFI Applications
+
+These types support Bare Metal Orchestration (BMO) and OS installation scenarios where firmware or BIOS/UEFI receives bootable images via FDO:
+
+- `application/efi` - UEFI executable application (.efi)
+- `application/vnd.efi` - Vendor-specific EFI application
+- `application/x-iso9660-image` - Bootable ISO image (CD/DVD format)
+- `application/x-raw-disk-image` - Raw disk image (dd format)
+- `application/x-qemu-disk` - QEMU disk image (qcow2)
+- `application/vnd.microsoft.wim` - Windows Imaging Format
+- `application/x-pxe` - PXE boot image (network boot)
+- `application/x-ipxe-script` - iPXE boot script
+
+**BMO Use Case**: A BMO (Bare Metal Orchestration) service can use `fdo.payload` to deliver an EFI application or bootable ISO to device firmware, enabling zero-touch OS installation. The firmware runs FDO, receives the boot image, and chainloads into the OS installer.
 
 ### Custom Types
 

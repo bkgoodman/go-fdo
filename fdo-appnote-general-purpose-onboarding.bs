@@ -1,5 +1,5 @@
 <pre class='metadata'>
-Title: Appnote - FIDO Device Onboard: General-Purpose OS Onboarding and Provisioning
+Title: Appnote - FIDO Device Onboard: Bare Metal Onboarding and General-Purpose Provisioning
 Shortname: appnote-general-purpose-onboarding
 Prepare for TR: false
 Level: 1
@@ -7,7 +7,7 @@ Status: WD
 Group: fido
 URL: https://github.com/fido-alliance/internet-of-things-specs
 Editor: Brad Goodman, Dell Technologies, brad.goodman@dell.com
-Abstract: Framework for implementing general-purpose OS onboarding and provisioning using standardized FIDO Device Onboard ServiceInfo Modules
+Abstract: Complete Bare Metal Onboarding (BMO) solution using FDO, including standardized FSIMs for OS installation, system configuration, and application credential provisioning. Defines a common configuration language enabling any management service to provision any device regardless of OS or vendor.
 Issue Tracking: GitHub https://github.com/fido-alliance/internet-of-things-specs
 Boilerplate: omit conformance, omit feedback-header, omit abstract-header
 Markup Shorthands: css off, markdown on
@@ -59,11 +59,57 @@ spec:webidl; type:interface; text:Promise
 		],
 		"href": "https://github.com/fido-alliance/internet-of-things-specs",
 		"title": "fdo.payload FSIM Specification"
+	},
+	"BMO-FSIM": {
+		"authors": [
+			"Brad Goodman"
+		],
+		"href": "https://github.com/fido-alliance/internet-of-things-specs",
+		"title": "fdo.bmo FSIM Specification"
 	}
 }
 </pre>
 
 # Introduction
+
+## Complete Bare Metal Onboarding (BMO) with FDO
+
+This application note defines a **complete Bare Metal Onboarding solution** using FDO - from powering on an unconfigured device to having a fully provisioned, running system. The solution has two distinct parts:
+
+### Part 1: Booting the Installer (The Simple Part)
+
+Getting an installer to boot on bare metal is straightforward with FDO:
+
+1. Device firmware runs FDO and establishes network connectivity (e.g., Wi-Fi credentials)
+2. Firmware contacts a BMO service and receives an EFI application or bootable ISO image
+3. Firmware chainloads into the installer
+
+That's it. The "boot" problem is solved by delivering a payload to firmware that knows how to execute it.
+
+**The installer image itself determines everything about how installation proceeds.** The image might be:
+
+- A **self-contained installer** that performs complete OS installation without further network access
+- A **stub installer** that fetches assets, packages, or instructions from external sources
+- A **general-purpose installer** that interacts with control planes for intelligent, dynamic installation decisions
+- An **OS-vendor installer** (like those from Red Hat, Microsoft, or Canonical) with vendor-specific automation
+
+This flexibility is fundamental: BMO services from different providers can deliver different types of installers, each with its own approach to installation. The FDO mechanism simply delivers the image; what that image *does* is entirely up to its creator.
+
+### Part 2: Configuring the System (The Hard Part)
+
+Once the installer boots, **what configuration does it apply?** And after the OS installs and reboots, **how does the system get its credentials?** This is where things get complicated - and where this document focuses.
+
+The challenge isn't booting an installer; it's answering questions like:
+- What hostname should this device have?
+- What timezone and locale?
+- What SSH keys should be authorized?
+- What credentials does the application need to connect to its control plane?
+
+**And critically**: How do we specify this configuration in a way that works across *any* OS installer, *any* operating system, and *any* application - all built by different vendors who don't coordinate with each other?
+
+### Why This Document Focuses on Configuration
+
+The boot mechanism is simple and well-understood (deliver a payload, execute it). The configuration challenge is where standardization is desperately needed. This document defines **standardized FSIMs** that provide a common language for configuration data - enabling any management service to configure any device, regardless of OS or vendor.
 
 ## The Real Problem: No Common Language for Configuration
 
@@ -131,51 +177,188 @@ This application note defines a set of **standardized, general-purpose FSIMs** t
   <figcaption>One management plane speaks standard FSIMs to configure any combination of independently-built components</figcaption>
 </figure>
 
-### The Three Provisioning Domains
+### Multi-Stage FDO Onboarding
 
-Most devices require configuration in three fundamental areas, typically built by completely separate vendors:
+A critical insight is that **FDO onboarding is not a single event** - it may occur **multiple times** during a device's lifecycle, with different components running FDO at different stages. Each stage may:
+
+- Contact the **same or different** onboarding services
+- Use **different FSIMs** relevant to that stage
+- Be executed by **different software components** (firmware, installer, OS, application)
+- Be provided by **completely different vendors**
+
+This implies that **FDO credentials must be reusable** across stages and stored in a **common, accessible location** on the device.
+
+#### Example: Server Bare-Metal to Application
+
+Consider a typical enterprise server deployment:
 
 <table class="data">
   <thead>
     <tr>
-      <th>Domain</th>
-      <th>What It Configures</th>
-      <th>Typical Vendor</th>
-      <th>FSIM</th>
+      <th>Stage</th>
+      <th>Component Running FDO</th>
+      <th>Onboarding Service</th>
+      <th>FSIMs Used</th>
+      <th>Examples</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><strong>Network Connectivity</strong></td>
-      <td>Wi-Fi SSID/password, certificates</td>
-      <td>Firmware/chipset vendor</td>
+      <td><strong>1. Network Setup</strong></td>
+      <td>Device firmware</td>
+      <td>Local network service</td>
       <td>fdo.wifi</td>
+      <td>Wi-Fi SSID, password, certificates</td>
     </tr>
     <tr>
-      <td><strong>Operating System</strong></td>
-      <td>Hostname, timezone, SSH keys</td>
-      <td>OS vendor (Red Hat, Microsoft, etc.)</td>
-      <td>fdo.sysconfig</td>
+      <td><strong>2. BMO (Bare Metal Orchestration)</strong></td>
+      <td>BIOS/UEFI</td>
+      <td>BMO service</td>
+      <td>fdo.payload</td>
+      <td>EFI application, bootable ISO image</td>
     </tr>
     <tr>
-      <td><strong>Application</strong></td>
-      <td>Management URLs, OAuth tokens, API keys</td>
-      <td>Application developer/ISV</td>
+      <td><strong>3. OS Installation</strong></td>
+      <td>OS Installer</td>
+      <td>General onboarding</td>
+      <td>fdo.sysconfig, fdo.payload</td>
+      <td>Hostname, timezone, language, kickstart/preseed config</td>
+    </tr>
+    <tr>
+      <td><strong>4. First Boot</strong></td>
+      <td>Installed OS</td>
+      <td>General onboarding</td>
+      <td>fdo.sysconfig, fdo.credentials</td>
+      <td>SSH keys, admin credentials, TLS certificates</td>
+    </tr>
+    <tr>
+      <td><strong>5. Application Setup</strong></td>
+      <td>Application</td>
+      <td>Application service</td>
       <td>fdo.credentials</td>
+      <td>API keys, OAuth tokens, endpoint URLs</td>
     </tr>
   </tbody>
 </table>
 
-For advanced deployments, **fdo.payload** delivers larger artifacts like cloud-init manifests, Ansible playbooks, or configuration files.
+**Key observations**:
+
+- **Five separate FDO processes** - Each stage runs its own TO2 protocol exchange
+- **Different FDO client code** - Each stage is executed by different software: firmware runs one FDO client, the installer runs another, the OS runs another, each application runs its own
+- **Same FDO credentials** - All stages use the device's FDO credentials, which must persist across reboots and OS installation
+- **Same or different services** - All clients may contact the same onboarding service, or each may contact stage-specific services
+- **Overlapping FSIMs** - `fdo.credentials` is used in stages 4 and 5; `fdo.sysconfig` in stages 3 and 4; `fdo.payload` in stages 2 and 3
+
+#### FSIM Advertisement as Phase Detection
+
+A critical mechanism for multi-stage onboarding is **FSIM advertisement** - the FSIMs a client advertises tell the server what stage the device is in and what data it needs:
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Client Type</th>
+      <th>Advertises FSIMs</th>
+      <th>Server Understands</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>UEFI Firmware</strong></td>
+      <td>fdo.wifi, fdo.bmo</td>
+      <td>"This is firmware needing network and/or boot image"</td>
+    </tr>
+    <tr>
+      <td><strong>OS Installer</strong></td>
+      <td>fdo.wifi, fdo.sysconfig, fdo.payload</td>
+      <td>"This is an installer needing system configuration"</td>
+    </tr>
+    <tr>
+      <td><strong>First-Boot OS</strong></td>
+      <td>fdo.sysconfig, fdo.credentials, fdo.payload</td>
+      <td>"This is OS first-boot needing config and credentials"</td>
+    </tr>
+    <tr>
+      <td><strong>Application</strong></td>
+      <td>fdo.credentials</td>
+      <td>"This is an app needing only its credentials"</td>
+    </tr>
+  </tbody>
+</table>
+
+**The server only sends data for FSIMs the client advertises.** This creates implicit phase detection:
+
+- If client advertises only `fdo.wifi` → server provides Wi-Fi setup, client connects and re-runs FDO
+- If client advertises `fdo.bmo` → server sends boot image (EFI/ISO)
+- If client advertises `fdo.sysconfig` but NOT `fdo.bmo` → server sends configuration, not boot images
+- If client advertises only `fdo.credentials` → server sends only credential data
+
+This means a **single onboarding service** can handle all stages - it simply responds to what each client advertises. The service has the device's voucher, knows the desired hostname, Wi-Fi credentials, boot image, and application credentials. Different FDO clients at different stages each get the data relevant to them.
+
+**Example: Single Service, Multiple Phases**
+
+Consider a unified onboarding service that has complete configuration for a device:
+
+1. **UEFI firmware** contacts service, advertises `fdo.wifi` + `fdo.bmo`
+   - Service sends Wi-Fi credentials AND boot image
+   - Firmware connects to Wi-Fi, chainloads into installer
+
+2. **OS installer** contacts same service, advertises `fdo.sysconfig` + `fdo.payload`
+   - Service sends hostname, timezone, kickstart config
+   - Service does NOT send boot image (installer didn't advertise `fdo.bmo`)
+   - Installer applies configuration during installation
+
+3. **First-boot OS** contacts same service, advertises `fdo.sysconfig` + `fdo.credentials`
+   - Service sends any remaining config plus admin credentials
+   - OS completes setup
+
+4. **Application** contacts same service, advertises only `fdo.credentials`
+   - Service sends only application-specific credentials
+   - App ignores (never sees) hostname, boot images, etc.
+
+#### Credential Persistence Requirements
+
+For multi-stage onboarding to work, FDO credentials MUST be:
+
+1. **Stored in persistent, common storage** - Accessible to firmware, installers, OS, and applications
+2. **Survive OS installation** - Credentials must persist even when the disk is reformatted
+3. **Accessible by multiple components** - Different software stacks must be able to locate and use them
+
+Common storage locations include:
+- **TPM NVRAM** - Persistent across OS changes, hardware-protected
+- **UEFI variables** - Accessible to firmware and OS
+- **Dedicated partition** - Preserved during OS installation
+
+### FSIMs Spanning Multiple Stages
+
+While configuration can be conceptually grouped into domains, **FSIMs are not strictly bound to single stages** - they span multiple execution contexts:
+
+<figure>
+  <img src="diagrams/multi-stage-fsim-domains.svg" alt="Multi-Stage FDO Onboarding: FSIMs Across Domains">
+  <figcaption>FSIMs span multiple execution stages. FDO credentials (left) persist across all stages. Tall FSIM blocks show how fdo.payload, fdo.sysconfig, and fdo.credentials each serve multiple stages.</figcaption>
+</figure>
+
+The diagram illustrates key architectural points:
+
+- **fdo.wifi** - Used primarily at firmware level for network establishment
+- **fdo.payload** - Spans BMO and OS installation; delivers boot images, kickstart, cloud-init configs
+- **fdo.sysconfig** - Spans installation and first-boot; delivers hostname, timezone, SSH keys
+- **fdo.credentials** - Spans first-boot and application; delivers admin credentials, API keys, certificates
 
 ### Core FSIM Specifications
 
-This framework consists of four primary FSIM specifications:
+This framework consists of five primary FSIM specifications:
 
 1. **fdo.wifi** [[WiFi-FSIM]]: Network connectivity provisioning
-2. **fdo.sysconfig** [[Sysconfig-FSIM]]: Operating system configuration
-3. **fdo.credentials** [[Credentials-FSIM]]: Authentication credential provisioning
-4. **fdo.payload** [[Payload-FSIM]]: Large file and package delivery
+2. **fdo.bmo** [[BMO-FSIM]]: Bare Metal Onboarding boot image delivery
+3. **fdo.sysconfig** [[Sysconfig-FSIM]]: Operating system configuration
+4. **fdo.credentials** [[Credentials-FSIM]]: Authentication credential provisioning
+5. **fdo.payload** [[Payload-FSIM]]: General payload delivery (scripts, configs, packages)
+
+**Note on fdo.bmo vs fdo.payload**: Both deliver payloads, but their presence signals different client capabilities:
+- **fdo.bmo** - Client is firmware capable of booting EFI/ISO images
+- **fdo.payload** - Client is an OS/installer capable of executing scripts, applying configs, etc.
+
+A server seeing `fdo.bmo` knows to send boot images; seeing only `fdo.payload` (without `fdo.bmo`) knows the client wants configuration payloads, not boot images.
 
 Each FSIM is designed to be:
 - **General-purpose**: Applicable across diverse device types and use cases
@@ -556,7 +739,51 @@ The fdo.wifi FSIM supports multiple security models:
 
 **Owner/Delegate Attestation**: For high-security environments requiring full mutual authentication.
 
-See [[WiFi-FSIM]] for complete security model details.
+### Attestation Modes: Single-Sided vs Full Owner
+
+The fdo.wifi FSIM can operate in two fundamentally different modes depending on the attestation model used:
+
+#### Single-Sided Attestation (WiFi-Only Service)
+
+A service that provides **only** Wi-Fi hints to untrusted devices operates with single-sided attestation. In this mode:
+
+- **Device proves legitimacy** to the owner service
+- **Owner is NOT verified** by the device
+- **Use case**: Bootstrap network discovery for devices without connectivity
+
+When a device detects single-sided attestation, it MUST enter a **single-sided profile**:
+
+1. **FSIM Restrictions**: Only `devmod` and `fdo.wifi` are available - the device MUST NOT advertise or accept other FSIMs (fdo.bmo, fdo.payload, etc.)
+
+2. **Minimal devmod**: Report only `devmod:modules` for FSIM discovery; omit identifying fields (`devmod:device`, `devmod:serial`, `devmod:os`, etc.)
+
+3. **Trust Level Enforcement**: Treat ALL networks as untrusted (`trust_level = 0`), regardless of what the server specifies. The server MAY believe networks are trusted, but the device cannot verify this without owner attestation - so it silently downgrades trust levels. This is not an error.
+
+#### Full Owner Attestation (Trusted Service)
+
+A service performing complete onboarding (Wi-Fi + BMO + payloads) uses full owner/delegate attestation. In this mode:
+
+- **Mutual verification**: Device proves legitimacy AND owner proves ownership
+- **Full trust**: Device can trust configuration from verified owner
+- **Use case**: Complete device provisioning and onboarding
+
+When a device detects full owner attestation, it operates in **full owner profile**:
+
+1. **All FSIMs Available**: Device advertises all supported FSIMs (fdo.wifi, fdo.bmo, fdo.payload, fdo.credentials, etc.)
+
+2. **Complete devmod**: Report all applicable fields including `devmod:device`, `devmod:serial`, `devmod:os`, etc. - enabling owner to customize payloads
+
+3. **Trust Levels Honored**: Device MAY apply trust levels as specified by owner - networks marked `full-access` can be used for general connectivity
+
+#### Why This Matters
+
+This distinction ensures:
+
+- **Privacy protection**: Untrusted services cannot extract device identity information
+- **Security boundaries**: Untrusted services cannot deliver boot images or configuration payloads
+- **Trust escalation**: Devices bootstrap on untrusted networks, then complete onboarding on trusted networks with verified owners
+
+See [[WiFi-FSIM]] for complete attestation mode details, client implementation requirements, and example flows.
 
 ## fdo.sysconfig - Operating System Configuration
 
@@ -625,6 +852,8 @@ Typically implemented by **application developers** and **ISVs** - companies bui
 
 The **fdo.credentials** FSIM [[Credentials-FSIM]] provides a unified framework for provisioning diverse authentication credentials required for devices to access management services and backend systems.
 
+A fundamental aspect of application setup is providing both **credentials** (authentication material) and **endpoint URLs** (where to use those credentials). The fdo.credentials FSIM binds these together in each credential message, enabling complete service configuration in a single operation.
+
 ### Key Capabilities
 
 **Credential Types**:
@@ -643,21 +872,34 @@ The **fdo.credentials** FSIM [[Credentials-FSIM]] provides a unified framework f
 
 **Registered Credentials**: Owner requests device's public key for registration with backend services (two-way flow).
 
+**Credential-Endpoint Binding**:
+
+Each credential message includes an optional `endpoint_url` field that specifies where the credential should be used:
+
+- **Management service credentials** → `https://mgmt.example.com/api/v1`
+- **Telemetry service credentials** → `https://telemetry.example.com/ingest`
+- **Configuration service credentials** → `https://config.example.com/v2`
+- **SSH access credentials** → `ssh://admin.example.com:22`
+
+This enables devices to receive credentials for multiple independent services in a single onboarding session, with each credential explicitly paired to its target endpoint.
+
 **Metadata Support**:
 - Credential scope and permissions
 - Expiration timestamps
-- Service endpoints and URLs
 - Usage context and purpose
 
 ### Typical Use Cases
 
-**Management Service Authentication**: Provision credentials for device to authenticate to management plane.
+**Management Service Authentication**: Provision credentials paired with management endpoint URL. Example: OAuth2 client credentials for `https://mgmt.example.com/api/v1`.
 
-**Cloud Platform Access**: Provide OAuth2 tokens or API keys for cloud service access.
+**Multi-Service Configuration**: Device receives credentials for multiple independent services in one onboarding session:
+- Telemetry service: API key + `https://telemetry.example.com/ingest`
+- Configuration service: TLS certificate + `https://config.example.com/v2`
+- Monitoring service: Bearer token + `https://monitor.example.com/metrics`
 
-**Certificate Enrollment**: Device generates CSR, receives signed TLS certificate for mutual TLS authentication.
+**Certificate Enrollment**: Device generates CSR, receives signed TLS certificate paired with the API endpoint where it will be used for mutual TLS authentication.
 
-**SSH Key Registration**: Device registers SSH public key with management service for remote access.
+**SSH Key Registration**: Device registers SSH public key paired with the SSH endpoint (`ssh://admin.example.com:22`) where it will authenticate for remote access.
 
 ### Security Considerations
 
@@ -1051,6 +1293,401 @@ The FSIM framework is designed to evolve over time:
 **Optional Fields**: New capabilities added as optional fields maintain backward compatibility.
 
 **Deprecation Policy**: Obsolete features are deprecated gracefully with migration guidance.
+
+## Backend Integration: Credential Provider Interface
+
+While this specification defines the wire protocol between devices and onboarding services, enterprise deployments face an additional integration challenge: **how do application backends provide credentials through a shared onboarding service?**
+
+### The Problem
+
+Consider an enterprise deploying devices that run multiple applications - a monitoring agent, a database client, and OS-level management tools. Each needs its own credentials from its own backend system:
+
+- Monitoring agent needs tokens from the monitoring SaaS provider
+- Database client needs certificates from the enterprise PKI
+- OS management needs API keys from the configuration management system
+
+Without a standard integration pattern, enterprises must either:
+
+1. **Build a monolithic onboarding service** that contains logic for every application (doesn't scale, tight coupling)
+2. **Deploy separate FDO services per application** (bifurcation problem - device can only contact one rendezvous endpoint)
+
+### Suggested Pattern: Credential Provider SPI
+
+Enterprises deploying integrated onboarding services SHOULD consider defining a **Credential Provider Interface** - a backend API that application teams implement:
+
+```
+┌─────────┐     FDO      ┌─────────────┐   Provider API   ┌─────────────────┐
+│ Device  │─────────────►│ Onboarding  │─────────────────►│ Monitoring      │
+│         │              │ Service     │                  │ Credential Prov │
+└─────────┘              │             │   Provider API   ├─────────────────┤
+                         │             │─────────────────►│ Database        │
+                         │             │                  │ Credential Prov │
+                         │             │   Provider API   ├─────────────────┤
+                         │             │─────────────────►│ Enterprise PKI  │
+                         └─────────────┘                  └─────────────────┘
+```
+
+The `credential_scope` field in `fdo.credentials` becomes the **routing key** - when a device requests credentials with `scope: "monitoring"`, the onboarding service delegates to the registered monitoring credential provider.
+
+### Benefits
+
+- **Applications don't need FDO expertise** - they implement a simple credential provider API
+- **Single device contact point** - no bifurcation; one onboarding service handles all applications
+- **CSR flows can be proxied** - service forwards CSR to app-specific CA, returns signed cert
+- **Decoupled deployment** - application teams manage their credential providers independently
+
+### Scope
+
+This integration pattern is **outside the wire protocol specification** - it is purely a backend implementation concern. The FSIM wire format already provides the necessary hooks:
+
+- `credential_scope` for routing credentials to the right provider
+- `endpoint_url` for telling the device where credentials are valid
+- Standard chunking for large credentials and CSR/certificate flows
+
+Defining a concrete Credential Provider API is left to implementation guides or future companion specifications.
+
+# Complete End-to-End BMO Example
+
+This section walks through a **complete bare metal onboarding scenario** from power-on to running application. Each stage shows:
+
+- **Who develops** the component
+- **Where it runs** (execution environment)
+- **What FSIMs** the component includes
+- **What data** it receives from each FSIM
+
+## Scenario: Enterprise Server Deployment
+
+An enterprise deploys a server that will run a containerized monitoring application. The server ships from the manufacturer with FDO credentials in TPM. The enterprise uses a unified onboarding service that has complete configuration for all stages.
+
+### Stage 1: UEFI Firmware - Wi-Fi Connectivity
+
+<table class="data">
+  <tr><th>Component</th><td>UEFI FDO Application</td></tr>
+  <tr><th>Developer</th><td><strong>Platform vendor</strong> (e.g., Dell, HP, Lenovo)</td></tr>
+  <tr><th>Execution Environment</th><td>UEFI pre-boot, runs from SPI flash</td></tr>
+  <tr><th>FDO Credentials</th><td>Reads from TPM NVRAM (device identity persists across stages)</td></tr>
+  <tr><th>FSIMs Advertised</th><td><code>fdo.wifi</code></td></tr>
+  <tr><th>Control Plane</th><td><strong>Local network admin</strong> or <strong>off-the-shelf service</strong></td></tr>
+  <tr><th>Control Plane Location</th><td>On-premises (often edge/site-local for Wi-Fi bootstrap)</td></tr>
+  <tr><th>Service Complexity</th><td>Simple - only needs ownership vouchers and Wi-Fi credentials; no device-specific logic required</td></tr>
+</table>
+
+**What happens:**
+
+The server powers on in a location with only Wi-Fi connectivity. The UEFI FDO application runs automatically.
+
+```
+Device → Server: fdo.wifi:active = true
+Server → Device: fdo.wifi:network-add {
+    -1: "CorpWiFi",           ; SSID
+    -2: 3,                    ; WPA3-Enterprise
+    -3: {
+        "eap_method": "EAP-TLS",
+        "identity": "device-12345@corp.example"
+    }
+}
+Server → Device: fdo.wifi:cert-begin { ... }  ; Client certificate for EAP-TLS
+Server → Device: fdo.wifi:cert-data-0 ...
+Server → Device: fdo.wifi:cert-end
+Device → Server: fdo.wifi:cert-result [0]
+```
+
+**Data received:**
+- Wi-Fi SSID and security configuration
+- EAP-TLS client certificate and private key
+- CA certificate for server validation
+
+**Outcome:** Device connects to corporate Wi-Fi. UEFI stores Wi-Fi config for subsequent stages.
+
+---
+
+### Stage 2: UEFI Firmware - Boot Image Delivery
+
+<table class="data">
+  <tr><th>Component</th><td>UEFI FDO Application (same as Stage 1)</td></tr>
+  <tr><th>Developer</th><td><strong>Platform vendor</strong></td></tr>
+  <tr><th>Execution Environment</th><td>UEFI pre-boot, now with network connectivity</td></tr>
+  <tr><th>FDO Credentials</th><td>Same TPM-stored credentials</td></tr>
+  <tr><th>FSIMs Advertised</th><td><code>fdo.bmo</code></td></tr>
+  <tr><th>Control Plane</th><td><strong>IT operations</strong> or <strong>OS vendor service</strong></td></tr>
+  <tr><th>Control Plane Location</th><td>On-premises or cloud (can be same or different from Wi-Fi service)</td></tr>
+  <tr><th>Service Complexity</th><td>Can range from <em>simple image server</em> (just serves pre-built installer images by device class) to <em>intelligent provisioning service</em> (selects images based on hardware, generates custom boot args)</td></tr>
+</table>
+
+**What happens:**
+
+Now connected to the network, firmware runs FDO again to get a boot image.
+
+```
+Device → Server: fdo.bmo:active = true
+Server → Device: fdo.bmo:image-begin {
+    0: 524288000,             ; 500MB
+    3: true,                  ; require_ack
+    -1: "application/efi",    ; EFI application
+    -2: "rhel-installer.efi",
+    -3: { "boot_args": "inst.repo=http://repo.corp.example/rhel9" }
+}
+Device → Server: fdo.bmo:image-ack [true]
+Server → Device: fdo.bmo:image-data-0 ...
+Server → Device: fdo.bmo:image-data-N
+Server → Device: fdo.bmo:image-end { 1: h'abc123...' }
+Device → Server: fdo.bmo:image-result [0, "Chainloading installer"]
+```
+
+**Data received:**
+- RHEL installer EFI application (500MB)
+- Boot arguments pointing to package repository
+- Hash for integrity verification
+
+**Outcome:** Firmware verifies image hash, writes to RAM, chainloads into installer. FDO session ends.
+
+---
+
+### Stage 3: OS Installer - System Configuration
+
+<table class="data">
+  <tr><th>Component</th><td>Anaconda Installer with FDO Plugin</td></tr>
+  <tr><th>Developer</th><td><strong>OS vendor</strong> (Red Hat)</td></tr>
+  <tr><th>Execution Environment</th><td>Linux initramfs, booted from UEFI-delivered image</td></tr>
+  <tr><th>FDO Credentials</th><td>Reads from TPM NVRAM (same device identity)</td></tr>
+  <tr><th>FSIMs Advertised</th><td><code>fdo.wifi</code>, <code>fdo.sysconfig</code>, <code>fdo.payload</code></td></tr>
+  <tr><th>Control Plane</th><td><strong>IT operations</strong> or <strong>enterprise provisioning service</strong></td></tr>
+  <tr><th>Control Plane Location</th><td>On-premises or cloud</td></tr>
+  <tr><th>Service Complexity</th><td>Two patterns: <em>(a) Smart service + dumb installer</em> - service generates complete kickstart with all decisions made; <em>(b) Dumb service + smart installer</em> - service provides basic config, installer has logic. Pattern (a) is more common for enterprise standardization.</td></tr>
+</table>
+
+**What happens:**
+
+The installer boots and runs its own FDO client to get installation configuration.
+
+```
+Device → Server: fdo.wifi:active = true
+Device → Server: fdo.sysconfig:active = true
+Device → Server: fdo.payload:active = true
+
+; Server sees fdo.sysconfig without fdo.bmo - knows this is installer, not firmware
+; Server does NOT send boot image (installer didn't advertise fdo.bmo)
+
+Server → Device: fdo.sysconfig:hostname "web-prod-042"
+Server → Device: fdo.sysconfig:timezone "America/New_York"
+Server → Device: fdo.sysconfig:locale "en_US.UTF-8"
+Server → Device: fdo.sysconfig:ntp-servers ["time.corp.example"]
+
+Server → Device: fdo.payload:payload-begin {
+    0: 8192,
+    3: true,
+    -1: "text/x-kickstart",
+    -2: "server-config.ks"
+}
+Device → Server: fdo.payload:payload-ack [true]
+Server → Device: fdo.payload:payload-data-0 ...
+Server → Device: fdo.payload:payload-end
+Device → Server: fdo.payload:payload-result [0]
+```
+
+**Data received:**
+- Hostname, timezone, locale, NTP configuration
+- Kickstart file with disk partitioning, package selection, post-install scripts
+- **Not received:** Boot images (installer doesn't advertise `fdo.bmo`)
+
+**Outcome:** Installer applies sysconfig values, uses kickstart for automated installation. OS installs to disk. System reboots.
+
+---
+
+### Stage 4: First-Boot OS - System Finalization
+
+<table class="data">
+  <tr><th>Component</th><td>systemd FDO service</td></tr>
+  <tr><th>Developer</th><td><strong>OS vendor</strong> (Red Hat) or <strong>FDO ecosystem</strong></td></tr>
+  <tr><th>Execution Environment</th><td>Linux userspace, installed OS booted from disk</td></tr>
+  <tr><th>FDO Credentials</th><td>Reads from TPM NVRAM (same device identity)</td></tr>
+  <tr><th>FSIMs Advertised</th><td><code>fdo.sysconfig</code>, <code>fdo.credentials</code>, <code>fdo.payload</code></td></tr>
+  <tr><th>Control Plane</th><td><strong>Enterprise provisioning service</strong> or <strong>configuration management integration</strong></td></tr>
+  <tr><th>Control Plane Location</th><td>On-premises or cloud (often integrated with existing CMDB/Satellite/Ansible)</td></tr>
+  <tr><th>Service Complexity</th><td>Moderate to high - needs to provision system-level credentials, integrate with identity management, and potentially orchestrate post-install automation. Often the same service as Stage 3 but with different FSIM responses based on phase detection.</td></tr>
+</table>
+
+**What happens:**
+
+The newly installed OS boots and runs FDO to complete configuration and get admin credentials.
+
+```
+Device → Server: fdo.sysconfig:active = true
+Device → Server: fdo.credentials:active = true
+Device → Server: fdo.payload:active = true
+
+; Server sees fdo.credentials - knows this is post-install, not installer
+
+Server → Device: fdo.sysconfig:ssh-authorized-keys [
+    "ssh-ed25519 AAAA... admin@corp.example",
+    "ssh-ed25519 AAAA... ops-team@corp.example"
+]
+Server → Device: fdo.sysconfig:root-password-hash "$6$rounds=..."
+
+Server → Device: fdo.credentials:credential-begin {
+    0: 256,
+    -1: "admin-api-key",
+    -2: "api_key",
+    -4: "https://mgmt.corp.example/api",
+    -5: "system"                        ; credential_scope
+}
+Server → Device: fdo.credentials:credential-data-0 ...
+Server → Device: fdo.credentials:credential-end
+Device → Server: fdo.credentials:credential-result [0]
+
+Server → Device: fdo.payload:payload-begin {
+    0: 2048,
+    3: true,
+    -1: "application/x-sh",
+    -2: "post-install.sh"
+}
+Device → Server: fdo.payload:payload-ack [true]
+Server → Device: fdo.payload:payload-data-0 ...
+Device → Server: fdo.payload:payload-result [0, "Script executed successfully"]
+```
+
+**Data received:**
+- SSH authorized keys for admin access
+- Hashed root password
+- Management API key with `credential_scope: "system"` (for OS-level tools only)
+- Post-install script (e.g., register with Satellite, install monitoring agent)
+
+**Outcome:** OS is fully configured with admin access. Post-install script installs the monitoring application container.
+
+---
+
+### Stage 5: Application - Application Credentials
+
+<table class="data">
+  <tr><th>Component</th><td>Monitoring Agent with embedded FDO client</td></tr>
+  <tr><th>Developer</th><td><strong>Application vendor</strong> (e.g., Datadog, Prometheus vendor, internal team)</td></tr>
+  <tr><th>Execution Environment</th><td>Container or application process, running on installed OS</td></tr>
+  <tr><th>FDO Credentials</th><td>Reads from TPM NVRAM (same device identity)</td></tr>
+  <tr><th>FSIMs Advertised</th><td><code>fdo.credentials</code> (with scope filter)</td></tr>
+  <tr><th>Control Plane</th><td><strong>Integrated enterprise service</strong> with application-specific credential management</td></tr>
+  <tr><th>Control Plane Location</th><td>Typically cloud or central datacenter (needs integration with secrets management, PKI, application backends)</td></tr>
+  <tr><th>Service Complexity</th><td>High - must integrate with application-specific identity systems, secrets vaults (HashiCorp Vault, AWS Secrets Manager), and potentially issue certificates via enterprise PKI. Cannot be a simple off-the-shelf service; requires enterprise-specific integration.</td></tr>
+</table>
+
+**What happens:**
+
+The monitoring application starts and runs its own FDO client to get its specific credentials.
+
+```
+Device → Server: fdo.credentials:active {
+    0: true,
+    -1: "monitoring"          ; scope_filter - only want monitoring credentials
+}
+
+; Server sees ONLY fdo.credentials with scope "monitoring"
+; Server sends ONLY credentials tagged for monitoring app
+; Server does NOT send: Wi-Fi config, boot images, hostname, system API keys
+
+Server → Device: fdo.credentials:credential-begin {
+    0: 512,
+    -1: "monitoring-api-token",
+    -2: "bearer_token",
+    -4: "https://monitoring.corp.example/ingest",
+    -5: "monitoring"          ; matches the scope filter
+}
+Server → Device: fdo.credentials:credential-data-0 ...
+Server → Device: fdo.credentials:credential-end
+Device → Server: fdo.credentials:credential-result [0]
+
+Server → Device: fdo.credentials:pubkey-request {
+    -1: "monitoring-mtls-cert",
+    -2: "x509_cert",
+    -4: "https://monitoring.corp.example/api"
+}
+Device → Server: fdo.credentials:request-begin { ... }  ; CSR
+...
+Server → Device: fdo.credentials:response-begin { ... } ; Signed cert
+...
+Device → Server: fdo.credentials:response-result [0]
+```
+
+**Data received:**
+- Bearer token for metrics ingestion endpoint
+- X.509 certificate (via CSR flow) for mTLS API access
+- **Not received:** Wi-Fi config, boot images, hostname, SSH keys, system API keys
+
+**Outcome:** Application has its credentials and can communicate with monitoring backend. Device is fully operational.
+
+---
+
+## Summary: Five Stages, Multiple Vendors, Flexible Control Planes
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Stage</th>
+      <th>Component Developer</th>
+      <th>Runs On</th>
+      <th>FSIMs</th>
+      <th>Control Plane</th>
+      <th>Service Complexity</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Platform vendor</td>
+      <td>UEFI (SPI flash)</td>
+      <td>fdo.wifi</td>
+      <td>Local admin / off-the-shelf</td>
+      <td>Simple (vouchers + Wi-Fi creds)</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Platform vendor</td>
+      <td>UEFI (SPI flash)</td>
+      <td>fdo.bmo</td>
+      <td>IT ops / OS vendor service</td>
+      <td>Simple to moderate (vouchers + images)</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>OS vendor</td>
+      <td>Initramfs (RAM)</td>
+      <td>fdo.wifi, fdo.sysconfig, fdo.payload</td>
+      <td>IT ops / enterprise service</td>
+      <td>Moderate (smart service or smart installer)</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>OS vendor / ecosystem</td>
+      <td>Installed OS (disk)</td>
+      <td>fdo.sysconfig, fdo.credentials, fdo.payload</td>
+      <td>Enterprise provisioning</td>
+      <td>Moderate-high (identity integration)</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Application vendor</td>
+      <td>Container/process</td>
+      <td>fdo.credentials (scoped)</td>
+      <td>Integrated enterprise service</td>
+      <td>High (secrets/PKI integration)</td>
+    </tr>
+  </tbody>
+</table>
+
+**Key architectural points:**
+
+1. **Same FDO credentials** - All five stages use the same device identity from TPM
+2. **Flexible control plane deployment** - Each stage can be served by different services, or consolidated into one; the protocol doesn't care
+3. **Increasing service complexity** - Early stages (Wi-Fi, BMO) can use simple off-the-shelf services; later stages (credentials) require enterprise integration
+4. **Four different component vendors** - Platform vendor, OS vendor, ecosystem contributor, application vendor - none coordinate directly
+5. **Implicit phase detection** - Server knows stage by which FSIMs client advertises
+6. **Credential scoping** - Application gets only its credentials, not system credentials or other apps' credentials
+
+**Control plane deployment patterns:**
+
+- **Fully distributed**: Different teams run different stages - network team runs Wi-Fi service, platform team runs BMO, etc.
+- **Consolidated enterprise**: Single integrated service handles all stages with phase detection
+- **Hybrid**: Off-the-shelf services for simple stages (Wi-Fi, BMO), integrated service for credentials
+
+This is the power of standardized FSIMs: independent vendors build components that work together through a common language. The control plane can be as simple or sophisticated as the enterprise requires - from off-the-shelf image servers to fully integrated provisioning platforms.
 
 # Conclusion
 
