@@ -1689,6 +1689,196 @@ Device → Server: fdo.credentials:response-result [0]
 
 This is the power of standardized FSIMs: independent vendors build components that work together through a common language. The control plane can be as simple or sophisticated as the enterprise requires - from off-the-shelf image servers to fully integrated provisioning platforms.
 
+# Interoperability, Requirements and Certification Considerations
+
+## What Does "FDO BMO Support" Mean?
+
+For a device to formally support FDO Bare Metal Onboarding, the **minimal requirements** are:
+
+1. **FDO Protocol Compliance**: Device firmware implements the standard FDO protocol (DI, TO1, TO2) per [[FDO-Specification]]
+2. **BMO FSIM Support**: Device implements the `fdo.bmo` FSIM and can receive, store, and execute a boot image
+
+That's it. A device meeting these two requirements can participate in the FDO BMO ecosystem.
+
+### What BMO FSIM Support Means
+
+Supporting `fdo.bmo` means the device firmware is capable of:
+
+1. **Receiving** a boot image via the chunked transfer protocol
+2. **Storing** the image (in RAM, flash, or other appropriate storage)
+3. **Executing** the image (chainloading, kexec, or platform-appropriate boot mechanism)
+
+The device does NOT need to understand the image contents - it simply receives an opaque blob with an associated MIME type and boots it.
+
+## Boot Image Format Requirements
+
+### Philosophy: Service Intelligence, Device Simplicity
+
+The onboarding service - not the device - is responsible for selecting an appropriate boot image. The service can use information from:
+
+- **Ownership Voucher**: Device GUID, manufacturer info, model identifiers
+- **devmod FSIM**: Architecture, OS type, device capabilities
+- **External databases**: Asset management systems, deployment policies
+
+This means a control plane can serve different image formats to different devices without the devices needing complex format negotiation.
+
+### Platform-Specific Requirements
+
+#### UEFI-Based Systems
+
+UEFI-based BMO implementations **SHALL** be able to boot:
+
+- **EFI Applications** (`application/efi`): Native UEFI executables that can be chainloaded directly
+- **EFI System Partition Images**: Bootable filesystem images containing EFI boot files
+
+UEFI implementations **SHOULD** also support:
+
+- **ISO Images** (`application/x-iso9660-image`): El Torito bootable ISO images via virtual media or RAM disk
+
+#### Non-UEFI Standard Systems
+
+Non-UEFI systems (legacy BIOS, coreboot, etc.) **SHOULD** be able to boot:
+
+- **RAM-bootable images**: Linux kernel + initramfs combinations
+- **PXE-compatible images**: Images suitable for network boot protocols
+
+#### Custom/Embedded Firmware
+
+Custom firmware implementations **MAY** define their own imaging formats but:
+
+- **SHALL** document the supported MIME types
+- **SHALL** receive images via standard `fdo.bmo` FSIM protocol
+- **SHOULD** register MIME types that describe their format requirements
+
+This ensures that even if a control plane has no specific knowledge of a device, it can be given an opaque image and MIME type to pass through to the device for execution.
+
+### MIME Type Conventions
+
+| MIME Type | Description | Platform |
+|-----------|-------------|----------|
+| `application/efi` | UEFI application | UEFI |
+| `application/x-iso9660-image` | Bootable ISO | Universal |
+| `application/x-raw-disk-image` | Raw disk/partition image | Various |
+| `application/x-linux-kernel` | Linux kernel image | Linux-capable |
+| `application/octet-stream` | Opaque binary | Fallback |
+
+Custom formats SHOULD use vendor-prefixed MIME types (e.g., `application/vnd.vendor.custom-boot`).
+
+## FSIM Support Tiers
+
+### Required (Certification Baseline)
+
+| FSIM | Requirement | Rationale |
+|------|-------------|-----------|
+| `devmod` | **REQUIRED** | FDO protocol mandates device capability reporting |
+| `fdo.bmo` | **REQUIRED** | Core BMO functionality - receiving and booting images |
+
+### Recommended (Interoperability)
+
+| FSIM | Requirement | Rationale |
+|------|-------------|-----------|
+| `fdo.sysconfig` | **RECOMMENDED** | Enables generic configuration services to provision the device; critical for OS-agnostic management |
+| `fdo.payload` | **RECOMMENDED** | Enables post-boot payload delivery for installer customization; important for "smart installer" architectures |
+
+Devices implementing these FSIMs gain interoperability with generic configuration services - any management plane can configure any device without vendor-specific logic.
+
+### Optional (Convenience/Enhancement)
+
+| FSIM | Requirement | Rationale |
+|------|-------------|-----------|
+| `fdo.wifi` | **OPTIONAL** | Only needed for devices requiring Wi-Fi connectivity during onboarding |
+| `fdo.credentials` | **OPTIONAL** | Provided as a convenience for service and device implementors; encourages standardized credential provisioning but not mandated |
+
+## Certification Scope
+
+### Device Certification
+
+Device certification focuses on **firmware capabilities**:
+
+1. **Protocol Compliance**: Correct implementation of FDO DI, TO1, TO2 protocols
+2. **BMO Capability**: Firmware can receive and boot images via `fdo.bmo` FSIM
+3. **Documented Formats**: Clear documentation of supported boot image formats and MIME types
+
+Device certification does **NOT** require:
+
+- Support for any specific boot image format (vendor chooses based on platform)
+- Implementation of optional FSIMs (fdo.wifi, fdo.credentials)
+- Support for any specific OS or installer
+
+### Service Certification
+
+Service/control plane certification focuses on **protocol compliance and image delivery**:
+
+1. **Protocol Compliance**: Correct implementation of FDO owner-side protocols
+2. **FSIM Compliance**: Correct implementation of `fdo.bmo` (and other supported FSIMs)
+3. **Image Delivery**: Ability to deliver images based on device capabilities
+
+### Interoperability Testing
+
+Interoperability certification verifies that:
+
+1. **Any certified device** can receive boot images from **any certified service**
+2. **FSIM messages** are correctly formatted per specifications
+3. **Chunked transfers** work correctly for large images
+
+## Summary: Minimal vs. Full-Featured Implementations
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Capability</th>
+      <th>Minimal BMO Device</th>
+      <th>Full-Featured BMO Device</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>FDO Protocol</td>
+      <td>✅ Required</td>
+      <td>✅ Required</td>
+    </tr>
+    <tr>
+      <td>devmod FSIM</td>
+      <td>✅ Required (FDO mandate)</td>
+      <td>✅ Required</td>
+    </tr>
+    <tr>
+      <td>fdo.bmo FSIM</td>
+      <td>✅ Required</td>
+      <td>✅ Required</td>
+    </tr>
+    <tr>
+      <td>fdo.wifi FSIM</td>
+      <td>❌ Not required</td>
+      <td>✅ If Wi-Fi capable</td>
+    </tr>
+    <tr>
+      <td>fdo.sysconfig FSIM</td>
+      <td>❌ Not required</td>
+      <td>✅ Recommended for interop</td>
+    </tr>
+    <tr>
+      <td>fdo.payload FSIM</td>
+      <td>❌ Not required</td>
+      <td>✅ Recommended for smart installers</td>
+    </tr>
+    <tr>
+      <td>fdo.credentials FSIM</td>
+      <td>❌ Not required</td>
+      <td>✅ Encouraged for standardization</td>
+    </tr>
+    <tr>
+      <td>Boot image formats</td>
+      <td>Vendor-defined (documented)</td>
+      <td>Platform-appropriate (EFI, ISO, etc.)</td>
+    </tr>
+  </tbody>
+</table>
+
+A **minimal BMO device** can fully participate in FDO onboarding - it receives and boots images. The onboarding service is responsible for providing appropriate images.
+
+A **full-featured BMO device** maximizes interoperability by supporting additional FSIMs, enabling generic configuration services to provision the device without vendor-specific logic.
+
 # Conclusion
 
 Remember the hostname problem from the introduction? An operator wanted to specify `hostname=mydevice` and have it work - regardless of whether the device runs Red Hat, Windows, or Ubuntu.
