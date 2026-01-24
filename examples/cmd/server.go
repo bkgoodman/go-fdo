@@ -79,10 +79,13 @@ var (
 	payloadMimeType      string
 	bmoFile              string
 	bmoImageType         string
+	bmoFiles             stringList // Multiple BMO files with types (format: type:file)
+	payloadFiles         stringList // Multiple payload files with types (format: type:file)
 	wifiConfigFile       string
 	credentials          stringList
 	pubkeyRequests       stringList
 	initOnly             bool
+	singleSidedWiFi      bool
 )
 
 type stringList []string
@@ -128,10 +131,13 @@ func init() {
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
 	serverFlags.StringVar(&bmoFile, "bmo-file", "", "Use fdo.bmo FSIM to send boot image `file` to device")
 	serverFlags.StringVar(&bmoImageType, "bmo-type", "application/x-iso9660-image", "Image type for BMO file")
+	serverFlags.Var(&bmoFiles, "bmo", "Use fdo.bmo FSIM with `type:file` format with RequireAck (flag may be used multiple times for NAK testing)")
+	serverFlags.Var(&payloadFiles, "payload", "Use fdo.payload FSIM with `type:file` format with RequireAck (flag may be used multiple times for NAK testing)")
 	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
 	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data[:endpoint_url]` format (flag may be used multiple times)")
 	serverFlags.Var(&pubkeyRequests, "request-pubkey", "Request public key from device with `type:id[:endpoint_url]` format (flag may be used multiple times)")
 	serverFlags.BoolVar(&initOnly, "initOnly", false, "Initialize initialization (db/key/voucher creation)")
+	serverFlags.BoolVar(&singleSidedWiFi, "single-sided-wifi", false, "Run as single-sided WiFi setup service (owner not verified by device)")
 }
 
 func server(ctx context.Context) error { //nolint:gocyclo
@@ -716,6 +722,7 @@ func newHandler(ctx context.Context, rvInfo [][]protocol.RvInstruction, state *s
 			OnboardDelegate: onboardDelegate,
 			RvDelegate:      rvDelegate,
 			ReuseCredential: func(context.Context, fdo.Voucher) (bool, error) { return reuseCred, nil },
+			SingleSidedMode: singleSidedWiFi,
 		},
 	}, nil
 }
@@ -902,25 +909,65 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 			}
 		}
 
-		if slices.Contains(modules, "fdo.payload") && payloadFile != "" {
-			data, err := os.ReadFile(payloadFile)
-			if err != nil {
-				log.Fatalf("error reading payload file %q: %v", payloadFile, err)
-			}
+		if slices.Contains(modules, "fdo.payload") && (payloadFile != "" || len(payloadFiles) > 0) {
 			payloadOwner := &fsim.PayloadOwner{}
-			payloadOwner.AddPayload(payloadMimeType, filepath.Base(payloadFile), data, nil)
+
+			// Handle multi-file NAK testing mode (with RequireAck)
+			if len(payloadFiles) > 0 {
+				for _, payloadSpec := range payloadFiles {
+					parts := strings.SplitN(payloadSpec, ":", 2)
+					if len(parts) != 2 {
+						log.Fatalf("invalid payload specification %q: expected type:file format", payloadSpec)
+					}
+					mimeType, filePath := parts[0], parts[1]
+					data, err := os.ReadFile(filePath)
+					if err != nil {
+						log.Fatalf("error reading payload file %q: %v", filePath, err)
+					}
+					payloadOwner.AddPayloadWithAck(mimeType, filepath.Base(filePath), data, nil)
+					log.Printf("Payload: Added payload with RequireAck: type=%s, file=%s", mimeType, filePath)
+				}
+			} else {
+				// Single file mode (no RequireAck)
+				data, err := os.ReadFile(payloadFile)
+				if err != nil {
+					log.Fatalf("error reading payload file %q: %v", payloadFile, err)
+				}
+				payloadOwner.AddPayload(payloadMimeType, filepath.Base(payloadFile), data, nil)
+			}
+
 			if !yield("fdo.payload", payloadOwner) {
 				return
 			}
 		}
 
-		if slices.Contains(modules, "fdo.bmo") && bmoFile != "" {
-			data, err := os.ReadFile(bmoFile)
-			if err != nil {
-				log.Fatalf("error reading BMO file %q: %v", bmoFile, err)
-			}
+		if slices.Contains(modules, "fdo.bmo") && (bmoFile != "" || len(bmoFiles) > 0) {
 			bmoOwner := &fsim.BMOOwner{}
-			bmoOwner.AddImage(bmoImageType, filepath.Base(bmoFile), data, nil)
+
+			// Handle multi-file NAK testing mode (with RequireAck)
+			if len(bmoFiles) > 0 {
+				for _, bmoSpec := range bmoFiles {
+					parts := strings.SplitN(bmoSpec, ":", 2)
+					if len(parts) != 2 {
+						log.Fatalf("invalid BMO specification %q: expected type:file format", bmoSpec)
+					}
+					imageType, filePath := parts[0], parts[1]
+					data, err := os.ReadFile(filePath)
+					if err != nil {
+						log.Fatalf("error reading BMO file %q: %v", filePath, err)
+					}
+					bmoOwner.AddImageWithAck(imageType, filepath.Base(filePath), data, nil)
+					log.Printf("BMO: Added image with RequireAck: type=%s, file=%s", imageType, filePath)
+				}
+			} else {
+				// Single file mode (no RequireAck)
+				data, err := os.ReadFile(bmoFile)
+				if err != nil {
+					log.Fatalf("error reading BMO file %q: %v", bmoFile, err)
+				}
+				bmoOwner.AddImage(bmoImageType, filepath.Base(bmoFile), data, nil)
+			}
+
 			if !yield("fdo.bmo", bmoOwner) {
 				return
 			}

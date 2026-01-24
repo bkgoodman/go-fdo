@@ -44,22 +44,25 @@ import (
 var clientFlags = flag.NewFlagSet("client", flag.ContinueOnError)
 
 var (
-	blobPath       string
-	diURL          string
-	diKey          string
-	diKeyEnc       string
-	kexSuite       string
-	cipherSuite    string
-	tpmPath        string
-	printDevice    bool
-	rvOnly         bool
-	dlDir          string
-	echoCmds       bool
-	uploads        = make(fsVar)
-	wgetDir        string
-	fdoVersion     int
-	registerSSHKey string // SSH public key to register with owner
-	enrollCSR      string // CSR enrollment request (format: id:csrdata)
+	blobPath              string
+	diURL                 string
+	diKey                 string
+	diKeyEnc              string
+	kexSuite              string
+	cipherSuite           string
+	tpmPath               string
+	printDevice           bool
+	rvOnly                bool
+	dlDir                 string
+	echoCmds              bool
+	uploads               = make(fsVar)
+	wgetDir               string
+	fdoVersion            int
+	registerSSHKey        string // SSH public key to register with owner
+	enrollCSR             string // CSR enrollment request (format: id:csrdata)
+	bmoSupportedTypes     string // Comma-separated list of supported BMO MIME types (empty = accept all)
+	payloadSupportedTypes string // Comma-separated list of supported Payload MIME types (empty = accept all)
+	allowSingleSided      bool   // Allow single-sided attestation (WiFi-only mode)
 )
 
 type fsVar map[string]string
@@ -156,6 +159,9 @@ func init() {
 	clientFlags.IntVar(&fdoVersion, "fdo-version", 101, "FDO protocol version (101 or 200)")
 	clientFlags.StringVar(&registerSSHKey, "register-ssh-key", "", "SSH public `key` to register with owner (format: id:keydata)")
 	clientFlags.StringVar(&enrollCSR, "enroll-csr", "", "CSR enrollment `request` (format: id:csrdata)")
+	clientFlags.StringVar(&bmoSupportedTypes, "bmo-supported-types", "", "Comma-separated list of supported BMO MIME `types` (empty = accept all)")
+	clientFlags.StringVar(&payloadSupportedTypes, "payload-supported-types", "", "Comma-separated list of supported Payload MIME `types` (empty = accept all)")
+	clientFlags.BoolVar(&allowSingleSided, "allow-single-sided", false, "Allow single-sided attestation (WiFi-only mode, owner not verified)")
 }
 
 func client(ctx context.Context) error {
@@ -198,6 +204,7 @@ func client(ctx context.Context) error {
 		KeyExchange:          kex.Suite(kexSuite),
 		CipherSuite:          kexCipherSuiteID,
 		AllowCredentialReuse: true,
+		AllowSingleSided:     allowSingleSided,
 	})
 	if rvOnly {
 		return nil
@@ -457,6 +464,46 @@ func (h *bmoHandler) HandleImage(ctx context.Context, imageType, name string, si
 	return 0, fmt.Sprintf("saved to %s", filename), nil
 }
 
+// bmoAckHandler implements fsim.ImageAckHandler to accept/reject images based on MIME type.
+type bmoAckHandler struct {
+	supportedTypes []string
+}
+
+func (h *bmoAckHandler) AcceptImage(imageType, name string, size uint64, metadata map[string]any) (accepted bool, reasonCode int, message string) {
+	fmt.Printf("[fdo.bmo] AcceptImage called: type=%s, name=%s, size=%d\n", imageType, name, size)
+
+	// Check if this image type is in our supported list
+	for _, supported := range h.supportedTypes {
+		if imageType == supported {
+			fmt.Printf("[fdo.bmo] Image type %s is supported, accepting\n", imageType)
+			return true, 0, ""
+		}
+	}
+
+	fmt.Printf("[fdo.bmo] Image type %s is NOT supported (supported: %v), rejecting\n", imageType, h.supportedTypes)
+	return false, 1, fmt.Sprintf("unsupported image type: %s", imageType)
+}
+
+// payloadAckHandler implements fsim.PayloadAckHandler to accept/reject payloads based on MIME type.
+type payloadAckHandler struct {
+	supportedTypes []string
+}
+
+func (h *payloadAckHandler) AcceptPayload(mimeType, name string, size uint64, metadata map[string]any) (accepted bool, reasonCode int, message string) {
+	fmt.Printf("[fdo.payload] AcceptPayload called: type=%s, name=%s, size=%d\n", mimeType, name, size)
+
+	// Check if this MIME type is in our supported list
+	for _, supported := range h.supportedTypes {
+		if mimeType == supported {
+			fmt.Printf("[fdo.payload] MIME type %s is supported, accepting\n", mimeType)
+			return true, 0, ""
+		}
+	}
+
+	fmt.Printf("[fdo.payload] MIME type %s is NOT supported (supported: %v), rejecting\n", mimeType, h.supportedTypes)
+	return false, 1, fmt.Sprintf("unsupported MIME type: %s", mimeType)
+}
+
 // wifiHandler implements fsim.WiFiHandler to display WiFi network configuration.
 // For this simple test, we just display the networks received from the server.
 type wifiHandler struct {
@@ -598,15 +645,29 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 
 	// Add payload handler to receive and save payloads
 	// Using UnifiedHandler - the framework handles chunking transparently
-	fsims["fdo.payload"] = &fsim.Payload{
+	payloadFSIM := &fsim.Payload{
 		UnifiedHandler: &payloadHandler{},
 	}
+	// Add AckHandler if supported types are specified (for NAK testing)
+	if payloadSupportedTypes != "" {
+		types := strings.Split(payloadSupportedTypes, ",")
+		payloadFSIM.AckHandler = &payloadAckHandler{supportedTypes: types}
+		fmt.Printf("[fdo.payload] NAK mode enabled, supported types: %v\n", types)
+	}
+	fsims["fdo.payload"] = payloadFSIM
 
 	// Add BMO handler to receive boot images
 	// Using UnifiedHandler - the framework handles chunking transparently
-	fsims["fdo.bmo"] = &fsim.BMO{
+	bmoFSIM := &fsim.BMO{
 		UnifiedHandler: &bmoHandler{},
 	}
+	// Add AckHandler if supported types are specified (for NAK testing)
+	if bmoSupportedTypes != "" {
+		types := strings.Split(bmoSupportedTypes, ",")
+		bmoFSIM.AckHandler = &bmoAckHandler{supportedTypes: types}
+		fmt.Printf("[fdo.bmo] NAK mode enabled, supported types: %v\n", types)
+	}
+	fsims["fdo.bmo"] = bmoFSIM
 
 	// Add WiFi handler to display network configuration
 	fsims["fdo.wifi"] = &fsim.WiFi{

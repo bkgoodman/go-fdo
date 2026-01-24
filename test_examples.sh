@@ -665,6 +665,53 @@ test_wifi() {
 	log_success "WiFi FSIM test PASSED"
 }
 
+# Test: Single-Sided WiFi Attestation
+# This test verifies single-sided attestation mode where:
+# - Server sends unsigned ProveOVHdr (algorithm=0, empty signature)
+# - Client accepts single-sided mode with -allow-single-sided flag
+# - Only devmod and fdo.wifi FSIMs are advertised/used
+# - Trust levels are downgraded to 0 (onboard-only)
+test_wifi_single_sided() {
+	log_section "TEST: Single-Sided WiFi Attestation"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create WiFi config file with trust_level=1 (full-access)
+	# In single-sided mode, device should downgrade this to 0
+	WIFI_CONFIG_FILE="wifi_single_sided.json"
+	cat > "$WIFI_CONFIG_FILE" << 'EOF'
+{
+  "networks": [
+    {
+      "network_id": "single-sided-test",
+      "ssid": "SingleSidedNetwork",
+      "auth_type": 1,
+      "password": "testpassword123",
+      "trust_level": 1
+    }
+  ]
+}
+EOF
+
+	log_step "Starting server in single-sided WiFi mode"
+	start_server "-single-sided-wifi -wifi-config ../$WIFI_CONFIG_FILE"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	log_step "Running TO1/TO2 with single-sided attestation"
+	# Client must explicitly allow single-sided mode
+	run_cmd timeout 30 go run ./cmd client -allow-single-sided
+	log_success "TO1/TO2 completed in single-sided mode"
+
+	stop_server
+
+	# Cleanup
+	rm -f "$WIFI_CONFIG_FILE"
+	log_success "Single-Sided WiFi Attestation test PASSED"
+}
+
 # Test: BMO FSIM
 # This test demonstrates the fdo.bmo FSIM by sending a boot image and verifying it's received correctly
 test_bmo() {
@@ -767,6 +814,118 @@ test_bmo_efi() {
 	# Cleanup
 	rm -f "$BMO_FILE" "$RECEIVED_FILE"
 	log_success "BMO FSIM (EFI Application) test PASSED"
+}
+
+# Test: BMO FSIM NAK (device rejects first type, accepts second)
+# This test verifies the NAK flow where device rejects unsupported MIME types
+test_bmo_nak() {
+	log_section "TEST: BMO FSIM NAK (Type Rejection/Fallback)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create test files
+	BMO_FILE_1="test_unsupported.bin"
+	BMO_FILE_2="test_supported.efi"
+	RECEIVED_FILE="test_supported.efi"
+	
+	log_step "Creating test boot images"
+	dd if=/dev/urandom of="$BMO_FILE_1" bs=1024 count=5 2>/dev/null
+	dd if=/dev/urandom of="$BMO_FILE_2" bs=1024 count=5 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$BMO_FILE_2" | awk '{print $1}')
+	log_success "Created test images: $BMO_FILE_1 (unsupported), $BMO_FILE_2 (supported)"
+
+	# Server sends two images: first unsupported, then supported (with RequireAck)
+	start_server "-bmo application/x-unsupported-format:../$BMO_FILE_1 -bmo application/efi:../$BMO_FILE_2"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	# Client only supports application/efi, should reject first, accept second
+	log_step "Running TO1/TO2 with NAK for first image, accept second"
+	run_cmd go run ./cmd client -bmo-supported-types "application/efi"
+	log_success "TO1/TO2 completed with NAK/fallback"
+
+	stop_server
+
+	# Verify the supported image was received
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found: $RECEIVED_FILE"
+		rm -f "$BMO_FILE_1" "$BMO_FILE_2"
+		return 1
+	fi
+
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	log_step "Verifying boot image integrity"
+	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
+		log_success "Boot image hashes match! NAK fallback successful"
+		log_success "  Original:  $ORIGINAL_HASH"
+		log_success "  Received:  $RECEIVED_HASH"
+	else
+		log_error "Boot image hashes DO NOT match!"
+		rm -f "$BMO_FILE_1" "$BMO_FILE_2" "$RECEIVED_FILE"
+		return 1
+	fi
+
+	# Cleanup
+	rm -f "$BMO_FILE_1" "$BMO_FILE_2" "$RECEIVED_FILE"
+	log_success "BMO FSIM NAK test PASSED"
+}
+
+# Test: Payload FSIM NAK (device rejects first type, accepts second)
+# This test verifies the NAK flow where device rejects unsupported MIME types
+test_payload_nak() {
+	log_section "TEST: Payload FSIM NAK (Type Rejection/Fallback)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Create test files
+	PAYLOAD_FILE_1="test_unsupported_payload.bin"
+	PAYLOAD_FILE_2="test_supported_payload.json"
+	RECEIVED_FILE="test_supported_payload.json"
+	
+	log_step "Creating test payloads"
+	echo '{"unsupported": true}' > "$PAYLOAD_FILE_1"
+	echo '{"config": "valid", "supported": true}' > "$PAYLOAD_FILE_2"
+	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE_2" | awk '{print $1}')
+	log_success "Created test payloads: $PAYLOAD_FILE_1 (unsupported), $PAYLOAD_FILE_2 (supported)"
+
+	# Server sends two payloads: first unsupported, then supported (with RequireAck)
+	start_server "-payload application/x-unsupported:../$PAYLOAD_FILE_1 -payload application/json:../$PAYLOAD_FILE_2"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL"
+	log_success "DI completed"
+
+	# Client only supports application/json, should reject first, accept second
+	log_step "Running TO1/TO2 with NAK for first payload, accept second"
+	run_cmd go run ./cmd client -payload-supported-types "application/json"
+	log_success "TO1/TO2 completed with NAK/fallback"
+
+	stop_server
+
+	# Verify the supported payload was received
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found: $RECEIVED_FILE"
+		rm -f "$PAYLOAD_FILE_1" "$PAYLOAD_FILE_2"
+		return 1
+	fi
+
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	log_step "Verifying payload integrity"
+	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
+		log_success "Payload hashes match! NAK fallback successful"
+		log_success "  Original:  $ORIGINAL_HASH"
+		log_success "  Received:  $RECEIVED_HASH"
+	else
+		log_error "Payload hashes DO NOT match!"
+		rm -f "$PAYLOAD_FILE_1" "$PAYLOAD_FILE_2" "$RECEIVED_FILE"
+		return 1
+	fi
+
+	# Cleanup
+	rm -f "$PAYLOAD_FILE_1" "$PAYLOAD_FILE_2" "$RECEIVED_FILE"
+	log_success "Payload FSIM NAK test PASSED"
 }
 
 # Test: Credentials FSIM
@@ -906,8 +1065,11 @@ test_all() {
 	test_sysconfig || failed=1
 	test_payload || failed=1
 	test_wifi || failed=1
+	test_wifi_single_sided || failed=1
 	test_bmo || failed=1
 	test_bmo_efi || failed=1
+	test_bmo_nak || failed=1
+	test_payload_nak || failed=1
 	test_credentials || failed=1
 	test_bad_delegate || failed=1
 
@@ -986,11 +1148,20 @@ main() {
 	wifi)
 		test_wifi
 		;;
+	wifi-single-sided)
+		test_wifi_single_sided
+		;;
 	bmo)
 		test_bmo
 		;;
 	bmo-efi)
 		test_bmo_efi
+		;;
+	bmo-nak)
+		test_bmo_nak
+		;;
+	payload-nak)
+		test_payload_nak
 		;;
 	credentials)
 		test_credentials
@@ -1000,7 +1171,7 @@ main() {
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, wifi, bmo, bmo-efi, credentials, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, payload, payload-nak, wifi, wifi-single-sided, bmo, bmo-efi, bmo-nak, credentials, all"
 		exit 1
 		;;
 	esac

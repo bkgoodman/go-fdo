@@ -60,6 +60,11 @@ type WiFi struct {
 	// Active indicates if the module is active
 	Active bool
 
+	// SingleSidedMode, when true, forces all received network trust levels
+	// to be downgraded to 0 (onboard-only). This is used when the device
+	// is in single-sided attestation mode where the owner has not been verified.
+	SingleSidedMode bool
+
 	// Internal state for chunked transfers
 	csrSender    *chunking.ChunkSender
 	csrReceiver  *chunking.ChunkReceiver
@@ -269,10 +274,20 @@ func (w *WiFi) handleNetworkAdd(messageBody io.Reader, respond func(string) io.W
 		network.EAPPassword = v
 	}
 
+	// In single-sided mode, always downgrade trust level to 0 (onboard-only)
+	// This enforces security: untrusted owner cannot grant full network access
+	if w.SingleSidedMode && network.TrustLevel > 0 {
+		slog.Info("fdo.wifi single-sided mode: downgrading trust_level",
+			"from", network.TrustLevel, "to", 0,
+			"network_id", network.NetworkID, "ssid", network.SSID)
+		network.TrustLevel = 0
+	}
+
 	slog.Debug("fdo.wifi network-add",
 		"network_id", network.NetworkID,
 		"ssid", network.SSID,
-		"auth_type", network.AuthType)
+		"auth_type", network.AuthType,
+		"trust_level", network.TrustLevel)
 
 	// Call application handler
 	if err := w.Handler.AddNetwork(network); err != nil {

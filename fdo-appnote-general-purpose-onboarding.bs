@@ -86,6 +86,30 @@ Getting an installer to boot on bare metal is straightforward with FDO:
 
 That's it. The "boot" problem is solved by delivering a payload to firmware that knows how to execute it.
 
+#### UEFI Implementation Recommendations
+
+In a UEFI environment, FDO-BMO would ideally be implemented as a **UEFI boot option** with appropriate priority in the boot order:
+
+**Boot Priority Design:**
+- Normal disk-based boot (installed OS) has **higher priority**
+- FDO-BMO boot has **lower priority** as a fallback mechanism
+- If the system can boot normally from disk, it does so; FDO-BMO is skipped
+- If disk boot is unavailable or fails, system falls back to FDO-BMO
+
+This design enables several important scenarios:
+
+1. **First-time boot on new hardware** - No bootable partition exists, so FDO-BMO runs automatically, allowing bare metal provisioning without manual intervention.
+
+2. **Atomic installation completion** - A well-designed installer SHOULD mark the boot partition as "bootable" only as its **final operation**. This makes installation atomic: if interrupted at any point before completion, FDO-BMO will restart on next boot. Only when installation completes in its entirety does normal boot take precedence.
+
+3. **Recovery from boot failures** - A well-designed system SHOULD implement watchdog mechanisms that detect repeated boot failures. After a configurable number of failed boot attempts, FDO-BMO boot SHOULD be invoked, enabling automatic recovery or re-provisioning.
+
+4. **Corrupted system recovery** - If a previously-working system becomes unbootable (disk corruption, failed update, etc.), the watchdog mechanism allows FDO-BMO to intervene.
+
+**Implementation Notes:**
+
+A sophisticated installer MAY be designed to detect and handle "partial" installations - electing to repair, re-install, or prompt for guidance. This COULD be done in conjunction with user input or even instructions from a control plane service. However, all such handling, implementation decisions, and recovery logic are left entirely to the individual implementation.
+
 **The installer image itself determines everything about how installation proceeds.** The image might be:
 
 - A **self-contained installer** that performs complete OS installation without further network access
