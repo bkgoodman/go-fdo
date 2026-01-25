@@ -72,16 +72,19 @@ The `credential_scope` field solves this by allowing:
 **Example Scenario:**
 
 A device runs three applications, each with its own FDO client:
+
 - **Monitoring agent** - needs credentials for `monitoring.example.com`
 - **Config manager** - needs credentials for `config.example.com`  
 - **Custom app** - needs credentials for `app.vendor.com`
 
 The onboarding service has credentials for all three, tagged with scopes:
+
 - `credential_scope: "monitoring"` → monitoring API key
 - `credential_scope: "config"` → config service certificate
 - `credential_scope: "vendor-app"` → vendor app OAuth token
 
 When each application's FDO client connects:
+
 - Monitoring agent advertises `fdo.credentials` with scope filter `"monitoring"` → receives only monitoring credentials
 - Config manager advertises scope filter `"config"` → receives only config credentials
 - Custom app advertises scope filter `"vendor-app"` → receives only its credentials
