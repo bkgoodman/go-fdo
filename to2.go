@@ -196,6 +196,8 @@ func (c *TO2Config) GetAttestationMode() AttestationMode {
 //
 // If the Credential Reuse protocol is allowed and occurs, then the returned
 // device credential will be nil.
+//
+//nolint:gocyclo
 func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c TO2Config) (*DeviceCredential, error) {
 	ctx = contextWithErrMsg(ctx)
 
