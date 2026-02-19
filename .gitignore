@@ -37,3 +37,5 @@ testvoucher*.ov
 
 # Retain spec for reference
 FIDO-IoT-spec.bs
+fdo.bmo.md
+fdo.sysconfig.md
