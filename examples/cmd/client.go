@@ -35,6 +35,7 @@ import (
 	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/custom"
 	"github.com/fido-device-onboard/go-fdo/fsim"
+	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 	"github.com/fido-device-onboard/go-fdo/kex"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
@@ -581,6 +582,17 @@ type defaultURLFetcher struct {
 }
 
 func (f *defaultURLFetcher) Fetch(url string, tlsCA []byte) ([]byte, error) {
+	data, _, err := f.FetchValidated(url, tlsCA)
+	return data, err
+}
+
+var _ chunking.ValidatingFetcher = (*defaultURLFetcher)(nil)
+
+// FetchValidated implements chunking.ValidatingFetcher. The HTTP client never
+// skips certificate verification, so a response received over TLS means the
+// server certificate chained to tlsCA (or the system store) and matched the
+// host: that fetch counts as TLS evidence. Plain HTTP never does.
+func (f *defaultURLFetcher) FetchValidated(url string, tlsCA []byte) ([]byte, bool, error) {
 	fmt.Printf("[fdo.bmo] Fetching URL: %s\n", url)
 
 	// Create HTTP client with optional custom CA
@@ -592,7 +604,7 @@ func (f *defaultURLFetcher) Fetch(url string, tlsCA []byte) ([]byte, error) {
 		// Parse the CA certificate
 		cert, err := x509.ParseCertificate(tlsCA)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse CA certificate: %w", err)
+			return nil, false, fmt.Errorf("failed to parse CA certificate: %w", err)
 		}
 
 		// Create a certificate pool with the custom CA
@@ -613,22 +625,23 @@ func (f *defaultURLFetcher) Fetch(url string, tlsCA []byte) ([]byte, error) {
 	// Make the request
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, false, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
+		return nil, false, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
 	}
 
 	// Read the response body
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, false, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	fmt.Printf("[fdo.bmo] Downloaded %d bytes from URL\n", len(data))
-	return data, nil
+	validated := resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0
+	fmt.Printf("[fdo.bmo] Downloaded %d bytes from URL (tls_validated=%v)\n", len(data), validated)
+	return data, validated, nil
 }
 
 // payloadAckHandler implements fsim.PayloadAckHandler to accept/reject payloads based on MIME type.
@@ -795,6 +808,7 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	payloadDeviceHandler := &payloadHandler{}
 	payloadFSIM := &fsim.Payload{
 		UnifiedHandler: payloadDeviceHandler,
+		URLFetcher:     &defaultURLFetcher{timeout: 30 * time.Second},
 	}
 	if payloadSendLog {
 		payloadFSIM.LogProvider = payloadDeviceHandler

@@ -226,7 +226,7 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 	//
 	// Results: Replacement ownership voucher, nonces to be retransmitted in
 	// Done/Done2 messages
-	proveDeviceNonce, ownerPublicKey, originalOwnerKey, originalOVH, delegateHasProvision, sess, err := verifyOwner(ctx, transport, to1d, &c)
+	proveDeviceNonce, ownerPublicKey, originalOwnerKey, originalOVH, peerAuthority, sess, err := verifyOwner(ctx, transport, to1d, &c)
 	if err != nil {
 		errorMsg(ctx, transport, err)
 		EmitProtocolError(ctx, &c.Cred.GUID, 0, protocol.InternalServerErrCode, err)
@@ -287,9 +287,11 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 	// Expose the TO2-proven Owner public key to FSIMs (e.g. fdo.bmo for
 	// authenticated-provisioning verification) via ctx.
 	ctx = WithOwnerPublicKey(ctx, ownerPublicKey)
-	// If the TO2 peer is a delegate with PERM.7, expose that so FSIMs
-	// (e.g. fdo.bmo) can accept unsigned provisioning (Model 2).
-	ctx = WithDelegateProvisionAuthority(ctx, delegateHasProvision)
+	// Expose who the TO2 peer proved itself to be (Owner, or Delegate with
+	// or without PERM.7) so FSIMs can decide on channel authority.
+	ctx = WithPeerAuthority(ctx, peerAuthority)
+	// Expose the voucher GUID for evaluating "guid" scope constraints.
+	ctx = WithDeviceGUID(ctx, c.Cred.GUID)
 
 	go c.Devmod.WriteFiltered(ctx, c.DeviceModules, sendMTU, serviceInfoWriter, moduleFilter)
 
@@ -385,13 +387,13 @@ func stopDevicePlugins(modules *deviceModuleMap) {
 // all ownership voucher entries, which are retrieved iteratively with
 // subsequence requests.
 //
-// The returned delegateHasProvision is true when the TO2 peer authenticated
-// via a delegate chain carrying OIDPermitProvision (PERM.7). This tells the
-// BMO device module that unsigned provisioning is acceptable (Model 2).
-func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c *TO2Config) (protocol.Nonce, crypto.PublicKey, crypto.PublicKey, *VoucherHeader, bool, kex.Session, error) {
+// The returned PeerAuthority records how ProveOVHdr was verified: directly
+// against the Owner key, or via a delegate chain with or without
+// OIDPermitProvision (PERM.7). FSIMs use it to decide on channel authority.
+func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c *TO2Config) (protocol.Nonce, crypto.PublicKey, crypto.PublicKey, *VoucherHeader, PeerAuthority, kex.Session, error) {
 	proveDeviceNonce, info, sess, err := sendHelloDevice(ctx, transport, c)
 	if err != nil {
-		return protocol.Nonce{}, nil, nil, nil, false, nil, err
+		return protocol.Nonce{}, nil, nil, nil, PeerUnknown, nil, err
 	}
 
 	// Store the attestation mode detected from ProveOVHdr
@@ -399,32 +401,23 @@ func verifyOwner(ctx context.Context, transport Transport, to1d *cose.Sign1[prot
 
 	if !c.KeyExchange.Valid(c.Key.Public(), info.PublicKeyToValidate) {
 		sess.Destroy()
-		return protocol.Nonce{}, nil, nil, nil, false, nil, fmt.Errorf(
+		return protocol.Nonce{}, nil, nil, nil, PeerUnknown, nil, fmt.Errorf(
 			"key exchange %s is invalid for the device and owner attestation types",
 			c.KeyExchange,
 		)
 	}
 	if !kex.Available(c.KeyExchange, c.CipherSuite) {
 		sess.Destroy()
-		return protocol.Nonce{}, nil, nil, nil, false, nil, fmt.Errorf("unsupported key exchange/cipher suite")
+		return protocol.Nonce{}, nil, nil, nil, PeerUnknown, nil, fmt.Errorf("unsupported key exchange/cipher suite")
 	}
 	if err := verifyVoucher(ctx, transport, to1d, info, c); err != nil {
 		sess.Destroy()
-		return protocol.Nonce{}, nil, nil, nil, false, nil, err
+		return protocol.Nonce{}, nil, nil, nil, PeerUnknown, nil, err
 	}
 
-	// After successful verification, check whether the delegate has
-	// provisioning authority (PERM.7). This is only relevant when a
-	// delegate chain was presented.
-	delegateHasProvision := false
-	if info.DelegateChain != nil {
-		chain, err := info.DelegateChain.Chain()
-		if err == nil {
-			delegateHasProvision = DelegateCanProvision(chain)
-		}
-	}
-
-	return proveDeviceNonce, info.PublicKeyToValidate, info.OriginalOwnerKey, &info.OVH, delegateHasProvision, sess, nil
+	// Record who the peer proved itself to be. Only meaningful after
+	// verifyVoucher has succeeded.
+	return proveDeviceNonce, info.PublicKeyToValidate, info.OriginalOwnerKey, &info.OVH, peerAuthorityFromDelegateChain(info.DelegateChain), sess, nil
 }
 
 // Verify Voucher - using Transport to get entries

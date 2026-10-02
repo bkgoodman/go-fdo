@@ -93,8 +93,11 @@ var (
 	bmoProvisioningSigner fsim.ProvisioningSigner // Populated at serve-time when bmoSign or bmoDelegateProvision is set
 	payloadFiles          stringList              // Multiple payload files with types (format: type:file)
 	payloadDuration       uint64                  // Advisory estimated transfer+apply duration for payloads (seconds, 0=omit)
+	payloadSign           bool                    // Sign fdo.payload payload-begin with the EC-P256 owner key
+	payloadSigner         fsim.ArtifactSigner     // Populated at serve-time when payloadSign is set
 	payloadLogDir         string                  // Directory to store device diagnostic logs (fdo.payload payload-log-*)
 	bmoDuration           uint64                  // Advisory estimated transfer+apply duration for BMO images (seconds, 0=omit)
+	bmoMetaHash           string                  // Hex SHA-256 of the final image pinned in meta-URL image-begin (key 8)
 	wifiConfigFile        string
 	credentials           stringList
 	pubkeyRequests        stringList
@@ -160,8 +163,10 @@ func init() {
 	serverFlags.StringVar(&bmoScopeNotAfter, "bmo-scope-not-after", "", "fdo.bmo.scope not_after timestamp (RFC 3339, e.g. 2027-01-01T00:00:00Z)")
 	serverFlags.Uint64Var(&bmoScopeGeneration, "bmo-scope-generation", 0, "fdo.bmo.scope generation counter (monotonic supersession; 0=omit)")
 	serverFlags.Var(&payloadFiles, "payload", "Use fdo.payload FSIM with `type:file` format with RequireAck (flag may be used multiple times for NAK testing)")
+	serverFlags.BoolVar(&payloadSign, "payload-sign", false, "Sign fdo.payload payload-begin with the EC-P256 owner key (artifact authority)")
 	serverFlags.Uint64Var(&payloadDuration, "payload-duration", 0, "Advisory estimated transfer+apply time in `seconds` for fdo.payload (sent in payload-begin; 0=omit)")
 	serverFlags.StringVar(&payloadLogDir, "payload-log-dir", "", "Accept fdo.payload device diagnostic logs and write them to `dir` (unset = decline logs)")
+	serverFlags.StringVar(&bmoMetaHash, "bmo-meta-hash", "", "Hex SHA-256 of the final image, pinned in every -bmo-meta-url image-begin (key 8). Required for an unsigned meta-payload over plain HTTP, which the device otherwise refuses")
 	serverFlags.Uint64Var(&bmoDuration, "bmo-duration", 0, "Advisory estimated transfer+apply time in `seconds` for fdo.bmo (sent in image-begin; 0=omit)")
 	serverFlags.StringVar(&wifiConfigFile, "wifi-config", "", "Use fdo.wifi FSIM with network config from JSON `file`")
 	serverFlags.Var(&credentials, "credential", "Use fdo.credentials FSIM with `type:id:data[:endpoint_url]` format (flag may be used multiple times)")
@@ -376,6 +381,19 @@ func server(ctx context.Context) error { //nolint:gocyclo
 		return resell(ctx, state)
 	}
 
+	// Payload signer (-payload-sign): same timing constraints as below.
+	if payloadSign {
+		ownerKey, _, err := state.OwnerKey(ctx, protocol.Secp256r1KeyType, 0)
+		if err != nil {
+			return fmt.Errorf("payload signing: loading EC-P256 owner key: %w", err)
+		}
+		ecKey, ok := ownerKey.(*ecdsa.PrivateKey)
+		if !ok {
+			return fmt.Errorf("payload signing: owner key is %T, expected *ecdsa.PrivateKey", ownerKey)
+		}
+		payloadSigner = &fsim.OwnerSigner{Key: ecKey}
+		log.Printf("Payload: payload-begin will be signed with EC-P256 owner key")
+	}
 	// Initialize BMO provisioning signer if requested. Must happen after
 	// generateKeys (so state.OwnerKey is populated) and before serveHTTP
 	// (so ownerModules can reference bmoProvisioningSigner).
@@ -1233,7 +1251,7 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 		}
 
 		if slices.Contains(modules, "fdo.payload") && (payloadFile != "" || len(payloadFiles) > 0) {
-			payloadOwner := &fsim.PayloadOwner{}
+			payloadOwner := &fsim.PayloadOwner{Signer: payloadSigner}
 			if payloadLogDir != "" {
 				payloadOwner.LogHandler = &payloadLogCollector{dir: payloadLogDir}
 			}
@@ -1473,6 +1491,13 @@ func ownerModules(modules []string) iter.Seq2[string, serviceinfo.OwnerModule] {
 				}
 
 				bmoOwner.AddImageMetaURL(metaURL, metaSigner, tlsCA)
+				if bmoMetaHash != "" {
+					h, err := hex.DecodeString(bmoMetaHash)
+					if err != nil {
+						log.Fatalf("invalid -bmo-meta-hash %q: %v", bmoMetaHash, err)
+					}
+					bmoOwner.SetLastExpectedHash("sha256", h)
+				}
 				if bmoDuration > 0 {
 					bmoOwner.SetLastEstimatedDuration(bmoDuration)
 				}

@@ -71,15 +71,9 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 		return nil, err
 	}
 
-	// After successful verification, check whether the delegate has
-	// provisioning authority (PERM.7) for Model 2 channel authority.
-	delegateHasProvision := false
-	if ownerInfo.DelegateChain != nil {
-		chain, chainErr := ownerInfo.DelegateChain.Chain()
-		if chainErr == nil {
-			delegateHasProvision = DelegateCanProvision(chain)
-		}
-	}
+	// Record who the peer proved itself to be (Owner, or Delegate with or
+	// without PERM.7). Only meaningful after verifyOwner20 has succeeded.
+	peerAuthority := peerAuthorityFromDelegateChain(ownerInfo.DelegateChain)
 
 	// Step 4: Service info exchange
 	// Send DeviceSvcInfoRdy20 and receive SetupDevice20 with GUID/RvInfo
@@ -148,9 +142,11 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 		ownerKeyForFSIM = ownerInfo.OwnerPublicKey
 	}
 	ctx = WithOwnerPublicKey(ctx, ownerKeyForFSIM)
-	// If the TO2 peer is a delegate with PERM.7, expose that so FSIMs
-	// (e.g. fdo.bmo) can accept unsigned provisioning (Model 2).
-	ctx = WithDelegateProvisionAuthority(ctx, delegateHasProvision)
+	// Expose who the TO2 peer proved itself to be so FSIMs can decide on
+	// channel authority.
+	ctx = WithPeerAuthority(ctx, peerAuthority)
+	// Expose the voucher GUID for evaluating "guid" scope constraints.
+	ctx = WithDeviceGUID(ctx, c.Cred.GUID)
 
 	go c.Devmod.Write(ctx, c.DeviceModules, sendMTU, serviceInfoWriter)
 

@@ -97,11 +97,11 @@ type ImageToSend struct {
 	RequireAck bool           // Optional: Request ack before sending data (default: false)
 
 	// URL delivery mode fields (fdo.bmo.md extension)
-	DeliveryMode uint   // 0=inline (default), 1=url, 2=meta-url (field -6)
-	URL          string // URL to fetch image/meta (field -7)
-	TLSCA        []byte // Optional: Single DER-encoded CA cert (field -8)
-	ExpectedHash []byte // Optional: Expected hash of final image (field -9)
-	MetaSigner   []byte // Optional: COSE_Key for meta-payload signature (field -10)
+	DeliveryMode uint   // 0=inline (default), 1=url, 2=meta-url (generic key 5)
+	URL          string // URL to fetch image/meta (generic key 6)
+	TLSCA        []byte // Optional: Single DER-encoded CA cert (generic key 7)
+	ExpectedHash []byte // Expected hash of final image (generic key 8); SHOULD always be set
+	MetaSigner   []byte // Optional: COSE_Key of a third-party meta-payload publisher (generic key 9)
 
 	EstimatedDuration uint64 // Optional: Advisory transfer+apply time in seconds (0 = unset)
 
@@ -222,6 +222,17 @@ func (b *BMOOwner) SetLastEstimatedDuration(seconds uint64) {
 	}
 }
 
+// SetLastExpectedHash pins the final image hash (generic key 8) on the most
+// recently added image. For meta-URL delivery this lets an unsigned
+// meta-payload be used as a pointer: the device authenticates the image by
+// this hash rather than by anything the meta-payload says.
+func (b *BMOOwner) SetLastExpectedHash(hashAlg string, hash []byte) {
+	if len(b.images) > 0 {
+		b.images[len(b.images)-1].ExpectedHash = hash
+		b.images[len(b.images)-1].HashAlg = hashAlg
+	}
+}
+
 // AddBiosParam adds a BIOS parameter to be set on the device.
 func (b *BMOOwner) AddBiosParam(name, value string) {
 	b.biosParams = append(b.biosParams, BiosParam{
@@ -304,32 +315,25 @@ func (b *BMOOwner) produceInfo(ctx context.Context, producer *serviceinfo.Produc
 			b.currentSender.BeginFields.FSIMFields[-5] = image.Description
 		}
 
-		// URL delivery mode fields (fdo.bmo.md extension)
-		if image.DeliveryMode != DeliveryModeInline {
-			b.currentSender.BeginFields.FSIMFields[-6] = image.DeliveryMode
-		}
-		if image.URL != "" {
-			b.currentSender.BeginFields.FSIMFields[-7] = image.URL
-		}
-		if len(image.TLSCA) > 0 {
-			b.currentSender.BeginFields.FSIMFields[-8] = image.TLSCA
-		}
-		if len(image.ExpectedHash) > 0 {
-			b.currentSender.BeginFields.FSIMFields[-9] = image.ExpectedHash
-		} else if b.ProvisioningSigner != nil && len(image.Data) > 0 {
-			// When signing is enabled and inline data is present, always
-			// include the image hash (key -9). Without it the signed
-			// image-begin authenticates the metadata but not the bytes
-			// that follow — the device has no way to verify the image
-			// matches what the signer intended.
+		// Delivery fields: generic keys 5-9 (chunking-strategy.md). The
+		// legacy fdo.bmo aliases -6..-10 are never emitted.
+		bf := &b.currentSender.BeginFields
+		bf.DeliveryMode = image.DeliveryMode
+		bf.URL = image.URL
+		bf.TLSCA = image.TLSCA
+		bf.MetaSigner = image.MetaSigner
+		bf.ExpectedHash = image.ExpectedHash
+		if len(bf.ExpectedHash) == 0 && len(image.Data) > 0 && (bf.HashAlg == "" || bf.HashAlg == "sha256") {
+			// Always bind inline bytes to image-begin (key 8). Under artifact
+			// authority it is mandatory — image-end is unsigned, so without it
+			// the signature covers the metadata but not the image — and the
+			// spec recommends it in every mode.
 			h := sha256.Sum256(image.Data)
-			b.currentSender.BeginFields.FSIMFields[-9] = h[:]
-			slog.Info("fdo.bmo: auto-computed image hash for signed inline delivery",
+			bf.ExpectedHash = h[:]
+			bf.HashAlg = "sha256"
+			slog.Info("fdo.bmo: auto-computed image hash for inline delivery",
 				"hash_alg", "sha256",
 				"hash", fmt.Sprintf("%x", h[:8]))
-		}
-		if len(image.MetaSigner) > 0 {
-			b.currentSender.BeginFields.FSIMFields[-10] = image.MetaSigner
 		}
 
 		// Legacy metadata support

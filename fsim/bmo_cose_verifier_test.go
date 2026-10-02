@@ -4,7 +4,6 @@
 package fsim
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -287,66 +286,4 @@ func TestCoseSign1Verifier_CurveMismatch(t *testing.T) {
 		t.Fatal("expected verification to fail with curve mismatch, but it succeeded")
 	}
 	t.Logf("correctly rejected curve mismatch: %v", err)
-}
-
-// TestCoseSign1Verifier_ImplementsInterface verifies that CoseSign1Verifier
-// satisfies the MetaPayloadVerifier interface.
-func TestCoseSign1Verifier_ImplementsInterface(t *testing.T) {
-	var _ MetaPayloadVerifier = (*CoseSign1Verifier)(nil)
-	var _ MetaPayloadVerifier = NewCoseSign1Verifier()
-}
-
-// TestBMOTransition_AutoInitializesVerifier verifies that the BMO module
-// automatically initializes MetaPayloadVerifier on Transition(true).
-func TestBMOTransition_AutoInitializesVerifier(t *testing.T) {
-	bmo := &BMO{
-		UnifiedHandler: &coseTestImageHandler{},
-	}
-
-	// Before transition, verifier should be nil
-	if bmo.MetaPayloadVerifier != nil {
-		t.Fatal("expected MetaPayloadVerifier to be nil before Transition")
-	}
-
-	// Activate the module
-	if err := bmo.Transition(true); err != nil {
-		t.Fatalf("Transition(true) failed: %v", err)
-	}
-
-	// After transition, verifier should be auto-initialized
-	if bmo.MetaPayloadVerifier == nil {
-		t.Fatal("expected MetaPayloadVerifier to be auto-initialized after Transition(true)")
-	}
-
-	// Verify it's a CoseSign1Verifier
-	if _, ok := bmo.MetaPayloadVerifier.(*CoseSign1Verifier); !ok {
-		t.Errorf("expected *CoseSign1Verifier, got %T", bmo.MetaPayloadVerifier)
-	}
-}
-
-// TestBMOTransition_DoesNotOverrideCustomVerifier verifies that a custom
-// MetaPayloadVerifier set by the application is not replaced on Transition.
-func TestBMOTransition_DoesNotOverrideCustomVerifier(t *testing.T) {
-	custom := &mockMetaPayloadVerifier{payload: []byte("custom")}
-	bmo := &BMO{
-		UnifiedHandler:      &coseTestImageHandler{},
-		MetaPayloadVerifier: custom,
-	}
-
-	if err := bmo.Transition(true); err != nil {
-		t.Fatalf("Transition(true) failed: %v", err)
-	}
-
-	// Should still be the custom verifier
-	if bmo.MetaPayloadVerifier != custom {
-		t.Error("custom MetaPayloadVerifier was overridden by Transition")
-	}
-}
-
-// coseTestImageHandler is a minimal UnifiedImageHandler for testing BMO Transition behavior.
-// Named differently from mockUnifiedImageHandler in bmo_url_test.go to avoid redeclaration.
-type coseTestImageHandler struct{}
-
-func (h *coseTestImageHandler) HandleImage(_ context.Context, _, _ string, _ uint64, _ map[string]any, _ []byte) (int, string, error) {
-	return 0, "ok", nil
 }

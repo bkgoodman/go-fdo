@@ -61,9 +61,9 @@ See `provisioning-security.md` for the narrative. The four models are:
 
 | Model | Library | Server | Unit tests | Integration test | Negative integration |
 |---|---|---|---|---|---|
-| 1 | Working (unsigned rejected unless delegate has PERM.7) | Works (omit `-bmo-sign`) | 6 unwrap tests | `bmo` (positive) | `bmo-signed-negative` |
+| 1 | **Working** (Owner-direct unsigned accepted — channel authority) | Works (omit `-bmo-sign`) | unwrap tests + `TestUnsignedProvisioningAllowed_Matrix` | **`bmo-owner-unsigned`** | `bmo-delegate-unsigned-noperm` (onboard-only peer) |
 | 2 | **Implemented** (delegate PERM.7 → accept unsigned) | Works (`-onboardDelegate` with PERM.7 chain) | 6 unwrap tests | **`bmo-delegate-unsigned`** | **`bmo-delegate-unsigned-noperm`** |
-| 3 | Implemented | `-bmo-sign` works | Yes (5 tests) | **`bmo-signed`** | `bmo-signed-negative` |
+| 3 | Implemented | `-bmo-sign` works | Yes (5 tests) | **`bmo-signed`** | Unit: tampered / wrong key / wrong content type |
 | 4 | Implemented | `-bmo-delegate-provision` works | Yes (3 tests) | **`bmo-delegate-provision`** | None |
 
 #### Completed testing tasks
@@ -76,16 +76,39 @@ See `provisioning-security.md` for the narrative. The four models are:
 - [x] **Model 4 integration test** (`test_bmo_delegate_provision`): Generates an
   Owner-rooted PERM.7 delegate chain, starts server with `-bmo-delegate-provision`,
   delivers BMO image, verifies payload integrity.
-- [x] **Model 3 negative integration test** (`test_bmo_signed_negative`): Server
-  sends unsigned BMO to a device with Owner key — device rejects it.
+- [x] **Model 1 resolved (2026-10-02)**: The spec now states channel authority
+  is REQUIRED and enabled by default (chunking-strategy.md §Channel Authority),
+  so unsigned provisioning from the Owner itself MUST be accepted. The device
+  previously rejected it whenever the Owner key was known, because the single
+  `delegateHasProvision` bool could not distinguish Owner-direct from an
+  onboard-only delegate. Replaced with `fdo.PeerAuthority`
+  (`PeerOwnerDirect` / `PeerDelegateProvision` / `PeerDelegateOnboardOnly` /
+  `PeerUnknown`), set from how ProveOVHdr was verified in both the 1.01 and 2.0
+  TO2 paths; decision logic in `unsignedProvisioningAllowed`. The old
+  `bmo-signed-negative` test (which asserted the non-compliant behaviour) is
+  replaced by `bmo-owner-unsigned` (positive). `WithDelegateProvisionAuthority`
+  / `DelegateProvisionAuthorityFromContext` kept as deprecated wrappers.
+  Audit note: go-fdo was **not** vulnerable to the fdo-uefi-rs H4 bug
+  (onboard-only delegate accepted) — it erred the other way.
+
+- [x] **Delivery/authorization restructure (2026-10-02)**: generic delivery
+  keys 5–9 (legacy -6..-10 aliases), meta-payload authentication (named
+  signer / Owner / PERM.7 x5chain), D2/D3 fetched-content rules, generic
+  artifact verification with fail-closed scope (`"fdo.scope"`), error codes
+  9–19 — all in `fsim/chunking`. Also fixed: `DelegateHasPermission` was
+  leaf-only (now every cert); BMO x5chain lacked CA/permission-chain checks;
+  device ignored scope; URL/meta delivery accepted unauthenticated content.
+  See fdo-uefi-rs/TODO.md PRIORITY section for full detail and test list.
 
 #### Remaining testing tasks
 
-- [ ] **Model 1 clarification**: The go-fdo device rejects unsigned provisioning
-  from the Owner itself (when no delegate is used and Owner key is present). This
-  is the strict interpretation: even the Owner MUST sign. This is now documented
-  and tested (`bmo-signed-negative`). If the spec intends to allow unsigned from
-  a verified Owner TO2 session (channel authority), add an Owner-direct flag.
+- [x] `fdo.payload` device-side authorization (2026-10-02): `payload-begin`
+  gated via shared `authorizeGated`; owner signing (`-payload-sign`);
+  delivery modes; begin hash in unified + streaming modes. Tests unit +
+  `payload-signed` / `payload-delegate-noperm`. Also fixed 5 payload
+  integration tests that compared the source file with itself.
+- [x] Removed dead `BMO.MetaPayloadVerifier` + interface; kept `CoseSign1Verifier` (used by go-fdo-meta-tool) as a wrapper over `chunking.VerifyMetaPayload`.
+
 - [~] **Model 4 negative variants**: Wrong root, missing PERM.7, tampered delegate
   signature. Covered by unit tests (3 tests in `bmo_provision_test.go`). Integration
   tests are impractical because the server validates the delegate chain at startup

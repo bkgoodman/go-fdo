@@ -158,6 +158,11 @@ Run via `./test_examples.sh` with specific test scenarios:
 | `bmo` | Bare Metal Onboarding FSIM |
 | `bmo-meta-url` | BMO meta-URL delivery (unsigned meta-payload via CLI) |
 | `bmo-meta-signed` | BMO signed meta-payload + tampered-signature negative test |
+| `bmo-meta-delegate-signed` | Meta-payload signed by a PERM.7 delegate chain (no `meta_signer`); `fdo meta` refuses an onboard-only chain; `meta verify -owner` |
+| `bmo-signed-scope` | Scope: validity window accepted; expired window and `generation` (no rollback storage) rejected |
+| `bmo-owner-unsigned` | Model 1: unsigned BMO from the Owner is accepted (channel authority) |
+| `payload-signed` | `payload-begin` signed by the Owner key (`-payload-sign`) |
+| `payload-delegate-noperm` | Negative: unsigned `payload-begin` from an onboard-only delegate is refused |
 | `rv-firmware-tags` | RV firmware extension tags (16/17/18) DI provisioning + TO1/TO2 compatibility |
 | `auth` | FDOKeyAuth CLI - obtain bearer token via challenge-response handshake |
 | `all` | Run all tests (default) |

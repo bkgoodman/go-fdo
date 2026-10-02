@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/fido-device-onboard/go-fdo/fsim"
+	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 )
 
 var metaFlags = flag.NewFlagSet("meta", flag.ContinueOnError)
@@ -142,13 +143,15 @@ func metaCreate(args []string) error {
 func metaSign(args []string) error {
 	fs := flag.NewFlagSet("meta sign", flag.ContinueOnError)
 	var (
-		inFile  string
-		keyFile string
-		outFile string
+		inFile    string
+		keyFile   string
+		outFile   string
+		chainFile string
 	)
 	fs.StringVar(&inFile, "in", "", "Input meta-payload CBOR file (required)")
 	fs.StringVar(&keyFile, "key", "", "PEM private key file for signing (required)")
 	fs.StringVar(&outFile, "out", "", "Output signed meta-payload file (required)")
+	fs.StringVar(&chainFile, "chain", "", "Optional PEM delegate certificate chain (leaf first); signs as a PERM.7 Delegate, verified against the Owner key")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -167,9 +170,9 @@ func metaSign(args []string) error {
 		return fmt.Errorf("loading private key: %w", err)
 	}
 
-	signed, err := fsim.SignMetaPayload(payload, signer)
+	signed, err := signMeta(payload, signer, chainFile)
 	if err != nil {
-		return fmt.Errorf("signing meta-payload: %w", err)
+		return err
 	}
 
 	if err := os.WriteFile(outFile, signed, 0600); err != nil {
@@ -185,10 +188,12 @@ func metaVerify(args []string) error {
 		inFile    string
 		keyFile   string
 		showPrint bool
+		asOwner   bool
 	)
 	fs.StringVar(&inFile, "in", "", "Signed meta-payload file to verify (required)")
 	fs.StringVar(&keyFile, "key", "", "PEM public key file for verification (required)")
 	fs.BoolVar(&showPrint, "print", false, "Print meta-payload contents after verification")
+	fs.BoolVar(&asOwner, "owner", false, "Treat -key as the Owner key: accept an Owner-direct signature or an embedded x5chain that validates to it and grants PERM.7 (as a device does when image-begin names no meta_signer)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -207,16 +212,28 @@ func metaVerify(args []string) error {
 		return fmt.Errorf("loading public key: %w", err)
 	}
 
-	// Marshal public key to COSE_Key for the verifier
-	pubKeyCBOR, err := fsim.MarshalSignerPublicKey(pubKey)
-	if err != nil {
-		return fmt.Errorf("marshaling public key: %w", err)
-	}
-
-	verifier := &fsim.CoseSign1Verifier{}
-	payload, err := verifier.Verify(signedData, pubKeyCBOR)
-	if err != nil {
-		return fmt.Errorf("verification failed: %w", err)
+	var payload []byte
+	if asOwner {
+		// Same rules the device applies (chunking.VerifyMetaPayload).
+		inner, signed, err := chunking.VerifyMetaPayload(signedData, nil, pubKey)
+		if err != nil {
+			return fmt.Errorf("verification failed: %w", err)
+		}
+		if !signed {
+			return fmt.Errorf("verification failed: meta-payload is not signed")
+		}
+		payload = inner
+	} else {
+		// Named-publisher mode: verify against -key as a meta_signer COSE_Key.
+		pubKeyCBOR, err := fsim.MarshalSignerPublicKey(pubKey)
+		if err != nil {
+			return fmt.Errorf("marshaling public key: %w", err)
+		}
+		inner, _, err := chunking.VerifyMetaPayload(signedData, pubKeyCBOR, nil)
+		if err != nil {
+			return fmt.Errorf("verification failed: %w", err)
+		}
+		payload = inner
 	}
 
 	fmt.Fprintf(os.Stderr, "Signature verified OK\n")
@@ -253,16 +270,18 @@ func metaVerify(args []string) error {
 func metaCreateSigned(args []string) error {
 	fs := flag.NewFlagSet("meta create-signed", flag.ContinueOnError)
 	var (
-		mimeType string
-		url      string
-		hashFile string
-		name     string
-		bootArgs string
-		version  string
-		desc     string
-		keyFile  string
-		outFile  string
+		mimeType  string
+		url       string
+		hashFile  string
+		name      string
+		bootArgs  string
+		version   string
+		desc      string
+		keyFile   string
+		outFile   string
+		chainFile string
 	)
+	fs.StringVar(&chainFile, "chain", "", "Optional PEM delegate certificate chain (leaf first); signs as a PERM.7 Delegate, verified against the Owner key")
 	fs.StringVar(&mimeType, "mime", "", "MIME type of the actual image (required)")
 	fs.StringVar(&url, "url", "", "URL where the actual image can be fetched (required)")
 	fs.StringVar(&hashFile, "hash-file", "", "Path to the actual image file (computes sha256 hash)")
@@ -313,9 +332,9 @@ func metaCreateSigned(args []string) error {
 		return fmt.Errorf("loading private key: %w", err)
 	}
 
-	signed, err := fsim.SignMetaPayload(metaCBOR, signer)
+	signed, err := signMeta(metaCBOR, signer, chainFile)
 	if err != nil {
-		return fmt.Errorf("signing meta-payload: %w", err)
+		return err
 	}
 
 	if err := os.WriteFile(outFile, signed, 0600); err != nil {
@@ -323,6 +342,26 @@ func metaCreateSigned(args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Created and signed meta-payload: %s (%d bytes)\n", outFile, len(signed))
 	return nil
+}
+
+// signMeta signs a meta-payload, as a provisioning Delegate when chainFile
+// names a PEM certificate chain, otherwise with the bare key.
+func signMeta(payload []byte, signer *ecdsa.PrivateKey, chainFile string) ([]byte, error) {
+	var chain []*x509.Certificate
+	if chainFile != "" {
+		pemBytes, err := os.ReadFile(filepath.Clean(chainFile))
+		if err != nil {
+			return nil, fmt.Errorf("reading chain: %w", err)
+		}
+		if chain, err = parseCertChainPEM(pemBytes); err != nil {
+			return nil, fmt.Errorf("parsing chain: %w", err)
+		}
+	}
+	signed, err := fsim.SignMetaPayloadWithChain(payload, signer, chain)
+	if err != nil {
+		return nil, fmt.Errorf("signing meta-payload: %w", err)
+	}
+	return signed, nil
 }
 
 func metaExportPubkey(args []string) error {

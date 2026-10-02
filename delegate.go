@@ -194,14 +194,22 @@ func CertHasPermissionOID(cert *x509.Certificate, oid asn1.ObjectIdentifier) boo
 	return false
 }
 
-// DelegateHasPermission checks if a delegate certificate chain has a specific
-// permission OID. The leaf certificate (index 0) is checked.
-// Use the OID_permit* constants for the oid parameter.
+// DelegateHasPermission reports whether a delegate certificate chain grants a
+// permission OID. Per the FDO delegate rules, a permission is granted only
+// when it is present in EVERY certificate of the chain: an issuer that omits
+// it strips it from everything below, whatever the leaf asserts. (Checking
+// only the leaf would let any CA in the chain mint a sub-delegate with
+// permissions it was never granted.) Use the OIDPermit* constants for oid.
 func DelegateHasPermission(chain []*x509.Certificate, oid asn1.ObjectIdentifier) bool {
 	if len(chain) == 0 {
 		return false
 	}
-	return CertHasPermissionOID(chain[0], oid)
+	for _, c := range chain {
+		if !CertHasPermissionOID(c, oid) {
+			return false
+		}
+	}
+	return true
 }
 
 // DelegateCanOnboard checks if a delegate certificate chain has any of the

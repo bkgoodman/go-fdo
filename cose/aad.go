@@ -38,8 +38,9 @@ var (
 
 	// BMO FSIM operations.
 
-	AADMetaPayload  = mustEncodeDomainAAD("FDO-FSIM-MetaPayload-v1")  // Signed BMO meta-payload
-	AADBmoProvision = mustEncodeDomainAAD("FDO-FSIM-BmoProvision-v1") // Signed BMO provisioning message (image-begin-signed, set-signed)
+	AADMetaPayload      = mustEncodeDomainAAD("FDO-FSIM-MetaPayload-v1")      // Signed BMO meta-payload
+	AADBmoProvision     = mustEncodeDomainAAD("FDO-FSIM-BmoProvision-v1")     // Signed BMO provisioning message (image-begin-signed, set-signed)
+	AADPayloadProvision = mustEncodeDomainAAD("FDO-FSIM-PayloadProvision-v1") // Signed fdo.payload provisioning message (payload-begin)
 )
 
 // mustEncodeDomainAAD returns the CBOR encoding of FDOExternalAAD = [tag].

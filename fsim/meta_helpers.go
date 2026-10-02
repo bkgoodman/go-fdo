@@ -7,8 +7,10 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"fmt"
 
+	fdo "github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/cose"
 )
@@ -74,9 +76,23 @@ func ComputeSHA256(data []byte) []byte {
 // signed with the provided key. The returned bytes are the CBOR-encoded
 // COSE_Sign1_Tagged structure that can be served as a signed meta-payload file.
 //
+// Use this for a third-party publisher whose public key the Owner names in
+// image-begin (meta_signer, key 9), or for the Owner key itself. For a
+// provisioning Delegate, use SignMetaPayloadWithChain.
+//
 // The signer must be an ECDSA key (P-256 or P-384). RSA keys are not currently
 // supported for meta-payload signing because cose.NewKey only supports EC keys.
 func SignMetaPayload(metaPayloadCBOR []byte, signer crypto.Signer) ([]byte, error) {
+	return SignMetaPayloadWithChain(metaPayloadCBOR, signer, nil)
+}
+
+// SignMetaPayloadWithChain signs a meta-payload as a provisioning Delegate:
+// chain (leaf first, up to but not including the Owner key) is carried in the
+// unprotected x5chain header (label 33). The device verifies it against the
+// TO2-proven Owner key when image-begin names no meta_signer; the chain must
+// grant fdo-ekt-permit-provision (PERM.7) in every certificate, and the leaf
+// must certify signer's public key.
+func SignMetaPayloadWithChain(metaPayloadCBOR []byte, signer crypto.Signer, chain []*x509.Certificate) ([]byte, error) {
 	if signer == nil {
 		return nil, fmt.Errorf("signer is required")
 	}
@@ -89,6 +105,21 @@ func SignMetaPayload(metaPayloadCBOR []byte, signer crypto.Signer) ([]byte, erro
 
 	var sign1 cose.Sign1[[]byte, []byte]
 	sign1.Payload = cbor.NewByteWrap(metaPayloadCBOR)
+
+	if len(chain) > 0 {
+		if !fdo.DelegateHasPermission(chain, fdo.OIDPermitProvision) {
+			return nil, fmt.Errorf("delegate chain does not grant fdo-ekt-permit-provision (PERM.7) in every certificate")
+		}
+		leafPub, ok := chain[0].PublicKey.(interface{ Equal(crypto.PublicKey) bool })
+		if !ok || !leafPub.Equal(signer.Public()) {
+			return nil, fmt.Errorf("signing key does not match the leaf certificate of the delegate chain")
+		}
+		ders := make([][]byte, len(chain))
+		for i, c := range chain {
+			ders[i] = c.Raw
+		}
+		sign1.Unprotected = cose.HeaderMap{x5chainLabel: ders}
+	}
 
 	if err := sign1.Sign(signer, nil, cose.AADMetaPayload, opts); err != nil {
 		return nil, fmt.Errorf("COSE Sign1 signing failed: %w", err)

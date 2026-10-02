@@ -6,6 +6,7 @@ package fsim
 import (
 	"bytes"
 	"context"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"errors"
 	"testing"
@@ -29,23 +30,6 @@ func (m *mockURLFetcher) Fetch(url string, tlsCA []byte) ([]byte, error) {
 		return data, nil
 	}
 	return nil, errors.New("URL not found")
-}
-
-// mockMetaPayloadVerifier is a mock implementation of MetaPayloadVerifier for testing.
-type mockMetaPayloadVerifier struct {
-	verifyErr error
-	payload   []byte // payload to return after verification
-}
-
-func (m *mockMetaPayloadVerifier) Verify(signedPayload []byte, signerKey []byte) ([]byte, error) {
-	if m.verifyErr != nil {
-		return nil, m.verifyErr
-	}
-	if m.payload != nil {
-		return m.payload, nil
-	}
-	// Return the payload as-is (simulating unsigned)
-	return signedPayload, nil
 }
 
 // mockUnifiedImageHandler is a mock implementation of UnifiedImageHandler for testing.
@@ -356,9 +340,9 @@ func TestBMODeviceOnBeginAckDeliveryModeCheck(t *testing.T) {
 			}
 
 			begin := chunking.BeginMessage{
+				DeliveryMode: uint(tt.deliveryMode),
 				FSIMFields: map[int]any{
 					-1: "application/x-iso9660-image",
-					-6: uint64(tt.deliveryMode),
 				},
 			}
 
@@ -400,12 +384,12 @@ func TestBMODeviceURLModeEndToEnd(t *testing.T) {
 
 	// Simulate receiving image-begin with URL mode
 	bmo.begin = chunking.BeginMessage{
-		HashAlg: "sha256",
+		HashAlg:      "sha256",
+		DeliveryMode: DeliveryModeURL,
+		URL:          imageURL,
+		ExpectedHash: imageHash[:],
 		FSIMFields: map[int]any{
 			-1: "application/x-iso9660-image",
-			-6: uint64(DeliveryModeURL),
-			-7: imageURL,
-			-9: imageHash[:],
 		},
 	}
 	bmo.buffer = &bytes.Buffer{}
@@ -467,12 +451,12 @@ func TestBMODeviceURLModeHashMismatch(t *testing.T) {
 
 	// Simulate receiving image-begin with URL mode and wrong hash
 	bmo.begin = chunking.BeginMessage{
-		HashAlg: "sha256",
+		HashAlg:      "sha256",
+		DeliveryMode: DeliveryModeURL,
+		URL:          imageURL,
+		ExpectedHash: wrongHash,
 		FSIMFields: map[int]any{
 			-1: "application/x-iso9660-image",
-			-6: uint64(DeliveryModeURL),
-			-7: imageURL,
-			-9: wrongHash,
 		},
 	}
 	bmo.buffer = &bytes.Buffer{}
@@ -487,14 +471,7 @@ func TestBMODeviceURLModeHashMismatch(t *testing.T) {
 		t.Fatal("expected error for hash mismatch, got nil")
 	}
 
-	// Verify it's a bmoURLError with correct code
-	urlErr, ok := err.(*bmoURLError)
-	if !ok {
-		t.Fatalf("expected *bmoURLError, got %T", err)
-	}
-	if urlErr.code != BMOErrorHashMismatch {
-		t.Errorf("error code = %d, want %d", urlErr.code, BMOErrorHashMismatch)
-	}
+	assertTransferCode(t, err, BMOErrorHashMismatch)
 
 	// Verify result status was set
 	if bmo.resultStatus != 2 {
@@ -519,10 +496,11 @@ func TestBMODeviceURLModeFetchError(t *testing.T) {
 
 	// Simulate receiving image-begin with URL mode
 	bmo.begin = chunking.BeginMessage{
+		DeliveryMode: DeliveryModeURL,
+		URL:          "https://example.com/image.bin",
+		ExpectedHash: make([]byte, 32), // pinned, so the fetch is attempted
 		FSIMFields: map[int]any{
 			-1: "application/x-iso9660-image",
-			-6: uint64(DeliveryModeURL),
-			-7: "https://example.com/image.bin",
 		},
 	}
 	bmo.buffer = &bytes.Buffer{}
@@ -537,239 +515,172 @@ func TestBMODeviceURLModeFetchError(t *testing.T) {
 		t.Fatal("expected error for fetch failure, got nil")
 	}
 
-	// Verify it's a bmoURLError with correct code
-	urlErr, ok := err.(*bmoURLError)
-	if !ok {
-		t.Fatalf("expected *bmoURLError, got %T", err)
-	}
-	if urlErr.code != BMOErrorURLFetchFailed {
-		t.Errorf("error code = %d, want %d", urlErr.code, BMOErrorURLFetchFailed)
-	}
+	assertTransferCode(t, err, BMOErrorURLFetchFailed)
 }
 
-func TestBMODeviceMetaURLModeEndToEnd(t *testing.T) {
-	// Actual image data
+// metaTestSetup builds a device, an image at imageURL, and a fetcher that
+// serves metaBody at metaURL.
+func metaTestSetup(metaBody []byte) (*BMO, *mockUnifiedImageHandler, *mockURLFetcher, []byte, string) {
 	imageData := []byte("actual image content")
-	imageHash := sha256.Sum256(imageData)
 	imageURL := "https://cdn.example.com/image.bin"
+	fetcher := &mockURLFetcher{data: map[string][]byte{
+		"https://vendor.example.com/meta.cbor": metaBody,
+		imageURL:                               imageData,
+	}}
+	handler := &mockUnifiedImageHandler{returnStatus: 0, returnMessage: "success"}
+	bmo := &BMO{UnifiedHandler: handler, URLFetcher: fetcher, buffer: &bytes.Buffer{}}
+	return bmo, handler, fetcher, imageData, imageURL
+}
 
-	// Create meta-payload
-	meta := MetaPayload{
-		MIMEType:     "application/x-raw-disk-image",
-		URL:          imageURL,
+func metaBegin(beginHash, metaSigner []byte) chunking.BeginMessage {
+	return chunking.BeginMessage{
 		HashAlg:      "sha256",
-		ExpectedHash: imageHash[:],
-		Name:         "test-image",
-		BootArgs:     "console=ttyS0",
-	}
-	metaData, err := meta.MarshalCBOR()
-	if err != nil {
-		t.Fatalf("failed to marshal meta-payload: %v", err)
-	}
-
-	metaURL := "https://vendor.example.com/meta.cbor"
-
-	// Create mock fetcher
-	fetcher := &mockURLFetcher{
-		data: map[string][]byte{
-			metaURL:  metaData,
-			imageURL: imageData,
-		},
-	}
-
-	// Create mock handler
-	handler := &mockUnifiedImageHandler{
-		returnStatus:  0,
-		returnMessage: "success",
-	}
-
-	// Create BMO device
-	bmo := &BMO{
-		UnifiedHandler: handler,
-		URLFetcher:     fetcher,
-	}
-
-	// Simulate receiving image-begin with meta-URL mode (unsigned)
-	bmo.begin = chunking.BeginMessage{
-		FSIMFields: map[int]any{
-			-1: "application/x-bmo-meta",
-			-6: uint64(DeliveryModeMetaURL),
-			-7: metaURL,
-		},
-	}
-	bmo.buffer = &bytes.Buffer{}
-
-	// Call onEndUnified
-	ctx := context.Background()
-	endFunc := bmo.onEndUnified(ctx)
-	err = endFunc(chunking.EndMessage{})
-
-	if err != nil {
-		t.Fatalf("onEndUnified failed: %v", err)
-	}
-
-	// Verify both URLs were fetched
-	if len(fetcher.fetchedURLs) != 2 {
-		t.Fatalf("expected 2 URLs fetched, got %d", len(fetcher.fetchedURLs))
-	}
-	if fetcher.fetchedURLs[0] != metaURL {
-		t.Errorf("first URL should be meta URL, got %q", fetcher.fetchedURLs[0])
-	}
-	if fetcher.fetchedURLs[1] != imageURL {
-		t.Errorf("second URL should be image URL, got %q", fetcher.fetchedURLs[1])
-	}
-
-	// Verify the handler received the image with correct type from meta-payload
-	if len(handler.receivedImages) != 1 {
-		t.Fatalf("expected 1 image, got %d", len(handler.receivedImages))
-	}
-
-	img := handler.receivedImages[0]
-	if img.imageType != "application/x-raw-disk-image" {
-		t.Errorf("imageType should come from meta-payload, got %q", img.imageType)
-	}
-	if img.name != "test-image" {
-		t.Errorf("name should come from meta-payload, got %q", img.name)
-	}
-	if !bytes.Equal(img.data, imageData) {
-		t.Errorf("image data mismatch")
-	}
-
-	// Verify boot_args was passed in metadata
-	if img.metadata == nil || img.metadata["boot_args"] != "console=ttyS0" {
-		t.Errorf("boot_args should be in metadata, got %v", img.metadata)
+		DeliveryMode: DeliveryModeMetaURL,
+		URL:          "https://vendor.example.com/meta.cbor",
+		ExpectedHash: beginHash,
+		MetaSigner:   metaSigner,
+		FSIMFields:   map[int]any{-1: "application/x-bmo-meta"},
 	}
 }
 
+// Signed by a named third-party publisher (meta_signer, key 9): accepted, and
+// its instruction fields (boot_args) are honoured.
 func TestBMODeviceMetaURLModeSignedPayload(t *testing.T) {
-	// Actual image data
-	imageData := []byte("actual image content")
-	imageURL := "https://cdn.example.com/image.bin"
-
-	// Create meta-payload
+	priv, coseKey := generateTestKey(t, elliptic.P256())
+	imageHash := sha256.Sum256([]byte("actual image content"))
 	meta := MetaPayload{
-		MIMEType: "application/x-raw-disk-image",
-		URL:      imageURL,
+		MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin",
+		HashAlg: "sha256", ExpectedHash: imageHash[:], Name: "test-image", BootArgs: "console=ttyS0",
 	}
-	metaData, err := meta.MarshalCBOR()
+	metaCBOR, _ := meta.MarshalCBOR()
+	signed, err := SignMetaPayload(metaCBOR, priv)
 	if err != nil {
-		t.Fatalf("failed to marshal meta-payload: %v", err)
+		t.Fatal(err)
 	}
+	bmo, handler, fetcher, imageData, imageURL := metaTestSetup(signed)
+	bmo.begin = metaBegin(nil, coseKey)
 
-	metaURL := "https://vendor.example.com/meta.cbor"
-	signerKey := []byte{0x01, 0x02, 0x03} // Fake signer key
-
-	// Create mock fetcher
-	fetcher := &mockURLFetcher{
-		data: map[string][]byte{
-			metaURL:  []byte("signed-wrapper-around-meta"), // Simulated signed payload
-			imageURL: imageData,
-		},
-	}
-
-	// Create mock verifier that returns the actual meta-payload
-	verifier := &mockMetaPayloadVerifier{
-		payload: metaData,
-	}
-
-	// Create mock handler
-	handler := &mockUnifiedImageHandler{
-		returnStatus:  0,
-		returnMessage: "success",
-	}
-
-	// Create BMO device
-	bmo := &BMO{
-		UnifiedHandler:      handler,
-		URLFetcher:          fetcher,
-		MetaPayloadVerifier: verifier,
-	}
-
-	// Simulate receiving image-begin with meta-URL mode (signed)
-	bmo.begin = chunking.BeginMessage{
-		FSIMFields: map[int]any{
-			-1:  "application/x-bmo-meta",
-			-6:  uint64(DeliveryModeMetaURL),
-			-7:  metaURL,
-			-10: signerKey,
-		},
-	}
-	bmo.buffer = &bytes.Buffer{}
-
-	// Call onEndUnified
-	ctx := context.Background()
-	endFunc := bmo.onEndUnified(ctx)
-	err = endFunc(chunking.EndMessage{})
-
-	if err != nil {
+	if err := bmo.onEndUnified(context.Background())(chunking.EndMessage{}); err != nil {
 		t.Fatalf("onEndUnified failed: %v", err)
 	}
-
-	// Verify the handler received the image
-	if len(handler.receivedImages) != 1 {
-		t.Fatalf("expected 1 image, got %d", len(handler.receivedImages))
+	if len(fetcher.fetchedURLs) != 2 || fetcher.fetchedURLs[1] != imageURL {
+		t.Fatalf("unexpected fetches: %v", fetcher.fetchedURLs)
 	}
-
 	img := handler.receivedImages[0]
-	if img.imageType != "application/x-raw-disk-image" {
-		t.Errorf("imageType should come from meta-payload, got %q", img.imageType)
+	if img.imageType != "application/x-raw-disk-image" || img.name != "test-image" || !bytes.Equal(img.data, imageData) {
+		t.Errorf("image fields not taken from the signed meta-payload: %+v", img)
+	}
+	if img.metadata["boot_args"] != "console=ttyS0" {
+		t.Errorf("boot_args from an authenticated meta-payload should be passed through, got %v", img.metadata)
 	}
 }
 
+// Named publisher, but the meta-payload is signed by a different key: 12.
 func TestBMODeviceMetaURLModeSignatureInvalid(t *testing.T) {
-	metaURL := "https://vendor.example.com/meta.cbor"
-	signerKey := []byte{0x01, 0x02, 0x03}
+	signerPriv, _ := generateTestKey(t, elliptic.P256())
+	_, otherKey := generateTestKey(t, elliptic.P256())
+	meta := MetaPayload{MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin"}
+	metaCBOR, _ := meta.MarshalCBOR()
+	signed, _ := SignMetaPayload(metaCBOR, signerPriv)
+	bmo, handler, _, _, _ := metaTestSetup(signed)
+	bmo.begin = metaBegin(nil, otherKey)
 
-	// Create mock fetcher
-	fetcher := &mockURLFetcher{
-		data: map[string][]byte{
-			metaURL: []byte("signed-payload"),
-		},
+	err := bmo.onEndUnified(context.Background())(chunking.EndMessage{})
+	assertTransferCode(t, err, BMOErrorMetaSignatureInvalid)
+	if len(handler.receivedImages) != 0 {
+		t.Error("image must not be delivered")
 	}
+}
 
-	// Create mock verifier that returns an error
-	verifier := &mockMetaPayloadVerifier{
-		verifyErr: errors.New("signature verification failed"),
+// meta_signer named but the meta-payload is unsigned: never downgraded, 12.
+func TestBMODeviceMetaURLModeSignerNamedButUnsigned(t *testing.T) {
+	_, coseKey := generateTestKey(t, elliptic.P256())
+	meta := MetaPayload{MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin"}
+	metaCBOR, _ := meta.MarshalCBOR()
+	bmo, _, _, _, _ := metaTestSetup(metaCBOR)
+	bmo.begin = metaBegin(nil, coseKey)
+	assertTransferCode(t, bmo.onEndUnified(context.Background())(chunking.EndMessage{}), BMOErrorMetaSignatureInvalid)
+}
+
+// Unsigned meta-payload, not over validated TLS, no hash pinned in
+// image-begin: nothing authenticates the image. Refused with 19, and the
+// image is never downloaded. (This was previously accepted.)
+func TestBMODeviceMetaURLModeUnauthenticatedRefused(t *testing.T) {
+	imageHash := sha256.Sum256([]byte("actual image content"))
+	meta := MetaPayload{MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin",
+		HashAlg: "sha256", ExpectedHash: imageHash[:]}
+	metaCBOR, _ := meta.MarshalCBOR()
+	bmo, handler, fetcher, _, _ := metaTestSetup(metaCBOR)
+	bmo.begin = metaBegin(nil, nil)
+
+	err := bmo.onEndUnified(context.Background())(chunking.EndMessage{})
+	assertTransferCode(t, err, BMOErrorUnauthenticatedSource)
+	if len(fetcher.fetchedURLs) != 1 || len(handler.receivedImages) != 0 {
+		t.Errorf("only the meta-payload should have been fetched; fetched=%v", fetcher.fetchedURLs)
 	}
+}
 
-	// Create mock handler
-	handler := &mockUnifiedImageHandler{}
+// Unsigned meta-payload used as a pointer: image-begin pins the image hash,
+// the meta-payload carries only pointer/constraint/informational fields.
+// Accepted.
+func TestBMODeviceMetaURLModeUnauthenticatedPointer(t *testing.T) {
+	imageHash := sha256.Sum256([]byte("actual image content"))
+	meta := MetaPayload{MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin",
+		HashAlg: "sha256", ExpectedHash: imageHash[:], Name: "n"}
+	metaCBOR, _ := meta.MarshalCBOR()
+	bmo, handler, _, imageData, _ := metaTestSetup(metaCBOR)
+	bmo.begin = metaBegin(imageHash[:], nil)
 
-	// Create BMO device
-	bmo := &BMO{
-		UnifiedHandler:      handler,
-		URLFetcher:          fetcher,
-		MetaPayloadVerifier: verifier,
+	if err := bmo.onEndUnified(context.Background())(chunking.EndMessage{}); err != nil {
+		t.Fatalf("pointer-only meta-payload with pinned image hash should be accepted: %v", err)
 	}
-
-	// Simulate receiving image-begin with meta-URL mode (signed)
-	bmo.begin = chunking.BeginMessage{
-		FSIMFields: map[int]any{
-			-1:  "application/x-bmo-meta",
-			-6:  uint64(DeliveryModeMetaURL),
-			-7:  metaURL,
-			-10: signerKey,
-		},
+	if !bytes.Equal(handler.receivedImages[0].data, imageData) {
+		t.Error("image data mismatch")
 	}
-	bmo.buffer = &bytes.Buffer{}
+}
 
-	// Call onEndUnified
-	ctx := context.Background()
-	endFunc := bmo.onEndUnified(ctx)
-	err := endFunc(chunking.EndMessage{})
+// Unsigned meta-payload carrying boot_args: refused with 15 even though the
+// image hash is pinned — a kernel command line takes over the device without
+// changing the image.
+func TestBMODeviceMetaURLModeUnauthenticatedBootArgsRefused(t *testing.T) {
+	imageHash := sha256.Sum256([]byte("actual image content"))
+	meta := MetaPayload{MIMEType: "application/x-raw-disk-image", URL: "https://cdn.example.com/image.bin",
+		BootArgs: "init=/bin/sh"}
+	metaCBOR, _ := meta.MarshalCBOR()
+	bmo, handler, _, _, _ := metaTestSetup(metaCBOR)
+	bmo.begin = metaBegin(imageHash[:], nil)
 
-	// Should return an error
+	assertTransferCode(t, bmo.onEndUnified(context.Background())(chunking.EndMessage{}), BMOErrorProvisionNotAuthorized)
+	if len(handler.receivedImages) != 0 {
+		t.Error("image must not be delivered")
+	}
+}
+
+// URL mode without a hash and a fetcher that cannot validate TLS: refused
+// with 19 before downloading.
+func TestBMODeviceURLModeNoHashRefused(t *testing.T) {
+	fetcher := &mockURLFetcher{data: map[string][]byte{"https://example.com/image.bin": []byte("x")}}
+	bmo := &BMO{UnifiedHandler: &mockUnifiedImageHandler{}, URLFetcher: fetcher, buffer: &bytes.Buffer{}}
+	bmo.begin = chunking.BeginMessage{DeliveryMode: DeliveryModeURL, URL: "https://example.com/image.bin",
+		FSIMFields: map[int]any{-1: "application/x-iso9660-image"}}
+
+	assertTransferCode(t, bmo.onEndUnified(context.Background())(chunking.EndMessage{}), BMOErrorUnauthenticatedSource)
+	if len(fetcher.fetchedURLs) != 0 {
+		t.Error("nothing should be downloaded when the content cannot be authenticated")
+	}
+}
+
+func assertTransferCode(t *testing.T, err error, want int) {
+	t.Helper()
 	if err == nil {
-		t.Fatal("expected error for signature verification failure, got nil")
+		t.Fatalf("expected error with code %d, got nil", want)
 	}
-
-	// Verify it's a bmoURLError with correct code
-	urlErr, ok := err.(*bmoURLError)
-	if !ok {
-		t.Fatalf("expected *bmoURLError, got %T", err)
+	var te *chunking.TransferError
+	if !errors.As(err, &te) {
+		t.Fatalf("expected *chunking.TransferError, got %T: %v", err, err)
 	}
-	if urlErr.code != BMOErrorMetaSignatureInvalid {
-		t.Errorf("error code = %d, want %d", urlErr.code, BMOErrorMetaSignatureInvalid)
+	if te.Code != want {
+		t.Errorf("error code = %d, want %d (%v)", te.Code, want, err)
 	}
 }
 
@@ -794,10 +705,10 @@ func TestBMODeviceMetaURLModeParseError(t *testing.T) {
 
 	// Simulate receiving image-begin with meta-URL mode (unsigned)
 	bmo.begin = chunking.BeginMessage{
+		DeliveryMode: DeliveryModeMetaURL,
+		URL:          metaURL,
 		FSIMFields: map[int]any{
 			-1: "application/x-bmo-meta",
-			-6: uint64(DeliveryModeMetaURL),
-			-7: metaURL,
 		},
 	}
 	bmo.buffer = &bytes.Buffer{}
@@ -812,14 +723,7 @@ func TestBMODeviceMetaURLModeParseError(t *testing.T) {
 		t.Fatal("expected error for meta-payload parse failure, got nil")
 	}
 
-	// Verify it's a bmoURLError with correct code
-	urlErr, ok := err.(*bmoURLError)
-	if !ok {
-		t.Fatalf("expected *bmoURLError, got %T", err)
-	}
-	if urlErr.code != BMOErrorMetaParseError {
-		t.Errorf("error code = %d, want %d", urlErr.code, BMOErrorMetaParseError)
-	}
+	assertTransferCode(t, err, BMOErrorMetaParseError)
 }
 
 func TestDeliveryModeConstants(t *testing.T) {

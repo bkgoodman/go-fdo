@@ -7,8 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	"crypto/sha256"
-	"crypto/sha512"
+	"crypto/subtle"
 	"fmt"
 	"hash"
 	"io"
@@ -125,11 +124,6 @@ type BMO struct {
 	// If nil, URL delivery modes will be rejected with error code 14.
 	URLFetcher URLFetcher
 
-	// MetaPayloadVerifier is used to verify COSE Sign1 signatures on meta-payloads (Mode 2).
-	// If nil, the default CoseSign1Verifier is used automatically.
-	// Set explicitly only if you need custom verification logic.
-	MetaPayloadVerifier MetaPayloadVerifier
-
 	// SupportedDeliveryModes specifies which delivery modes the device supports.
 	// If nil or empty, all modes are supported (assuming URLFetcher is set for modes 1/2).
 	// Use this to explicitly restrict supported modes for NAK testing.
@@ -158,6 +152,7 @@ type BMO struct {
 	begin        chunking.BeginMessage
 	resultStatus int
 	resultMsg    string
+	beginHasher  hash.Hash // chunked mode: running hash for begin expected_hash
 
 	// BIOS parameter state
 	pendingBiosResponses []BiosResponse
@@ -173,25 +168,11 @@ var _ serviceinfo.DeviceModule = (*BMO)(nil)
 
 // Transition implements serviceinfo.DeviceModule.
 func (b *BMO) Transition(active bool) error {
-	if active {
-		// Auto-initialize MetaPayloadVerifier with the default COSE Sign1
-		// verifier if none was explicitly provided. This makes signed
-		// meta-payload verification transparent to the application.
-		if b.MetaPayloadVerifier == nil {
-			b.MetaPayloadVerifier = NewCoseSign1Verifier()
-		}
-	} else {
+	if !active {
 		b.reset()
 	}
 	return nil
 }
-
-// coseSign1Tag18FirstByte is the CBOR head byte for tag 18 (major type 6,
-// value 18 = 0xD2). A tagged COSE_Sign1 is encoded with 0xD2 as its first
-// byte; a raw CBOR map/array starts with a different head byte (0xA* for
-// maps, 0x8* for arrays), so this single byte cleanly distinguishes a
-// spec-compliant signed provisioning message from a legacy unsigned one.
-const coseSign1Tag18FirstByte byte = 0xD2
 
 // Receive implements serviceinfo.DeviceModule.
 func (b *BMO) Receive(ctx context.Context, messageName string, messageBody io.Reader, respond func(string) io.Writer, yield func()) error {
@@ -204,19 +185,22 @@ func (b *BMO) Receive(ctx context.Context, messageName string, messageBody io.Re
 		// the ordinary chunked handler with the inner payload. A raw CBOR map
 		// is accepted only in non-conforming legacy mode (OwnerPublicKey unset
 		// AND no owner key in ctx), for back-compat with test scaffolding.
-		inner, provisioned, err := b.unwrapProvisioning(ctx, messageBody, BMOContentTypeImageBegin)
+		inner, signed, err := b.unwrapProvisioning(ctx, messageBody, BMOContentTypeImageBegin)
 		if err != nil {
+			slog.Error("fdo.bmo: image-begin rejected", "error", err)
+			return b.sendError(respond, chunking.ErrorCode(err, BMOErrorProvisionNotAuthorized), "Provisioning not authorized", err.Error())
+		}
+		if err := checkSignedBeginBindsContent(inner, signed); err != nil {
 			slog.Error("fdo.bmo: image-begin rejected", "error", err)
 			return b.sendError(respond, BMOErrorProvisionNotAuthorized, "Provisioning not authorized", err.Error())
 		}
-		_ = provisioned
 		return b.handleChunkedMessage(ctx, "image-begin", bytes.NewReader(inner), respond)
 
 	case "set":
 		inner, _, err := b.unwrapProvisioning(ctx, messageBody, BMOContentTypeSet)
 		if err != nil {
 			slog.Error("fdo.bmo: set rejected", "error", err)
-			return b.sendError(respond, BMOErrorProvisionNotAuthorized, "Provisioning not authorized", err.Error())
+			return b.sendError(respond, chunking.ErrorCode(err, BMOErrorProvisionNotAuthorized), "Provisioning not authorized", err.Error())
 		}
 		return b.handleBiosSet(bytes.NewReader(inner), respond)
 
@@ -246,14 +230,13 @@ func (b *BMO) Receive(ctx context.Context, messageName string, messageBody io.Re
 // certificate whose leaf MUST bear OIDPermitProvision, and the signature is
 // verified with external AAD FdoBmoProvisionAAD.
 //
-// If the body is a raw CBOR map/array (no tag 18), the message is legacy
-// unsigned. This is out-of-spec and is accepted ONLY when no Owner public
-// key is available (a test / debug configuration); conforming deployments
-// MUST set OwnerPublicKey either directly or via ctx and therefore reject
-// unsigned messages with error 15.
+// If the body is a raw CBOR map/array (no tag 18), it relies on channel
+// authority: it is accepted only if the TO2 peer holds provisioning
+// authority (Owner-direct, or a Delegate with PERM.7), per
+// unsignedProvisioningAllowed. Otherwise it is rejected with error 15.
 //
-// The second return is true if the message was verified as a COSE_Sign1
-// (i.e. spec-compliant), false if it was a legacy unsigned map/array.
+// The second return is true if the message was verified as a COSE_Sign1,
+// false if it was accepted unsigned under channel authority.
 func (b *BMO) unwrapProvisioning(ctx context.Context, messageBody io.Reader, expectedContentType string) (inner []byte, signed bool, err error) {
 	raw, err := io.ReadAll(messageBody)
 	if err != nil {
@@ -265,41 +248,7 @@ func (b *BMO) unwrapProvisioning(ctx context.Context, messageBody io.Reader, exp
 		ownerKey = fdo.OwnerPublicKeyFromContext(ctx)
 	}
 
-	// Tagged COSE_Sign1 (tag 18) begins with 0xD2.
-	isTagged := len(raw) > 0 && raw[0] == coseSign1Tag18FirstByte
-	if isTagged {
-		if ownerKey == nil {
-			return nil, true, fmt.Errorf("signed provisioning message received but no Owner public key is available (set BMO.OwnerPublicKey or fdo.WithOwnerPublicKey on ctx)")
-		}
-		payload, err := VerifyBmoSigned(raw, ownerKey, expectedContentType)
-		if err != nil {
-			return nil, true, err
-		}
-		return payload, true, nil
-	}
-
-	// Unsigned — acceptable under two conditions:
-	//
-	// 1. Channel authority from an Owner-direct session (Model 1): the TO2
-	//    peer proved it holds the Owner key, so anything it sends is implicitly
-	//    authorised. However, the spec says a conforming deployment SHOULD
-	//    use signed provisioning when the Owner key is available, so we only
-	//    allow this when no Owner key is configured (test/legacy setups).
-	//
-	// 2. Channel authority from a delegate with PERM.7 (Model 2): the TO2
-	//    peer proved it holds a delegate certificate chain rooted in the Owner
-	//    key AND carrying OIDPermitProvision. This delegate is authorised to
-	//    provision, so unsigned payloads are acceptable via channel authority.
-	if ownerKey != nil {
-		// Check whether the TO2 peer is a PERM.7 delegate (Model 2).
-		if fdo.DelegateProvisionAuthorityFromContext(ctx) {
-			slog.Info("accepting unsigned BMO via delegate channel authority (Model 2)",
-				"message_type", expectedContentType)
-			return raw, false, nil
-		}
-		return nil, false, fmt.Errorf("unsigned %s received but Owner public key is configured and no delegate provisioning authority; a spec-compliant deployment MUST sign provisioning messages or use a PERM.7 delegate (see fdo.bmo.md §Authorization of Provisioning Messages)", expectedContentType)
-	}
-	return raw, false, nil
+	return authorizeGated(ctx, raw, ownerKey, expectedContentType, fdoBmoProvisionAAD(), nil)
 }
 
 // Yield implements serviceinfo.DeviceModule.
@@ -374,10 +323,7 @@ func (b *BMO) handleChunkedMessage(ctx context.Context, messageName string, mess
 	// Handle the message using the chunking receiver
 	if err := b.receiver.HandleMessage(messageName, messageBody); err != nil {
 		// Extract error code from bmoURLError if available, otherwise use generic transfer error
-		errorCode := BMOErrorTransferError
-		if urlErr, ok := err.(*bmoURLError); ok {
-			errorCode = urlErr.code
-		}
+		errorCode := chunking.ErrorCode(err, BMOErrorTransferError)
 		if sendErr := b.sendError(respond, errorCode, "Transfer error", err.Error()); sendErr != nil {
 			return sendErr
 		}
@@ -432,30 +378,14 @@ func (b *BMO) onBeginAck(begin chunking.BeginMessage) (accepted bool, reasonCode
 	name, _ := begin.FSIMFields[-3].(string) // Note: -3 is name per spec, -2 is boot_args
 
 	// Check delivery mode support
-	deliveryMode := uint(0) // Default to inline
-	if dm, ok := begin.FSIMFields[-6].(uint64); ok {
-		deliveryMode = uint(dm) //#nosec G115 -- delivery mode is a small enum (0-2)
-	} else if dm, ok := begin.FSIMFields[-6].(int64); ok && dm >= 0 {
-		deliveryMode = uint(dm) //#nosec G115 -- bounds checked above
-	} else if dm, ok := begin.FSIMFields[-6].(int); ok && dm >= 0 {
-		deliveryMode = uint(dm) //#nosec G115 -- bounds checked above
-	}
-
-	// Check if delivery mode is supported
-	if !b.supportsDeliveryMode(deliveryMode) {
+	deliveryMode := begin.DeliveryMode
+	if !b.supportsDeliveryMode(deliveryMode) || deliveryMode > DeliveryModeMetaURL {
 		return false, BMOErrorDeliveryModeNotSupported, fmt.Sprintf("delivery mode %d not supported", deliveryMode)
 	}
 
 	// For URL modes, check if URLFetcher is configured
 	if (deliveryMode == DeliveryModeURL || deliveryMode == DeliveryModeMetaURL) && b.URLFetcher == nil {
 		return false, BMOErrorDeliveryModeNotSupported, "URL delivery not supported (no URLFetcher configured)"
-	}
-
-	// For meta-URL mode with signer, check if MetaPayloadVerifier is configured
-	if deliveryMode == DeliveryModeMetaURL {
-		if _, hasMetaSigner := begin.FSIMFields[-10]; hasMetaSigner && b.MetaPayloadVerifier == nil {
-			return false, BMOErrorDeliveryModeNotSupported, "signed meta-payload not supported (no MetaPayloadVerifier configured)"
-		}
 	}
 
 	// Delegate to application's AckHandler if provided
@@ -530,146 +460,59 @@ func (b *BMO) onEndUnified(ctx context.Context) func(chunking.EndMessage) error 
 			}
 		}
 
-		// Extract delivery mode
-		deliveryMode := uint(0)
-		if dm, ok := b.begin.FSIMFields[-6].(uint64); ok {
-			deliveryMode = uint(dm) //#nosec G115 -- delivery mode is a small enum (0-2)
-		} else if dm, ok := b.begin.FSIMFields[-6].(int64); ok && dm >= 0 {
-			deliveryMode = uint(dm) //#nosec G115 -- bounds checked above
-		} else if dm, ok := b.begin.FSIMFields[-6].(int); ok && dm >= 0 {
-			deliveryMode = uint(dm) //#nosec G115 -- bounds checked above
-		}
-
 		var imageData []byte
 
-		switch deliveryMode {
+		switch b.begin.DeliveryMode {
 		case DeliveryModeInline:
-			// Mode 0: Use buffered inline data
+			// Mode 0: buffered inline data. A hash in image-begin binds the
+			// bytes to the authorisation (image-end's hash is checked by the
+			// chunk receiver).
 			imageData = b.buffer.Bytes()
+			if len(b.begin.ExpectedHash) > 0 {
+				if err := b.verifyHash(imageData, b.begin.ExpectedHash, b.begin.HashAlg); err != nil {
+					b.resultStatus = 2
+					b.resultMsg = fmt.Sprintf("Hash verification failed: %v", err)
+					return &chunking.TransferError{Code: BMOErrorHashMismatch, Msg: b.resultMsg}
+				}
+			}
 			slog.Debug("fdo.bmo unified inline",
 				"image_type", imageType,
 				"name", name,
 				"size", b.begin.TotalSize,
 				"received", len(imageData))
 
-		case DeliveryModeURL:
-			// Mode 1: Fetch image from URL
-			url, _ := b.begin.FSIMFields[-7].(string)
-			tlsCA, _ := b.begin.FSIMFields[-8].([]byte)
-			expectedHash, _ := b.begin.FSIMFields[-9].([]byte)
-			hashAlg := b.begin.HashAlg
-
-			slog.Debug("fdo.bmo unified URL mode",
-				"image_type", imageType,
-				"url", url)
-
-			// Fetch image from URL
-			data, err := b.URLFetcher.Fetch(url, tlsCA)
+		case DeliveryModeURL, DeliveryModeMetaURL:
+			// Modes 1/2: fetch by reference. Every fetched object must be
+			// authenticated (chunking-strategy.md "Authenticating Fetched
+			// Content"); chunking.Resolve enforces that.
+			ownerKey := b.OwnerPublicKey
+			if ownerKey == nil {
+				ownerKey = fdo.OwnerPublicKeyFromContext(ctx)
+			}
+			res, err := chunking.Resolve(b.URLFetcher, b.begin, ownerKey)
 			if err != nil {
 				b.resultStatus = 2
-				b.resultMsg = fmt.Sprintf("URL fetch failed: %v", err)
-				slog.Error("fdo.bmo URL fetch failed", "url", url, "error", err)
-				return &bmoURLError{code: BMOErrorURLFetchFailed, message: b.resultMsg}
+				b.resultMsg = err.Error()
+				slog.Error("fdo.bmo delivery failed", "mode", b.begin.DeliveryMode, "url", b.begin.URL, "error", err)
+				return err
 			}
-
-			// Verify hash if expected
-			if len(expectedHash) > 0 {
-				if err := b.verifyHash(data, expectedHash, hashAlg); err != nil {
-					b.resultStatus = 2
-					b.resultMsg = fmt.Sprintf("Hash verification failed: %v", err)
-					slog.Error("fdo.bmo hash mismatch", "url", url, "error", err)
-					return &bmoURLError{code: BMOErrorHashMismatch, message: b.resultMsg}
+			imageData = res.Content
+			if res.Meta != nil {
+				// The meta-payload names the actual image. Resolve has already
+				// rejected an unauthenticated meta-payload carrying instruction
+				// fields, so boot_args here is authenticated.
+				imageType = res.Meta.MIMEType
+				if res.Meta.Name != "" {
+					name = res.Meta.Name
+				}
+				if res.Meta.BootArgs != "" {
+					bootArgs = res.Meta.BootArgs
 				}
 			}
-
-			imageData = data
-
-		case DeliveryModeMetaURL:
-			// Mode 2: Fetch meta-payload from URL, then fetch actual image
-			metaURL, _ := b.begin.FSIMFields[-7].(string)
-			tlsCA, _ := b.begin.FSIMFields[-8].([]byte)
-			metaSignerKey, _ := b.begin.FSIMFields[-10].([]byte)
-
-			slog.Debug("fdo.bmo unified meta-URL mode",
-				"meta_url", metaURL,
-				"has_signer", len(metaSignerKey) > 0)
-
-			// Fetch meta-payload
-			metaData, err := b.URLFetcher.Fetch(metaURL, tlsCA)
-			if err != nil {
-				b.resultStatus = 2
-				b.resultMsg = fmt.Sprintf("Meta-payload fetch failed: %v", err)
-				slog.Error("fdo.bmo meta-payload fetch failed", "url", metaURL, "error", err)
-				return &bmoURLError{code: BMOErrorURLFetchFailed, message: b.resultMsg}
-			}
-
-			// Verify signature if signer key is present
-			var metaPayloadData []byte
-			if len(metaSignerKey) > 0 {
-				if b.MetaPayloadVerifier == nil {
-					b.MetaPayloadVerifier = &CoseSign1Verifier{}
-				}
-				metaPayloadData, err = b.MetaPayloadVerifier.Verify(metaData, metaSignerKey)
-				if err != nil {
-					b.resultStatus = 2
-					b.resultMsg = fmt.Sprintf("Meta-payload signature invalid: %v", err)
-					slog.Error("fdo.bmo meta-payload signature invalid", "error", err)
-					return &bmoURLError{code: BMOErrorMetaSignatureInvalid, message: b.resultMsg}
-				}
-			} else {
-				metaPayloadData = metaData
-			}
-
-			// Parse meta-payload
-			var meta MetaPayload
-			if err := meta.UnmarshalCBOR(metaPayloadData); err != nil {
-				b.resultStatus = 2
-				b.resultMsg = fmt.Sprintf("Meta-payload parse error: %v", err)
-				slog.Error("fdo.bmo meta-payload parse error", "error", err)
-				return &bmoURLError{code: BMOErrorMetaParseError, message: b.resultMsg}
-			}
-
-			// Override imageType and other fields from meta-payload
-			imageType = meta.MIMEType
-			if meta.Name != "" {
-				name = meta.Name
-			}
-			if meta.BootArgs != "" {
-				bootArgs = meta.BootArgs
-			}
-
-			// Fetch actual image from meta-payload URL
-			imageTLSCA := meta.TLSCA
-			if len(imageTLSCA) == 0 {
-				imageTLSCA = tlsCA // Fall back to original TLS CA
-			}
-
-			slog.Debug("fdo.bmo fetching actual image from meta-payload",
-				"image_url", meta.URL,
-				"image_type", imageType)
-
-			data, err := b.URLFetcher.Fetch(meta.URL, imageTLSCA)
-			if err != nil {
-				b.resultStatus = 2
-				b.resultMsg = fmt.Sprintf("Image fetch failed: %v", err)
-				slog.Error("fdo.bmo image fetch failed", "url", meta.URL, "error", err)
-				return &bmoURLError{code: BMOErrorURLFetchFailed, message: b.resultMsg}
-			}
-
-			// Verify hash if expected in meta-payload
-			if len(meta.ExpectedHash) > 0 {
-				if err := b.verifyHash(data, meta.ExpectedHash, meta.HashAlg); err != nil {
-					b.resultStatus = 2
-					b.resultMsg = fmt.Sprintf("Image hash verification failed: %v", err)
-					slog.Error("fdo.bmo image hash mismatch", "url", meta.URL, "error", err)
-					return &bmoURLError{code: BMOErrorHashMismatch, message: b.resultMsg}
-				}
-			}
-
-			imageData = data
 
 		default:
-			return fmt.Errorf("unsupported delivery mode: %d", deliveryMode)
+			return &chunking.TransferError{Code: BMOErrorDeliveryModeNotSupported,
+				Msg: fmt.Sprintf("unsupported delivery mode: %d", b.begin.DeliveryMode)}
 		}
 
 		// Add boot args to metadata if present
@@ -693,42 +536,33 @@ func (b *BMO) onEndUnified(ctx context.Context) func(chunking.EndMessage) error 
 	}
 }
 
-// bmoURLError is an error type for URL-related errors that includes an error code.
-type bmoURLError struct {
-	code    int
-	message string
-}
-
-func (e *bmoURLError) Error() string {
-	return e.message
-}
-
 // verifyHash verifies that the data matches the expected hash.
 func (b *BMO) verifyHash(data, expectedHash []byte, hashAlg string) error {
-	var h hash.Hash
-	switch hashAlg {
-	case "sha256", "SHA256", "":
-		h = sha256.New()
-	case "sha384", "SHA384":
-		h = sha512.New384()
-	case "sha512", "SHA512":
-		h = sha512.New()
-	default:
-		return fmt.Errorf("unsupported hash algorithm: %s", hashAlg)
+	alg := strings.ToLower(hashAlg)
+	if alg == "" {
+		alg = "sha256"
 	}
-
-	h.Write(data)
-	actualHash := h.Sum(nil)
-
-	if !bytes.Equal(actualHash, expectedHash) {
-		return fmt.Errorf("hash mismatch: expected %x, got %x", expectedHash, actualHash)
-	}
-	return nil
+	return chunking.VerifyHash(alg, data, expectedHash)
 }
 
 // Chunked mode callbacks
 
 func (b *BMO) onBeginChunked(begin chunking.BeginMessage) error {
+	// Streaming mode handles inline transfers only.
+	if begin.DeliveryMode != DeliveryModeInline {
+		return &chunking.TransferError{Code: BMOErrorDeliveryModeNotSupported,
+			Msg: fmt.Sprintf("delivery mode %d not supported with a chunked image handler", begin.DeliveryMode)}
+	}
+	b.beginHasher = nil
+	if len(begin.ExpectedHash) > 0 {
+		h, err := newBeginHasher(begin.HashAlg)
+		if err != nil {
+			return err
+		}
+		b.beginHasher = h
+		b.begin = begin
+	}
+
 	imageType, ok := begin.FSIMFields[-1].(string)
 	if !ok || imageType == "" {
 		return fmt.Errorf("missing required image_type field (-1)")
@@ -759,10 +593,23 @@ func (b *BMO) onBeginChunked(begin chunking.BeginMessage) error {
 }
 
 func (b *BMO) onChunkChunked(data []byte) error {
+	if b.beginHasher != nil {
+		b.beginHasher.Write(data)
+	}
 	return b.ChunkedHandler.ReceiveChunk(data)
 }
 
 func (b *BMO) onEndChunked(end chunking.EndMessage) error {
+	// The handler has already seen the bytes; a mismatch cancels the image
+	// before it is finalized and applied.
+	if b.beginHasher != nil {
+		sum := b.beginHasher.Sum(nil)
+		b.beginHasher = nil
+		if subtle.ConstantTimeCompare(sum, b.begin.ExpectedHash) != 1 {
+			_ = b.ChunkedHandler.CancelImage()
+			return &chunking.TransferError{Code: BMOErrorHashMismatch, Msg: "image does not match expected_hash (key 8)"}
+		}
+	}
 	statusCode, message, err := b.ChunkedHandler.EndImage()
 	if err != nil {
 		return err

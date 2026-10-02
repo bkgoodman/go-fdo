@@ -306,14 +306,24 @@ go run ./cmd server -payload-file config.json -payload-log-dir ./device-logs
 # BMO FSIM - Boot image management for device updates
 go run ./cmd server -bmo application/x-iso9660-image:boot.iso
 
-# BMO FSIM with Meta-URL delivery (unsigned meta-payload served via HTTP)
-go run ./cmd server -bmo-meta-url http://cdn.example.com/meta.cbor
+# BMO FSIM with Meta-URL delivery (unsigned meta-payload served via HTTP).
+# An unsigned meta-payload is only a pointer: the image hash MUST be pinned in
+# image-begin (-bmo-meta-hash), otherwise the device refuses (error 19).
+go run ./cmd server -bmo-meta-url http://cdn.example.com/meta.cbor \
+  -bmo-meta-hash "$(sha256sum image.efi | cut -d' ' -f1)"
+
+# BMO FSIM with Meta-URL delivery, meta-payload signed by the Owner or a PERM.7
+# delegate (fdo meta create-signed -chain ...): no signer key on the server side
+go run ./cmd server -bmo-meta-url http://cdn.example.com/meta-signed.cbor
 
 # BMO FSIM with Meta-URL delivery (signed meta-payload, PEM signer key)
 go run ./cmd server -bmo-meta-url "http://cdn.example.com/meta-signed.cbor:signer-key.pem"
 
 # BMO FSIM with Meta-URL delivery (signed meta-payload, raw COSE_Key file)
 go run ./cmd server -bmo-meta-url "http://cdn.example.com/meta-signed.cbor:signer.cbor"
+
+# fdo.payload with artifact authority: payload-begin signed by the Owner key
+go run ./cmd server -payload-file config.json -payload-mime application/json -payload-sign
 
 # WiFi Configuration FSIM - Configure wireless network settings
 go run ./cmd server -wifi-config wifi-config.json
@@ -768,6 +778,12 @@ go run ./cmd meta sign \
 | `-in` | Yes | Input meta-payload CBOR file (unsigned) |
 | `-key` | Yes | PEM private key file for signing (ECDSA P-256 or P-384) |
 | `-out` | Yes | Output file path for the signed meta-payload |
+| `-chain` | No | PEM delegate certificate chain (leaf first). Signs as a provisioning Delegate: the chain is embedded as `x5chain` and must grant `provision` (PERM.7) in every certificate; the tool refuses otherwise. Devices verify it against the Owner key, so the server names **no** signer key. Use for the Owner's own release process. |
+
+**Which signer to use:**
+
+- **Named publisher** (no `-chain`): a third party (e.g. an OS vendor) signs one meta-payload for all customers; each Owner names the publisher's public key in `-bmo-meta-url URL:KEY`.
+- **Owner / Delegate** (`-chain`): the Owner's own release team signs with a PERM.7 delegate certificate; `-bmo-meta-url URL` with no key.
 
 **Key format:** The private key must be PEM-encoded ECDSA. Supported PEM block types:
 
@@ -798,6 +814,7 @@ go run ./cmd meta verify \
 | `-in` | Yes | Signed meta-payload file to verify |
 | `-key` | Yes | PEM public key file for verification |
 | `-print` | No | Print meta-payload contents after successful verification |
+| `-owner` | No | Treat `-key` as the **Owner** key: accept an Owner-signed meta-payload, or one whose embedded `x5chain` validates to the Owner key and grants PERM.7 — exactly the device's rule when `image-begin` names no signer. Get the Owner key with `server -db <db> -print-owner-public SECP256R1`. |
 
 **Key format:** The public key can be provided as:
 
@@ -832,7 +849,7 @@ go run ./cmd meta create-signed \
   -out meta-signed.cbor
 ```
 
-**Flags:** Combines all flags from `create` plus `-key` from `sign`.
+**Flags:** Combines all flags from `create` plus `-key` and the optional `-chain` (sign as a PERM.7 Delegate) from `sign`.
 
 ### Export Public Key as COSE_Key
 
@@ -906,8 +923,10 @@ The `-bmo-meta-url` flag configures the server to use meta-URL delivery mode (mo
 
 | Format | Description |
 |--------|-------------|
-| `URL` | Unsigned meta-payload. Device fetches and parses raw CBOR. |
-| `URL:KEY_FILE` | Signed meta-payload. Device verifies COSE Sign1 signature using the key. |
+| `URL` | No signer named. The meta-payload must be **signed by the Owner or a PERM.7 delegate** (`fdo meta ... -chain`), or be unsigned and used only as a pointer with `-bmo-meta-hash` set. An unsigned meta-payload carrying `boot_args`, `tls_ca` or other instruction fields is refused. |
+| `URL:KEY_FILE` | Third-party publisher named (`meta_signer`, key 9). The meta-payload MUST be signed by this key; unsigned is refused. |
+
+**`-bmo-meta-hash <hex>`** pins the SHA-256 of the final image in every meta-URL `image-begin` (key 8). Required for an unsigned meta-payload fetched over plain HTTP; recommended always. See [chunking-strategy.md, Authenticating Fetched Content](../fdo-sim/fsim-repository/chunking-strategy.md#authenticating-fetched-content).
 
 **Key file formats for signed mode:**
 

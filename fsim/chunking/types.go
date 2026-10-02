@@ -9,10 +9,43 @@
 package chunking
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
+)
+
+// Begin message keys defined by chunking-strategy.md ("Begin Message Fields").
+const (
+	BeginKeyTotalSize         = 0
+	BeginKeyHashAlg           = 1
+	BeginKeyMetadata          = 2
+	BeginKeyRequireAck        = 3
+	BeginKeyEstimatedDuration = 4
+	BeginKeyDeliveryMode      = 5
+	BeginKeyURL               = 6
+	BeginKeyTLSCA             = 7
+	BeginKeyExpectedHash      = 8
+	BeginKeyMetaSigner        = 9
+)
+
+// LegacyBeginKeyAliases maps the former fdo.bmo-local negative keys to the
+// generic delivery keys that replaced them. Receivers accept the aliases;
+// senders never emit them (chunking-strategy.md, Reserved Key Policy).
+var LegacyBeginKeyAliases = map[int]int{
+	-6:  BeginKeyDeliveryMode,
+	-7:  BeginKeyURL,
+	-8:  BeginKeyTLSCA,
+	-9:  BeginKeyExpectedHash,
+	-10: BeginKeyMetaSigner,
+}
+
+// Delivery modes (chunking-strategy.md "Delivery Modes").
+const (
+	DeliveryModeInline  uint = 0 // chunked transfer over the FDO channel (default)
+	DeliveryModeURL     uint = 1 // receiver fetches the content from URL
+	DeliveryModeMetaURL uint = 2 // receiver fetches a meta-payload naming the content
 )
 
 // BeginMessage represents the *-begin message structure from chunking-strategy.md.
@@ -25,6 +58,14 @@ type BeginMessage struct {
 	RequireAck        bool           // Key 3: If true, sender waits for *-ack before sending data
 	EstimatedDuration uint64         // Key 4: Advisory estimate of total transfer+apply time in seconds (0 = unset)
 
+	// Delivery fields (keys 5-9). Receivers also accept the legacy fdo.bmo
+	// aliases -6..-10 (see LegacyBeginKeyAliases); senders emit only 5-9.
+	DeliveryMode uint   // Key 5: 0=inline, 1=url, 2=meta-url
+	URL          string // Key 6: content URL (mode 1) or meta-payload URL (mode 2)
+	TLSCA        []byte // Key 7: DER CA certificate used as TLS trust anchor for URL
+	ExpectedHash []byte // Key 8: hash of the final content (algorithm in HashAlg)
+	MetaSigner   []byte // Key 9: COSE_Key of a third-party meta-payload publisher
+
 	// FSIM-specific fields use negative integer keys to avoid collisions
 	// Example: -1 for network_id, -2 for ssid, etc.
 	FSIMFields map[int]any
@@ -36,25 +77,52 @@ func (b *BeginMessage) MarshalCBOR() ([]byte, error) {
 
 	// Add generic fields if present
 	if b.TotalSize > 0 {
-		m[0] = b.TotalSize
+		m[BeginKeyTotalSize] = b.TotalSize
 	}
 	if b.HashAlg != "" {
-		m[1] = b.HashAlg
+		m[BeginKeyHashAlg] = b.HashAlg
 	}
 	if len(b.Metadata) > 0 {
-		m[2] = b.Metadata
+		m[BeginKeyMetadata] = b.Metadata
 	}
 	if b.RequireAck {
-		m[3] = true
+		m[BeginKeyRequireAck] = true
 	}
 	if b.EstimatedDuration > 0 {
-		m[4] = b.EstimatedDuration
+		m[BeginKeyEstimatedDuration] = b.EstimatedDuration
+	}
+	if b.DeliveryMode != DeliveryModeInline {
+		m[BeginKeyDeliveryMode] = b.DeliveryMode
+	}
+	if b.URL != "" {
+		m[BeginKeyURL] = b.URL
+	}
+	if len(b.TLSCA) > 0 {
+		m[BeginKeyTLSCA] = b.TLSCA
+	}
+	if len(b.ExpectedHash) > 0 {
+		m[BeginKeyExpectedHash] = b.ExpectedHash
+	}
+	if len(b.MetaSigner) > 0 {
+		m[BeginKeyMetaSigner] = b.MetaSigner
 	}
 
-	// Add FSIM-specific fields (negative keys)
+	// Add FSIM-specific fields (negative keys). A legacy delivery alias set
+	// by older code is translated to its generic key, never emitted as-is;
+	// if the generic field is also set to a different value, that is an error.
 	for key, val := range b.FSIMFields {
 		if key >= 0 {
 			continue // Skip non-negative keys to avoid conflicts
+		}
+		if generic, legacy := LegacyBeginKeyAliases[key]; legacy {
+			if existing, set := m[generic]; set {
+				if !sameValue(existing, val) {
+					return nil, fmt.Errorf("begin message sets key %d and legacy alias %d to different values", generic, key)
+				}
+				continue
+			}
+			m[generic] = val
+			continue
 		}
 		m[key] = val
 	}
@@ -63,6 +131,10 @@ func (b *BeginMessage) MarshalCBOR() ([]byte, error) {
 }
 
 // UnmarshalCBOR decodes BeginMessage from CBOR map format.
+//
+// Legacy fdo.bmo aliases (-6..-10) are folded into the generic delivery
+// fields. A message carrying both a generic key and its alias with different
+// values is rejected, as chunking-strategy.md requires.
 func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 	var m map[any]any
 	if err := cbor.Unmarshal(data, &m); err != nil {
@@ -70,126 +142,109 @@ func (b *BeginMessage) UnmarshalCBOR(data []byte) error {
 	}
 
 	b.FSIMFields = make(map[int]any)
-
+	fields := make(map[int]any, len(m))
 	for key, val := range m {
-		switch k := key.(type) {
-		case int:
-			switch k {
-			case 0:
-				// TotalSize can be decoded as uint64, int, or int64 depending on value
-				if v, ok := val.(uint64); ok {
-					b.TotalSize = uint64(v)
-				} else if v, ok := val.(int); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
-				} else if v, ok := val.(int64); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
+		k, ok := intKey(key)
+		if !ok {
+			continue
+		}
+		fields[k] = val
+	}
+
+	// Resolve legacy aliases into their generic keys.
+	for alias, generic := range LegacyBeginKeyAliases {
+		av, hasAlias := fields[alias]
+		if !hasAlias {
+			continue
+		}
+		if gv, hasGeneric := fields[generic]; hasGeneric && !sameValue(gv, av) {
+			return fmt.Errorf("begin message carries key %d and its legacy alias %d with different values", generic, alias)
+		}
+		fields[generic] = av
+	}
+
+	for k, val := range fields {
+		switch k {
+		case BeginKeyTotalSize:
+			switch v := val.(type) {
+			case int64:
+				if v < 0 {
+					return fmt.Errorf("total size cannot be negative")
 				}
-			case 1:
-				if v, ok := val.(string); ok {
-					b.HashAlg = v
-				}
-			case 2:
-				if v, ok := val.(map[any]any); ok {
-					b.Metadata = convertToStringMap(v)
-				}
-			case 3:
-				if v, ok := val.(bool); ok {
-					b.RequireAck = v
-				}
-			case 4:
-				b.EstimatedDuration = parseUint64(val)
-			default:
-				// Negative keys are FSIM-specific
-				if k < 0 {
-					b.FSIMFields[k] = val
+			case int:
+				if v < 0 {
+					return fmt.Errorf("total size cannot be negative")
 				}
 			}
-		case int64:
-			// Handle int64 keys (CBOR may decode negative integers as int64)
-			ki := int(k)
-			switch ki {
-			case 0:
-				if v, ok := val.(uint64); ok {
-					b.TotalSize = uint64(v)
-				} else if v, ok := val.(int); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
-				} else if v, ok := val.(int64); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
-				}
-			case 1:
-				if v, ok := val.(string); ok {
-					b.HashAlg = v
-				}
-			case 2:
-				if v, ok := val.(map[any]any); ok {
-					b.Metadata = convertToStringMap(v)
-				}
-			case 3:
-				if v, ok := val.(bool); ok {
-					b.RequireAck = v
-				}
-			case 4:
-				b.EstimatedDuration = parseUint64(val)
-			default:
-				// Negative keys are FSIM-specific
-				if ki < 0 {
-					b.FSIMFields[ki] = val
-				}
+			b.TotalSize = parseUint64(val)
+		case BeginKeyHashAlg:
+			b.HashAlg, _ = val.(string)
+		case BeginKeyMetadata:
+			if v, ok := val.(map[any]any); ok {
+				b.Metadata = convertToStringMap(v)
 			}
-		case uint64:
-			// Handle uint64 keys (CBOR may decode as uint64)
-			switch k {
-			case 0:
-				if v, ok := val.(uint64); ok {
-					b.TotalSize = uint64(v)
-				} else if v, ok := val.(int); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
-				} else if v, ok := val.(int64); ok {
-					if v >= 0 {
-						b.TotalSize = uint64(v)
-					} else {
-						return fmt.Errorf("total size cannot be negative")
-					}
-				}
-			case 1:
-				if v, ok := val.(string); ok {
-					b.HashAlg = v
-				}
-			case 2:
-				if v, ok := val.(map[any]any); ok {
-					b.Metadata = convertToStringMap(v)
-				}
-			case 3:
-				if v, ok := val.(bool); ok {
-					b.RequireAck = v
-				}
-			case 4:
-				b.EstimatedDuration = parseUint64(val)
+		case BeginKeyRequireAck:
+			b.RequireAck, _ = val.(bool)
+		case BeginKeyEstimatedDuration:
+			b.EstimatedDuration = parseUint64(val)
+		case BeginKeyDeliveryMode:
+			mode := parseUint64(val)
+			if mode > uint64(DeliveryModeMetaURL) {
+				// Unknown modes are kept as-is so the receiver can reject
+				// them with "delivery mode not supported".
+				mode = uint64(DeliveryModeMetaURL) + 1
+			}
+			b.DeliveryMode = uint(mode) //#nosec G115 -- clamped above
+		case BeginKeyURL:
+			b.URL, _ = val.(string)
+		case BeginKeyTLSCA:
+			b.TLSCA, _ = val.([]byte)
+		case BeginKeyExpectedHash:
+			b.ExpectedHash, _ = val.([]byte)
+		case BeginKeyMetaSigner:
+			b.MetaSigner, _ = val.([]byte)
+		default:
+			// Negative keys are FSIM-specific (legacy aliases are kept here
+			// too, for FSIM code that still reads them).
+			if k < 0 {
+				b.FSIMFields[k] = val
 			}
 		}
 	}
 
 	return nil
+}
+
+// intKey normalizes a CBOR-decoded map key to int.
+func intKey(key any) (int, bool) {
+	switch k := key.(type) {
+	case int:
+		return k, true
+	case int64:
+		if k < math.MinInt32 || k > math.MaxInt32 {
+			return 0, false
+		}
+		return int(k), true
+	case uint64:
+		if k > math.MaxInt32 {
+			return 0, false
+		}
+		return int(k), true //#nosec G115 -- bounds checked above
+	}
+	return 0, false
+}
+
+// sameValue compares two CBOR-decoded scalar values.
+func sameValue(a, b any) bool {
+	if ab, ok := a.([]byte); ok {
+		bb, ok := b.([]byte)
+		return ok && bytes.Equal(ab, bb)
+	}
+	if as, ok := a.(string); ok {
+		bs, ok := b.(string)
+		return ok && as == bs
+	}
+	return parseUint64(a) == parseUint64(b) && fmt.Sprint(a) == fmt.Sprint(b)
 }
 
 // EndMessage represents the *-end message structure from chunking-strategy.md.

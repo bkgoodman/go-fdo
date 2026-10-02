@@ -456,6 +456,41 @@ func TestDelegateChainRootMissingPermission(t *testing.T) {
 	}
 }
 
+// TestDelegatePermissionRequiresEveryCert verifies the FDO intersection rule:
+// a permission is granted only when every certificate in the chain carries
+// it. An intermediate lacking PERM.7 must strip it from a leaf that claims it
+// (previously only the leaf was checked).
+func TestDelegatePermissionRequiresEveryCert(t *testing.T) {
+	ownerKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	interKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	build := func(interPerms, leafPerms []asn1.ObjectIdentifier) []*x509.Certificate {
+		inter, err := fdo.GenerateDelegate(ownerKey, fdo.DelegateFlagIntermediate, interKey.Public(),
+			"Intermediate", "Owner", interPerms, x509.ECDSAWithSHA256)
+		if err != nil {
+			t.Fatalf("intermediate: %v", err)
+		}
+		leaf, err := fdo.GenerateDelegate(interKey, fdo.DelegateFlagLeaf, leafKey.Public(),
+			"Leaf", "Intermediate", leafPerms, x509.ECDSAWithSHA256)
+		if err != nil {
+			t.Fatalf("leaf: %v", err)
+		}
+		return []*x509.Certificate{leaf, inter}
+	}
+	onboard := fdo.OIDPermitOnboardNewCred
+	prov := fdo.OIDPermitProvision
+
+	// Leaf claims PERM.7, intermediate does not: NOT granted.
+	if fdo.DelegateCanProvision(build([]asn1.ObjectIdentifier{onboard}, []asn1.ObjectIdentifier{onboard, prov})) {
+		t.Error("SECURITY FAILURE: PERM.7 granted although the intermediate lacks it")
+	}
+	// Control: both carry PERM.7: granted.
+	if !fdo.DelegateCanProvision(build([]asn1.ObjectIdentifier{onboard, prov}, []asn1.ObjectIdentifier{onboard, prov})) {
+		t.Error("PERM.7 should be granted when every certificate carries it")
+	}
+}
+
 // TestDelegateCannotReuseCred verifies that a delegate with onboard-new-cred
 // permission but NOT onboard-reuse-cred cannot use the credential reuse protocol.
 func TestDelegateCannotReuseCred(t *testing.T) {

@@ -5,12 +5,14 @@ package fsim
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
+	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
@@ -40,6 +42,14 @@ type PayloadOwner struct {
 	// LogHandler receives diagnostic logs uploaded by the device. If nil, the
 	// owner declines every offered log with AckReasonDiagnosticsNotRequested.
 	LogHandler PayloadLogHandler
+
+	// Signer, if set, wraps every payload-begin in a COSE_Sign1 (artifact
+	// authority) with content type PayloadContentTypeBegin and external AAD
+	// cose.AADPayloadProvision. It must be the Owner key or a Delegate whose
+	// chain grants fdo-ekt-permit-provision. Required when this service's
+	// TO2 identity is an onboard-only Delegate; optional (channel authority)
+	// when it holds the Owner key or a PERM.7 Delegate certificate.
+	Signer ArtifactSigner
 
 	// Internal state
 	currentSender *chunking.ChunkSender
@@ -77,6 +87,14 @@ type PayloadToSend struct {
 	HashAlg           string         // Optional: Hash algorithm (e.g., "sha256")
 	RequireAck        bool           // Optional: Request ack before sending data (default: false)
 	EstimatedDuration uint64         // Optional: Advisory transfer+apply time in seconds (0 = auto-compute from size)
+
+	// Delivery by reference (chunking-strategy.md "Delivery Modes"). When
+	// DeliveryMode is URL or meta-URL, Data is not sent.
+	DeliveryMode uint   // generic key 5: 0=inline (default), 1=url, 2=meta-url
+	URL          string // generic key 6
+	TLSCA        []byte // generic key 7
+	ExpectedHash []byte // generic key 8; computed automatically for inline Data
+	MetaSigner   []byte // generic key 9: COSE_Key of a third-party meta-payload publisher
 }
 
 // PayloadResult represents the result received from the device.
@@ -152,6 +170,28 @@ func (p *PayloadOwner) AddPayloadWithAck(mimeType, name string, data []byte, met
 		Metadata:   metadata,
 		HashAlg:    "sha256",
 		RequireAck: true,
+	})
+}
+
+// AddPayloadURL adds a payload the device fetches from url (delivery mode 1).
+// expectedHash SHOULD be provided; without it the device accepts the content
+// only over TLS it can validate.
+func (p *PayloadOwner) AddPayloadURL(mimeType, name, url string, expectedHash, tlsCA []byte) {
+	p.payloads = append(p.payloads, PayloadToSend{
+		MimeType: mimeType, Name: name, HashAlg: "sha256", RequireAck: true,
+		DeliveryMode: DeliveryModeURL, URL: url, ExpectedHash: expectedHash, TLSCA: tlsCA,
+	})
+}
+
+// AddPayloadMetaURL adds a payload delivered via a meta-payload at metaURL
+// (delivery mode 2). metaSigner names a third-party publisher's COSE_Key; if
+// nil, the meta-payload must be signed by the Owner or a PERM.7 Delegate, or
+// be used as a pointer with expectedHash pinned.
+func (p *PayloadOwner) AddPayloadMetaURL(mimeType, metaURL string, metaSigner, expectedHash, tlsCA []byte) {
+	p.payloads = append(p.payloads, PayloadToSend{
+		MimeType: mimeType, HashAlg: "sha256", RequireAck: true,
+		DeliveryMode: DeliveryModeMetaURL, URL: metaURL, MetaSigner: metaSigner,
+		ExpectedHash: expectedHash, TLSCA: tlsCA,
 	})
 }
 
@@ -265,6 +305,22 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 				p.currentSender.BeginFields.EstimatedDuration = payload.EstimatedDuration
 			}
 
+			// Delivery fields (generic keys 5-9).
+			bf := &p.currentSender.BeginFields
+			bf.DeliveryMode = payload.DeliveryMode
+			bf.URL = payload.URL
+			bf.TLSCA = payload.TLSCA
+			bf.MetaSigner = payload.MetaSigner
+			bf.ExpectedHash = payload.ExpectedHash
+			if payload.DeliveryMode == DeliveryModeInline && len(bf.ExpectedHash) == 0 &&
+				len(payload.Data) > 0 && (bf.HashAlg == "" || bf.HashAlg == "sha256") {
+				// Bind the bytes to payload-begin (key 8): mandatory under
+				// artifact authority (payload-end is unsigned), recommended always.
+				h := sha256.Sum256(payload.Data)
+				bf.ExpectedHash = h[:]
+				bf.HashAlg = "sha256"
+			}
+
 			p.sendState = stateSendingBegin
 		}
 
@@ -272,7 +328,21 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 		switch p.sendState {
 		case stateSendingBegin:
 			fmt.Printf("[PayloadOwner] Sending begin message\n")
-			if err := p.currentSender.SendBegin(producer); err != nil {
+			if p.Signer != nil {
+				// Artifact authority: wrap the begin map in a COSE_Sign1. The
+				// wire key stays "payload-begin".
+				beginCBOR, err := p.currentSender.BeginFields.MarshalCBOR()
+				if err != nil {
+					return false, false, fmt.Errorf("failed to encode payload-begin for signing: %w", err)
+				}
+				signed, err := p.Signer.SignArtifact(beginCBOR, PayloadContentTypeBegin, cose.AADPayloadProvision)
+				if err != nil {
+					return false, false, fmt.Errorf("failed to sign payload-begin: %w", err)
+				}
+				if err := p.currentSender.SendBeginAs(producer, "payload-begin", signed); err != nil {
+					return false, false, fmt.Errorf("failed to send signed payload-begin: %w", err)
+				}
+			} else if err := p.currentSender.SendBegin(producer); err != nil {
 				return false, false, fmt.Errorf("failed to send begin: %w", err)
 			}
 			slog.Debug("fdo.payload sent begin",
@@ -320,6 +390,12 @@ func (p *PayloadOwner) produceInfo(ctx context.Context, producer *serviceinfo.Pr
 			fallthrough
 
 		case stateSendingChunks:
+			// Delivery by reference: no payload-data chunks; payload-end
+			// signals "fetch now".
+			if p.currentSender.BeginFields.DeliveryMode != DeliveryModeInline {
+				p.sendState = stateSendingEnd
+				return true, false, nil
+			}
 			// Send chunks one at a time, respecting MTU limits
 			chunkIndex := p.currentSender.GetBytesSent() / int64(p.currentSender.ChunkSize)
 			chunkKey := fmt.Sprintf("payload-data-%d", chunkIndex)

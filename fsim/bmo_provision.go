@@ -10,12 +10,13 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/x509"
-	"encoding/asn1"
 	"fmt"
+	"time"
 
 	fdo "github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/cose"
+	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 )
 
 // Content-type values per fdo.bmo.md §Content-Type Registry.
@@ -24,17 +25,18 @@ const (
 	BMOContentTypeSet        = "application/cbor+fdo.bmo.set"
 )
 
-// BMO error code for provisioning not authorized.
+// BMOErrorProvisionNotAuthorized is the BMO error code for provisioning not authorized.
 const BMOErrorProvisionNotAuthorized = 15
 
-// BmoScopeLabel is the protected header label for fdo.bmo.scope.
+// BmoScopeLabel is the legacy fdo.bmo scope label, still accepted by devices.
+//
+// Deprecated: senders emit the generic label chunking.ScopeLabel ("fdo.scope").
 const BmoScopeLabel = "fdo.bmo.scope"
 
 // COSE header labels.
 var (
-	contentTypeLabel    = cose.Label{Int64: 3}
-	bmoScopeLabel       = cose.Label{Str: BmoScopeLabel}
-	x5chainLabel        = cose.Label{Int64: 33} // RFC 9360: x5chain unprotected header
+	contentTypeLabel = cose.Label{Int64: 3}
+	x5chainLabel     = cose.Label{Int64: 33} // RFC 9360: x5chain unprotected header
 )
 
 // BmoScope defines the scope constraints for a BMO provisioning artifact.
@@ -85,6 +87,14 @@ type ProvisioningSigner interface {
 	Sign(payloadCBOR []byte, contentType string) ([]byte, error)
 }
 
+// ArtifactSigner signs an authorization artifact for any FSIM: the caller
+// supplies the FSIM's registered content type and external_aad
+// (chunking-strategy.md "FSIM Declarations"). OwnerSigner and DelegateSigner
+// implement it.
+type ArtifactSigner interface {
+	SignArtifact(payloadCBOR []byte, contentType string, aad []byte) ([]byte, error)
+}
+
 // OwnerSigner signs provisioning artifacts directly with the Owner key.
 // No x5chain is included in the unprotected header (Owner-direct mode).
 type OwnerSigner struct {
@@ -92,11 +102,19 @@ type OwnerSigner struct {
 	Scope *BmoScope // Optional scope constraints
 }
 
-var _ ProvisioningSigner = (*OwnerSigner)(nil)
+var (
+	_ ProvisioningSigner = (*OwnerSigner)(nil)
+	_ ArtifactSigner     = (*OwnerSigner)(nil)
+)
 
 // Sign implements ProvisioningSigner.
 func (s *OwnerSigner) Sign(payloadCBOR []byte, contentType string) ([]byte, error) {
-	return signProvisioningArtifact(payloadCBOR, contentType, s.Scope, s.Key, nil)
+	return s.SignArtifact(payloadCBOR, contentType, fdoBmoProvisionAAD())
+}
+
+// SignArtifact implements ArtifactSigner.
+func (s *OwnerSigner) SignArtifact(payloadCBOR []byte, contentType string, aad []byte) ([]byte, error) {
+	return signProvisioningArtifact(payloadCBOR, contentType, aad, s.Scope, s.Key, nil)
 }
 
 // DelegateSigner signs provisioning artifacts with a Delegate key and includes
@@ -108,40 +126,30 @@ type DelegateSigner struct {
 	Scope *BmoScope           // Optional scope constraints
 }
 
-var _ ProvisioningSigner = (*DelegateSigner)(nil)
+var (
+	_ ProvisioningSigner = (*DelegateSigner)(nil)
+	_ ArtifactSigner     = (*DelegateSigner)(nil)
+)
 
 // Sign implements ProvisioningSigner.
 func (s *DelegateSigner) Sign(payloadCBOR []byte, contentType string) ([]byte, error) {
+	return s.SignArtifact(payloadCBOR, contentType, fdoBmoProvisionAAD())
+}
+
+// SignArtifact implements ArtifactSigner.
+func (s *DelegateSigner) SignArtifact(payloadCBOR []byte, contentType string, aad []byte) ([]byte, error) {
 	if len(s.Chain) == 0 {
 		return nil, fmt.Errorf("DelegateSigner requires at least one certificate in Chain")
 	}
-	// Verify the leaf carries OIDPermitProvision before signing.
-	leaf := s.Chain[0]
-	if !hasOID(leaf, fdo.OIDPermitProvision) {
-		return nil, fmt.Errorf("delegate leaf certificate does not carry OIDPermitProvision (PERM.7)")
+	// The chain must grant OIDPermitProvision: present in every certificate.
+	if !fdo.DelegateHasPermission(s.Chain, fdo.OIDPermitProvision) {
+		return nil, fmt.Errorf("delegate chain does not grant OIDPermitProvision (PERM.7) in every certificate")
 	}
-	return signProvisioningArtifact(payloadCBOR, contentType, s.Scope, s.Key, s.Chain)
-}
-
-// hasOID checks whether a certificate carries a given OID in its
-// ExtKeyUsage or UnhandledCriticalExtensions / ExtraExtensions.
-func hasOID(cert *x509.Certificate, target asn1.ObjectIdentifier) bool {
-	for _, ext := range cert.Extensions {
-		if ext.Id.Equal(target) {
-			return true
-		}
-	}
-	// Also check parsed ExtKeyUsage OIDs (Go may parse some into enums).
-	for _, oid := range cert.UnknownExtKeyUsage {
-		if oid.Equal(target) {
-			return true
-		}
-	}
-	return false
+	return signProvisioningArtifact(payloadCBOR, contentType, aad, s.Scope, s.Key, s.Chain)
 }
 
 // signProvisioningArtifact is the shared implementation for OwnerSigner and DelegateSigner.
-func signProvisioningArtifact(payloadCBOR []byte, contentType string, scope *BmoScope, signer *ecdsa.PrivateKey, chain []*x509.Certificate) ([]byte, error) {
+func signProvisioningArtifact(payloadCBOR []byte, contentType string, aad []byte, scope *BmoScope, signer *ecdsa.PrivateKey, chain []*x509.Certificate) ([]byte, error) {
 	if signer == nil {
 		return nil, fmt.Errorf("signer is required")
 	}
@@ -154,7 +162,7 @@ func signProvisioningArtifact(payloadCBOR []byte, contentType string, scope *Bmo
 	var sign1 cose.Sign1[[]byte, []byte]
 	sign1.Payload = cbor.NewByteWrap(payloadCBOR)
 
-	// Protected header: { 1: alg, 3: contentType, ?"fdo.bmo.scope": scope }
+	// Protected header: { 1: alg, 3: contentType, ?"fdo.scope": scope }
 	sign1.Protected = make(cose.HeaderMap)
 	sign1.Protected[contentTypeLabel] = contentType
 	if scope != nil {
@@ -162,7 +170,7 @@ func signProvisioningArtifact(payloadCBOR []byte, contentType string, scope *Bmo
 		if err != nil {
 			return nil, fmt.Errorf("marshaling scope: %w", err)
 		}
-		sign1.Protected[bmoScopeLabel] = cbor.RawBytes(scopeCBOR)
+		sign1.Protected[chunking.ScopeLabel] = cbor.RawBytes(scopeCBOR)
 	}
 
 	// Unprotected header: { ?33: x5chain }
@@ -176,8 +184,7 @@ func signProvisioningArtifact(payloadCBOR []byte, contentType string, scope *Bmo
 		}
 	}
 
-	// Sign with external AAD = CBOR(["FDO-FSIM-BmoProvision-v1"])
-	aad := fdoBmoProvisionAAD()
+	// Sign with the FSIM's registered external AAD.
 	if err := sign1.Sign(signer, nil, aad, opts); err != nil {
 		return nil, fmt.Errorf("COSE Sign1 signing failed: %w", err)
 	}
@@ -186,158 +193,19 @@ func signProvisioningArtifact(payloadCBOR []byte, contentType string, scope *Bmo
 }
 
 // VerifyBmoSigned verifies a COSE_Sign1-wrapped provisioning artifact against
-// the TO2-proven Owner public key. It checks content_type, verifies the
-// signature using the BMO provisioning AAD, and validates delegate x5chain
-// when present.
+// the TO2-proven Owner public key, using the generic verifier
+// (chunking.VerifyArtifact) with the BMO provisioning AAD. Scope is evaluated
+// with the system clock and no device GUID or generation storage, so an
+// artifact carrying a "guid" or "generation" constraint is rejected; devices
+// should use VerifyBmoSignedScoped.
 //
 // Returns the inner payload CBOR on success.
 func VerifyBmoSigned(signedData []byte, ownerKey crypto.PublicKey, expectedContentType string) ([]byte, error) {
-	if ownerKey == nil {
-		return nil, fmt.Errorf("ownerKey is required for provisioning verification")
-	}
-
-	var sign1Tag cose.Sign1Tag[[]byte, []byte]
-	if err := cbor.Unmarshal(signedData, &sign1Tag); err != nil {
-		return nil, fmt.Errorf("failed to parse COSE_Sign1: %w", err)
-	}
-
-	// Check content_type in protected header
-	var ct string
-	if ok, err := sign1Tag.Protected.Parse(contentTypeLabel, &ct); err != nil {
-		return nil, fmt.Errorf("failed to parse content_type: %w", err)
-	} else if !ok {
-		return nil, fmt.Errorf("missing content_type in protected header")
-	}
-	if ct != expectedContentType {
-		return nil, fmt.Errorf("content_type mismatch: expected %q, got %q", expectedContentType, ct)
-	}
-
-	// Determine verification key: Owner-direct or Delegate x5chain.
-	verifyKey := ownerKey
-	if sign1Tag.Unprotected != nil && sign1Tag.Unprotected[x5chainLabel] != nil {
-		// Delegate mode: x5chain present.
-		delegateKey, err := verifyDelegateChain(sign1Tag.Unprotected[x5chainLabel], ownerKey)
-		if err != nil {
-			return nil, fmt.Errorf("delegate chain verification failed: %w", err)
-		}
-		verifyKey = delegateKey
-	}
-
-	// Verify signature with external AAD
-	aad := fdoBmoProvisionAAD()
-	valid, err := sign1Tag.Verify(verifyKey, nil, aad)
-	if err != nil {
-		return nil, fmt.Errorf("signature verification error: %w", err)
-	}
-	if !valid {
-		return nil, fmt.Errorf("signature verification failed")
-	}
-
-	if sign1Tag.Payload == nil {
-		return nil, fmt.Errorf("COSE_Sign1 has no payload")
-	}
-
-	return sign1Tag.Payload.Val, nil
+	return VerifyBmoSignedScoped(signedData, ownerKey, expectedContentType, chunking.ScopeContext{Now: time.Now})
 }
 
-// verifyDelegateChain validates the x5chain from the unprotected header.
-// The chain must be leaf-first, the leaf must carry OIDPermitProvision,
-// and the root must be signed by (or be) the Owner key.
-// Returns the leaf's public key on success.
-func verifyDelegateChain(x5chainRaw interface{}, ownerKey crypto.PublicKey) (crypto.PublicKey, error) {
-	// x5chain is an array of bstr (DER certs), leaf first.
-	var derCerts [][]byte
-
-	// The CBOR library may decode as []interface{} or [][]byte.
-	switch v := x5chainRaw.(type) {
-	case []interface{}:
-		for _, item := range v {
-			b, ok := item.([]byte)
-			if !ok {
-				return nil, fmt.Errorf("x5chain entry is not a byte string")
-			}
-			derCerts = append(derCerts, b)
-		}
-	case [][]byte:
-		derCerts = v
-	default:
-		return nil, fmt.Errorf("x5chain has unexpected type %T", x5chainRaw)
-	}
-
-	if len(derCerts) == 0 {
-		return nil, fmt.Errorf("x5chain is empty")
-	}
-
-	// Parse all certificates.
-	certs := make([]*x509.Certificate, len(derCerts))
-	for i, der := range derCerts {
-		cert, err := x509.ParseCertificate(der)
-		if err != nil {
-			return nil, fmt.Errorf("parsing x5chain cert %d: %w", i, err)
-		}
-		certs[i] = cert
-	}
-
-	// Leaf must carry OIDPermitProvision.
-	leaf := certs[0]
-	if !hasOID(leaf, fdo.OIDPermitProvision) {
-		return nil, fmt.Errorf("delegate leaf certificate does not carry OIDPermitProvision (PERM.7)")
-	}
-
-	// Verify chain: each cert must be signed by the next, and the last must
-	// be signed by the Owner key.
-	for i := 0; i < len(certs)-1; i++ {
-		if err := certs[i].CheckSignatureFrom(certs[i+1]); err != nil {
-			return nil, fmt.Errorf("delegate chain: cert %d not signed by cert %d: %w", i, i+1, err)
-		}
-	}
-
-	// The last cert must be signed by the Owner key.
-	lastCert := certs[len(certs)-1]
-	ownerECKey, ok := ownerKey.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("Owner key is %T, expected *ecdsa.PublicKey", ownerKey)
-	}
-
-	// Build a synthetic self-signed cert-like structure to verify the last cert
-	// against the Owner key. We check if the last cert's issuer key matches the
-	// Owner key, or if it's a self-referencing chain.
-	//
-	// For a single-cert chain (self-signed delegate issued by Owner):
-	// the cert was signed by the Owner key directly.
-	if err := lastCert.CheckSignature(lastCert.SignatureAlgorithm, lastCert.RawTBSCertificate, lastCert.Signature); err != nil {
-		// The cert is not self-signed; check if it was signed by the Owner.
-		_ = ownerECKey // We need to verify using the Owner key.
-	}
-
-	// More direct approach: use ecdsa.VerifyASN1 on the raw TBS.
-	if !verifyWithOwnerKey(lastCert, ownerECKey) {
-		return nil, fmt.Errorf("delegate chain: root certificate not signed by Owner key")
-	}
-
-	return leaf.PublicKey, nil
-}
-
-// verifyWithOwnerKey checks that a certificate was signed by the Owner key.
-func verifyWithOwnerKey(cert *x509.Certificate, ownerKey *ecdsa.PublicKey) bool {
-	return ecdsa.VerifyASN1(ownerKey, hashForSignature(cert), cert.Signature)
-}
-
-// hashForSignature computes the hash of the TBS certificate using the
-// algorithm indicated by the certificate's signature algorithm.
-func hashForSignature(cert *x509.Certificate) []byte {
-	var hash crypto.Hash
-	switch cert.SignatureAlgorithm {
-	case x509.ECDSAWithSHA256:
-		hash = crypto.SHA256
-	case x509.ECDSAWithSHA384:
-		hash = crypto.SHA384
-	case x509.ECDSAWithSHA512:
-		hash = crypto.SHA512
-	default:
-		hash = crypto.SHA256
-	}
-	h := hash.New()
-	h.Write(cert.RawTBSCertificate)
-	return h.Sum(nil)
+// VerifyBmoSignedScoped is VerifyBmoSigned with an explicit scope context
+// (device GUID, trusted clock, generation storage).
+func VerifyBmoSignedScoped(signedData []byte, ownerKey crypto.PublicKey, expectedContentType string, sc chunking.ScopeContext) ([]byte, error) {
+	return chunking.VerifyArtifact(signedData, ownerKey, expectedContentType, fdoBmoProvisionAAD(), sc)
 }

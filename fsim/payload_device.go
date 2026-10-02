@@ -6,15 +6,26 @@ package fsim
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/subtle"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 
+	fdo "github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cbor"
+	"github.com/fido-device-onboard/go-fdo/cose"
 	"github.com/fido-device-onboard/go-fdo/fsim/chunking"
 	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
+
+// PayloadContentTypeBegin is the registered content type of a signed
+// fdo.payload:payload-begin (fdo.payload.md, "Authorization of Payload
+// Delivery"). Its external_aad is cose.AADPayloadProvision.
+const PayloadContentTypeBegin = "application/cbor+fdo.payload.payload-begin"
 
 // UnifiedPayloadHandler receives complete payloads at once.
 // The framework handles all chunking transparently - the application just processes the complete payload.
@@ -140,6 +151,27 @@ type Payload struct {
 	// defaultMaxLogSize. Output beyond the cap is truncated and flagged.
 	MaxLogSize int
 
+	// payload-begin is authorization-gated (chunking-strategy.md
+	// "Authorization of Begin Messages"): it is accepted signed by the Owner
+	// or a PERM.7 Delegate, or unsigned from a TO2 peer that holds
+	// provisioning authority.
+
+	// OwnerPublicKey overrides the TO2-proven Owner key taken from ctx
+	// (fdo.OwnerPublicKeyFromContext). Normally left nil.
+	OwnerPublicKey crypto.PublicKey
+
+	// UnauthorizedMIMETypes is a documented local policy (fdo.payload.md): MIME
+	// types accepted unsigned even from a peer WITHOUT provisioning authority
+	// (e.g. an onboard-only Delegate). For these types that peer is
+	// effectively a provisioning authority; list only genuinely low-risk
+	// types. Empty (the default) means none.
+	UnauthorizedMIMETypes []string
+
+	// URLFetcher enables delivery modes 1 (URL) and 2 (meta-URL) in unified
+	// mode. If nil, those modes are rejected with error 14. Implement
+	// chunking.ValidatingFetcher to let validated TLS count as evidence.
+	URLFetcher chunking.URLFetcher
+
 	// Active indicates if the module is active
 	Active bool
 
@@ -150,6 +182,7 @@ type Payload struct {
 	resultStatus int
 	resultMsg    string
 	logSender    *chunking.ChunkSender
+	beginHasher  hash.Hash // chunked mode: running hash for begin expected_hash
 }
 
 var _ serviceinfo.DeviceModule = (*Payload)(nil)
@@ -171,6 +204,16 @@ func (p *Payload) Receive(ctx context.Context, messageName string, messageBody i
 		return p.handleLogAck(messageBody, respond)
 	}
 
+	// payload-begin is authorization-gated.
+	if messageName == "payload-begin" {
+		inner, err := p.authorizeBegin(ctx, messageBody)
+		if err != nil {
+			slog.Error("fdo.payload: payload-begin rejected", "error", err)
+			return p.sendError(respond, chunking.ErrorCode(err, chunking.CodeNotAuthorized), "Provisioning not authorized", err.Error())
+		}
+		return p.handleChunkedMessage(ctx, messageName, bytes.NewReader(inner), respond)
+	}
+
 	// Handle chunked payload messages
 	if strings.HasPrefix(messageName, "payload-") {
 		return p.handleChunkedMessage(ctx, messageName, messageBody, respond)
@@ -178,6 +221,60 @@ func (p *Payload) Receive(ctx context.Context, messageName string, messageBody i
 
 	// Silently ignore unknown messages for protocol compatibility
 	return nil
+}
+
+// authorizeBegin authorizes payload-begin and returns the inner (unsigned)
+// begin map.
+func (p *Payload) authorizeBegin(ctx context.Context, body io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read payload-begin: %w", err)
+	}
+	ownerKey := p.OwnerPublicKey
+	if ownerKey == nil {
+		ownerKey = fdo.OwnerPublicKeyFromContext(ctx)
+	}
+	inner, signed, err := authorizeGated(ctx, raw, ownerKey, PayloadContentTypeBegin, cose.AADPayloadProvision, p.allowUnauthorized)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSignedBeginBindsContent(inner, signed); err != nil {
+		return nil, &chunking.TransferError{Code: chunking.CodeNotAuthorized, Msg: err.Error()}
+	}
+	return inner, nil
+}
+
+// allowUnauthorized applies the UnauthorizedMIMETypes local policy.
+func (p *Payload) allowUnauthorized(inner []byte) (bool, string) {
+	if len(p.UnauthorizedMIMETypes) == 0 {
+		return false, ""
+	}
+	var begin chunking.BeginMessage
+	if err := begin.UnmarshalCBOR(inner); err != nil {
+		return false, ""
+	}
+	mime, _ := begin.FSIMFields[-1].(string)
+	if begin.DeliveryMode == chunking.DeliveryModeInline && slices.Contains(p.UnauthorizedMIMETypes, mime) {
+		return true, "UnauthorizedMIMETypes includes " + mime
+	}
+	return false, ""
+}
+
+// checkDeliveryMode validates the delivery mode for the configured handler.
+func (p *Payload) checkDeliveryMode(begin chunking.BeginMessage) error {
+	switch begin.DeliveryMode {
+	case chunking.DeliveryModeInline:
+		return nil
+	case chunking.DeliveryModeURL, chunking.DeliveryModeMetaURL:
+		if p.UnifiedHandler == nil || p.URLFetcher == nil {
+			return &chunking.TransferError{Code: chunking.CodeDeliveryModeNotSupported,
+				Msg: fmt.Sprintf("delivery mode %d requires a unified handler and a URLFetcher", begin.DeliveryMode)}
+		}
+		return nil
+	default:
+		return &chunking.TransferError{Code: chunking.CodeDeliveryModeNotSupported,
+			Msg: fmt.Sprintf("delivery mode %d not supported", begin.DeliveryMode)}
+	}
 }
 
 // Yield implements serviceinfo.DeviceModule.
@@ -231,7 +328,7 @@ func (p *Payload) handleChunkedMessage(ctx context.Context, messageName string, 
 	// Handle the message using the chunking receiver
 	if err := p.receiver.HandleMessage(messageName, messageBody); err != nil {
 		// On error, send error response and reset
-		if sendErr := p.sendError(respond, 6, "Transfer error", err.Error()); sendErr != nil {
+		if sendErr := p.sendError(respond, chunking.ErrorCode(err, 6), "Transfer error", err.Error()); sendErr != nil {
 			return sendErr
 		}
 		p.receiver = nil
@@ -403,6 +500,9 @@ func (p *Payload) handleLogAck(messageBody io.Reader, respond func(string) io.Wr
 // onBeginAck is called when payload-begin with RequireAck=true is received.
 // It delegates to the AckHandler to decide whether to accept or reject.
 func (p *Payload) onBeginAck(begin chunking.BeginMessage) (accepted bool, reasonCode int, message string) {
+	if err := p.checkDeliveryMode(begin); err != nil {
+		return false, chunking.ErrorCode(err, chunking.CodeDeliveryModeNotSupported), err.Error()
+	}
 	if p.AckHandler == nil {
 		// No handler, accept by default
 		return true, 0, ""
@@ -434,6 +534,9 @@ func (p *Payload) onBeginAck(begin chunking.BeginMessage) (accepted bool, reason
 
 // onBeginUnified is called when payload-begin is received in unified mode.
 func (p *Payload) onBeginUnified(begin chunking.BeginMessage) error {
+	if err := p.checkDeliveryMode(begin); err != nil {
+		return err
+	}
 	if begin.EstimatedDuration > 0 {
 		slog.Info("fdo.payload: server estimates transfer+apply time",
 			"estimated_duration_sec", begin.EstimatedDuration,
@@ -482,14 +585,44 @@ func (p *Payload) onEndUnified(ctx context.Context) func(chunking.EndMessage) er
 			}
 		}
 
+		data := p.buffer.Bytes()
+		size := p.begin.TotalSize
+		switch p.begin.DeliveryMode {
+		case chunking.DeliveryModeInline:
+			// A hash in payload-begin binds the bytes to the authorisation
+			// (payload-end's hash is checked by the chunk receiver).
+			if err := verifyBeginHash(data, p.begin); err != nil {
+				return err
+			}
+		default:
+			// Modes 1/2: every fetched object must be authenticated
+			// (chunking-strategy.md "Authenticating Fetched Content").
+			ownerKey := p.OwnerPublicKey
+			if ownerKey == nil {
+				ownerKey = fdo.OwnerPublicKeyFromContext(ctx)
+			}
+			res, err := chunking.Resolve(p.URLFetcher, p.begin, ownerKey)
+			if err != nil {
+				return err
+			}
+			data = res.Content
+			size = uint64(len(data))
+			if res.Meta != nil {
+				mimeType = res.Meta.MIMEType
+				if res.Meta.Name != "" {
+					name = res.Meta.Name
+				}
+			}
+		}
+
 		slog.Debug("fdo.payload unified",
 			"mime_type", mimeType,
 			"name", name,
-			"size", p.begin.TotalSize,
-			"received", p.buffer.Len())
+			"size", size,
+			"received", len(data))
 
 		// Call unified handler with complete payload
-		statusCode, message, err := p.UnifiedHandler.HandlePayload(ctx, mimeType, name, p.begin.TotalSize, metadata, p.buffer.Bytes())
+		statusCode, message, err := p.UnifiedHandler.HandlePayload(ctx, mimeType, name, size, metadata, data)
 		if err != nil {
 			return err
 		}
@@ -507,6 +640,19 @@ func (p *Payload) onEndUnified(ctx context.Context) func(chunking.EndMessage) er
 
 // onBeginChunked is called when payload-begin is received in chunked mode.
 func (p *Payload) onBeginChunked(begin chunking.BeginMessage) error {
+	if err := p.checkDeliveryMode(begin); err != nil {
+		return err
+	}
+	p.beginHasher = nil
+	if len(begin.ExpectedHash) > 0 {
+		h, err := newBeginHasher(begin.HashAlg)
+		if err != nil {
+			return err
+		}
+		p.beginHasher = h
+		p.begin = begin
+	}
+
 	// Extract MIME type from field -1 (required per fdo.payload.md)
 	mimeType, ok := begin.FSIMFields[-1].(string)
 	if !ok || mimeType == "" {
@@ -553,11 +699,25 @@ func (p *Payload) onBeginChunked(begin chunking.BeginMessage) error {
 
 // onChunkChunked is called for each payload-data-<n> chunk in chunked mode.
 func (p *Payload) onChunkChunked(data []byte) error {
+	if p.beginHasher != nil {
+		p.beginHasher.Write(data)
+	}
 	return p.ChunkedHandler.ReceiveChunk(data)
 }
 
 // onEndChunked is called when payload-end is received in chunked mode.
 func (p *Payload) onEndChunked(end chunking.EndMessage) error {
+	// The application has already seen the bytes, so a mismatch cancels the
+	// payload before it is finalized and applied.
+	if p.beginHasher != nil {
+		sum := p.beginHasher.Sum(nil)
+		p.beginHasher = nil
+		if subtle.ConstantTimeCompare(sum, p.begin.ExpectedHash) != 1 {
+			_ = p.ChunkedHandler.CancelPayload()
+			return &chunking.TransferError{Code: chunking.CodeHashMismatch, Msg: "payload does not match expected_hash (key 8)"}
+		}
+	}
+
 	// Finalize and apply the payload
 	statusCode, message, err := p.ChunkedHandler.EndPayload()
 	if err != nil {

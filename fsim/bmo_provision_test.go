@@ -194,7 +194,7 @@ func TestUnwrapProvisioning_UnsignedAcceptedWithDelegateProvision(t *testing.T) 
 	// This MUST be accepted.
 	owner := genECKey(t)
 	bmo := &BMO{OwnerPublicKey: owner.Public()}
-	ctx := fdo.WithDelegateProvisionAuthority(context.Background(), true)
+	ctx := fdo.WithPeerAuthority(context.Background(), fdo.PeerDelegateProvision)
 
 	inner, signed, err := bmo.unwrapProvisioning(ctx, bytes.NewReader(unsignedCBOR), BMOContentTypeImageBegin)
 	if err != nil {
@@ -213,11 +213,89 @@ func TestUnwrapProvisioning_UnsignedRejectedWithoutProvisionPerm(t *testing.T) {
 	// Unsigned BMO MUST still be rejected.
 	owner := genECKey(t)
 	bmo := &BMO{OwnerPublicKey: owner.Public()}
-	ctx := fdo.WithDelegateProvisionAuthority(context.Background(), false)
+	ctx := fdo.WithPeerAuthority(context.Background(), fdo.PeerDelegateOnboardOnly)
 
 	_, _, err := bmo.unwrapProvisioning(ctx, bytes.NewReader(unsignedCBOR), BMOContentTypeImageBegin)
 	if err == nil {
 		t.Fatal("expected unsigned BMO to be rejected when delegate lacks provision authority")
+	}
+}
+
+// Model 1: the Owner itself is the TO2 peer. Unsigned MUST be accepted —
+// channel authority is REQUIRED and enabled by default. (Previously this was
+// rejected whenever an Owner key was known, because a single bool could not
+// distinguish "Owner-direct" from "onboard-only delegate".)
+func TestUnwrapProvisioning_UnsignedAcceptedOwnerDirect(t *testing.T) {
+	owner := genECKey(t)
+	bmo := &BMO{OwnerPublicKey: owner.Public()}
+	ctx := fdo.WithPeerAuthority(context.Background(), fdo.PeerOwnerDirect)
+
+	inner, signed, err := bmo.unwrapProvisioning(ctx, bytes.NewReader(unsignedCBOR), BMOContentTypeImageBegin)
+	if err != nil {
+		t.Fatalf("expected unsigned BMO from Owner-direct peer to be accepted: %v", err)
+	}
+	if signed || !bytes.Equal(inner, unsignedCBOR) {
+		t.Fatal("unexpected signed flag or inner payload")
+	}
+}
+
+// Onboard-only delegate: unsigned MUST be rejected, for both gated messages,
+// even though the Owner key is known. This is the H4 case.
+func TestUnwrapProvisioning_UnsignedRejectedOnboardOnlyDelegate(t *testing.T) {
+	owner := genECKey(t)
+	bmo := &BMO{OwnerPublicKey: owner.Public()}
+	ctx := fdo.WithPeerAuthority(context.Background(), fdo.PeerDelegateOnboardOnly)
+
+	for _, ct := range []string{BMOContentTypeImageBegin, BMOContentTypeSet} {
+		if _, _, err := bmo.unwrapProvisioning(ctx, bytes.NewReader(unsignedCBOR), ct); err == nil {
+			t.Fatalf("%s: expected unsigned message from onboard-only delegate to be rejected", ct)
+		}
+	}
+}
+
+// Onboard-only delegate relaying an Owner-signed artifact: MUST be accepted.
+// This is the relay path delegation exists for.
+func TestUnwrapProvisioning_OnboardOnlyDelegateRelaysOwnerSigned(t *testing.T) {
+	owner := genECKey(t)
+	signer := &OwnerSigner{Key: owner}
+	payload := []byte{0xA1, 0x01, 0x02}
+	signedMsg, err := signer.Sign(payload, BMOContentTypeImageBegin)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	bmo := &BMO{OwnerPublicKey: owner.Public()}
+	ctx := fdo.WithPeerAuthority(context.Background(), fdo.PeerDelegateOnboardOnly)
+
+	inner, signed, err := bmo.unwrapProvisioning(ctx, bytes.NewReader(signedMsg), BMOContentTypeImageBegin)
+	if err != nil {
+		t.Fatalf("expected Owner-signed artifact relayed by onboard-only delegate to be accepted: %v", err)
+	}
+	if !signed || !bytes.Equal(inner, payload) {
+		t.Fatal("unexpected signed flag or inner payload")
+	}
+}
+
+// Same bytes, only the peer varies: proves each decision is attributable to
+// the peer authority.
+func TestUnsignedProvisioningAllowed_Matrix(t *testing.T) {
+	cases := []struct {
+		peer     fdo.PeerAuthority
+		ownerKey bool
+		want     bool
+	}{
+		{fdo.PeerOwnerDirect, true, true},
+		{fdo.PeerDelegateProvision, true, true},
+		{fdo.PeerDelegateOnboardOnly, true, false},
+		{fdo.PeerUnknown, true, false},
+		{fdo.PeerUnknown, false, true},
+	}
+	for _, c := range cases {
+		if got, _ := unsignedProvisioningAllowed(c.peer, c.ownerKey); got != c.want {
+			t.Errorf("peer=%s ownerKey=%v: got %v, want %v", c.peer, c.ownerKey, got, c.want)
+		}
+		if c.ownerKey && c.peer != fdo.PeerUnknown && c.want != c.peer.HasProvisionAuthority() {
+			t.Errorf("peer=%s: HasProvisionAuthority disagrees with decision", c.peer)
+		}
 	}
 }
 

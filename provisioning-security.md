@@ -388,25 +388,25 @@ Mapping the concepts above to their protocol-level implementations, for develope
 
 | This document says | Protocol term | Reference |
 |---|---|---|
-| Approval "in the connection" (models 1, 2) | Channel authority | [fdo.bmo.md, Channel Authority](../fdo-sim/fsim-repository/fdo.bmo.md#channel-authority) |
-| Approval "in the payload" (models 3, 4) | Artifact authority; `COSE_Sign1` envelope in CBOR tag 18 | [fdo.bmo.md, COSE_Sign1 Structure](../fdo-sim/fsim-repository/fdo.bmo.md#cosesign1-structure) |
+| Approval "in the connection" (models 1, 2) | Channel authority | [chunking-strategy.md, Channel Authority](../fdo-sim/fsim-repository/chunking-strategy.md#channel-authority) |
+| Approval "in the payload" (models 3, 4) | Artifact authority; `COSE_Sign1` envelope in CBOR tag 18 | [chunking-strategy.md, COSE_Sign1 Structure](../fdo-sim/fsim-repository/chunking-strategy.md#cose_sign1-structure) |
 | "Certificate saying someone may run the service" | Delegate certificate presented in `TO2.ProveOVHdr` (unprotected header label 258) | FDO 2.0 Specification |
 | "Certificate saying someone may sign payloads" | Delegate certificate in the `x5chain` unprotected header (COSE label 33) | RFC 9360 |
-| **Onboard** permission | `fdo-ekt-permit-onboard-new-cred` (PERM.1) / `fdo-ekt-permit-onboard-reuse-cred` (PERM.2) | FDO 2.0 Specification |
-| **Provision** permission | `fdo-ekt-permit-provision` (PERM.7), OID `1.3.6.1.4.1.45724.3.1.7` | FDO 2.0 Specification |
-| Redirect permission | `fdo-ekt-permit-redirect` (PERM.6) | FDO 2.0 Specification |
-| Device binding | `fdo.bmo.scope.guid` -- compared against the voucher GUID | [Scope Constraints](../fdo-sim/fsim-repository/fdo.bmo.md#scope-constraints) |
-| Expiration | `fdo.bmo.scope.not_before` / `not_after`, Unix seconds UTC | [Scope Constraints](../fdo-sim/fsim-repository/fdo.bmo.md#scope-constraints) |
-| Supersession | `fdo.bmo.scope.generation` -- monotonic counter in rollback-protected storage | [Scope Constraints](../fdo-sim/fsim-repository/fdo.bmo.md#scope-constraints) |
+| **Onboard** permission | `fdo-ekt-permit-onboard-new-cred` (PERM.2) / `fdo-ekt-permit-onboard-reuse-cred` (PERM.3) / `fdo-ekt-permit-onboard-fdo-disable` (PERM.4) | FDO 2.0 Specification |
+| **Provision** permission | `fdo-ekt-permit-provision` (PERM.7), OID `1.3.6.1.4.1.45724.3.1.7` | [chunking-strategy.md, Signer](../fdo-sim/fsim-repository/chunking-strategy.md#signer) (deferred in the core FDO 2.0 specification) |
+| Redirect permission | `fdo-ekt-permit-redirect` (PERM.1) | FDO 2.0 Specification |
+| Device binding | `fdo.scope` `guid` -- compared against the voucher GUID (legacy label `fdo.bmo.scope`) | [Scope Constraints](../fdo-sim/fsim-repository/chunking-strategy.md#scope-constraints) |
+| Expiration | `fdo.scope` `not_before` / `not_after`, Unix seconds UTC | [Scope Constraints](../fdo-sim/fsim-repository/chunking-strategy.md#scope-constraints) |
+| Supersession | `fdo.scope` `generation` -- monotonic counter in rollback-protected storage | [Scope Constraints](../fdo-sim/fsim-repository/chunking-strategy.md#scope-constraints) |
 | "The Owner key the device already holds" | Owner public key from the final Ownership Voucher entry, proven during `TO2.ProveOVHdr` | FDO Specification |
 | Onboarding session | TO2 (Transfer of Ownership 2) | FDO Specification |
-| Payloads subject to approval | `fdo.bmo:image-begin`, `fdo.bmo:set` | [fdo.bmo.md](../fdo-sim/fsim-repository/fdo.bmo.md) |
+| Payloads subject to approval | `fdo.bmo:image-begin`, `fdo.bmo:set`, `fdo.payload:payload-begin` | [FSIM Declarations](../fdo-sim/fsim-repository/chunking-strategy.md#fsim-declarations) |
 
 ### Permission evaluation across a chain
 
 A permission is granted only when the OID is present in **every** certificate in the chain -- the usual FDO intersection rule. An intermediate that omits `fdo-ekt-permit-provision` strips it from every certificate below, regardless of what the leaf asserts.
 
-This is what makes the onboard/provision split in [The Fine Print](#the-fine-print-any-service-doesnt-mean-any-service) enforceable rather than advisory: a delegate issued a chain carrying only PERM.1/PERM.2 cannot acquire PERM.7 by issuing itself a sub-certificate that claims it.
+This is what makes the onboard/provision split in [The Fine Print](#the-fine-print-any-service-doesnt-mean-any-service) enforceable rather than advisory: a delegate issued a chain carrying only onboard permissions (PERM.2–4) cannot acquire PERM.7 by issuing itself a sub-certificate that claims it.
 
 Two independent places carry delegate chains, and they are evaluated separately:
 
@@ -428,21 +428,22 @@ The device distinguishes the two forms by the first byte of the message body:
 
 ### Verification algorithm
 
-Normative version: [fdo.bmo.md, Device Verification Algorithm](../fdo-sim/fsim-repository/fdo.bmo.md#device-verification-algorithm). Summary:
+Normative version: [chunking-strategy.md, Verification Algorithm](../fdo-sim/fsim-repository/chunking-strategy.md#verification-algorithm). Summary:
 
 1. Parse `COSE_Sign1`; check protected `content_type` against the message key.
 2. `x5chain` present (delegate signature): validate the chain to the Owner key, require PERM.7 on the leaf, use the leaf public key for verification.
 3. `x5chain` absent (Owner-direct): use the Owner public key.
-4. Verify the signature with `external_aad = CBOR(["FDO-FSIM-BmoProvision-v1"])`.
-5. Evaluate `fdo.bmo.scope`; fail closed on any constraint the device cannot evaluate (errors 16/17/18).
+4. Verify the signature with the FSIM's registered `external_aad` (for BMO, `CBOR(["FDO-FSIM-BmoProvision-v1"])`).
+5. Evaluate the `fdo.scope` header; fail closed on any constraint the device cannot evaluate (errors 16/17/18).
 6. Commit monotonic state, then decode and process the inner payload.
 
 No downgrade: once the body is recognized as tag 18, failure is terminal. The device must not reinterpret it as an unsigned message.
 
 ### References
 
-- **[Authorization of Provisioning Messages](../fdo-sim/fsim-repository/fdo.bmo.md#authorization-of-provisioning-messages)** -- Normative: verification algorithm, scope constraints, conformance, channel vs. artifact authority.
-- **[Chunking Strategy: Authorization of Begin Messages](../fdo-sim/fsim-repository/chunking-strategy.md#authorization-of-begin-messages)** -- How approval integrates with the common chunked-transfer pattern.
+- **[Chunking Strategy: Authorization of Begin Messages](../fdo-sim/fsim-repository/chunking-strategy.md#authorization-of-begin-messages)** -- Normative: verification algorithm, scope constraints, conformance, channel vs. artifact authority, for every FSIM.
+- **[Chunking Strategy: Delivery Modes](../fdo-sim/fsim-repository/chunking-strategy.md#delivery-modes)** -- URL and meta-URL delivery and authenticating fetched content.
+- **[fdo.bmo: Authorization of Provisioning Messages](../fdo-sim/fsim-repository/fdo.bmo.md#authorization-of-provisioning-messages)** -- BMO's declarations under that model.
 - **[fdo.bmo FSIM Specification](../fdo-sim/fsim-repository/fdo.bmo.md)** -- Full BMO protocol: message schemas, delivery modes, firmware configuration.
 - **[fdo.payload FSIM Specification](../fdo-sim/fsim-repository/fdo.payload.md)** -- Payload delivery for OS-stage provisioning.
 - **[General-Purpose Onboarding Appnote](fdo-appnote-general-purpose-onboarding.bs)** -- Multi-stage onboarding architecture and FSIM design.

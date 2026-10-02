@@ -3,65 +3,23 @@
 
 package fsim
 
-import (
-	"fmt"
+import "github.com/fido-device-onboard/go-fdo/fsim/chunking"
 
-	"github.com/fido-device-onboard/go-fdo/cbor"
-	"github.com/fido-device-onboard/go-fdo/cose"
-)
-
-// CoseSign1Verifier is the default MetaPayloadVerifier implementation.
-// It verifies COSE Sign1 signatures on meta-payloads using the signer key
-// provided by the owner during the FSIM exchange.
+// CoseSign1Verifier verifies a meta-payload signed by a named publisher key
+// (the meta_signer, begin key 9). It is a convenience for tools such as
+// fdo-meta-tool; devices use chunking.Resolve, which also covers Owner- and
+// PERM.7 delegate-signed meta-payloads. Both go through
+// chunking.VerifyMetaPayload, so the rules are identical.
 //
-// The signerKey parameter is a CBOR-encoded COSE_Key (RFC 8152 Section 7).
-// The signedPayload is a CBOR-encoded COSE_Sign1 structure (tag 18).
-// On success, the inner payload (the MetaPayload CBOR) is returned.
-//
-// This verifier supports EC2 keys (P-256, P-384, P-521) with ECDSA
-// signature algorithms (ES256, ES384, ES512).
+// signerKey is a CBOR-encoded COSE_Key; signedPayload is a tagged
+// COSE_Sign1. On success the inner MetaPayload CBOR is returned. An unsigned
+// input is rejected: naming a signer never downgrades to unsigned.
 type CoseSign1Verifier struct{}
 
-// Verify checks the COSE Sign1 signature on a meta-payload.
-// signerKey is a CBOR-encoded COSE_Key used for verification.
-// signedPayload is a CBOR-encoded COSE_Sign1 (tagged) structure.
-// Returns the inner payload (MetaPayload CBOR) if signature is valid.
+// Verify checks the COSE Sign1 signature on a meta-payload against signerKey.
 func (v *CoseSign1Verifier) Verify(signedPayload []byte, signerKey []byte) ([]byte, error) {
-	// Parse the COSE_Key from the signer key bytes
-	var key cose.Key
-	if err := cbor.Unmarshal(signerKey, &key); err != nil {
-		return nil, fmt.Errorf("failed to parse COSE_Key: %w", err)
-	}
-
-	// Extract the public key for verification
-	pubKey, err := key.Public()
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract public key from COSE_Key: %w", err)
-	}
-
-	// Parse the COSE_Sign1 tagged structure
-	// Payload type is []byte (raw CBOR bytes = the MetaPayload)
-	// External AAD type is []byte (nil = no external AAD)
-	var sign1Tag cose.Sign1Tag[[]byte, []byte]
-	if err := cbor.Unmarshal(signedPayload, &sign1Tag); err != nil {
-		return nil, fmt.Errorf("failed to parse COSE_Sign1: %w", err)
-	}
-
-	// Verify the signature with MetaPayload domain separation tag
-	valid, err := sign1Tag.Verify(pubKey, nil, cose.AADMetaPayload)
-	if err != nil {
-		return nil, fmt.Errorf("signature verification error: %w", err)
-	}
-	if !valid {
-		return nil, fmt.Errorf("signature verification failed: invalid signature")
-	}
-
-	// Extract and return the inner payload
-	if sign1Tag.Payload == nil {
-		return nil, fmt.Errorf("COSE_Sign1 has no payload")
-	}
-
-	return sign1Tag.Payload.Val, nil
+	inner, _, err := chunking.VerifyMetaPayload(signedPayload, signerKey, nil)
+	return inner, err
 }
 
 // NewCoseSign1Verifier creates a new CoseSign1Verifier instance.

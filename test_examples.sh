@@ -790,7 +790,9 @@ test_payload_fdo200() {
 	# Create a random test file (10KB to test multi-chunk transfer)
 	# Default chunk size is 1014 bytes, so 10KB will require ~10 chunks
 	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload_fdo200.bin"
-	RECEIVED_FILE="$EPHEMERAL_DIR/test_payload_fdo200.bin"
+	# The client saves received payloads to examples/<name>.
+	RECEIVED_FILE="examples/test_payload_fdo200.bin"
+	rm -f "$RECEIVED_FILE"
 	log_step "Creating random test file (10KB for multi-chunk transfer)"
 	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=10 2>/dev/null
 	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
@@ -893,6 +895,69 @@ EOF
 
 # Test: Payload FSIM
 # This test demonstrates the fdo.payload FSIM by sending a file and verifying it's received correctly
+# Test: fdo.payload with artifact authority — payload-begin signed by the
+# Owner key (-payload-sign). The device verifies it as a COSE_Sign1 with
+# content type application/cbor+fdo.payload.payload-begin.
+test_payload_signed() {
+	log_section "TEST: Payload FSIM — Owner-Signed payload-begin"
+
+	mkdir -p "$EPHEMERAL_DIR"
+	rm -f "$DB_FILE" "$CRED_FILE"
+	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload_signed.bin"
+	RECEIVED_FILE="examples/test_payload_signed.bin"
+	rm -f "$RECEIVED_FILE"
+	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=6 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
+
+	start_server "-payload-file ../$PAYLOAD_FILE -payload-mime application/octet-stream -payload-sign"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
+	run_cmd go run ./cmd client -kex ECDH256 || return 1
+	stop_server
+
+	if ! grep -q "payload-begin will be signed" "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null; then
+		log_error "Server did not sign payload-begin"
+		return 1
+	fi
+	if [ ! -f "$RECEIVED_FILE" ] || [ "$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')" != "$ORIGINAL_HASH" ]; then
+		log_error "Signed payload not delivered intact"
+		return 1
+	fi
+	rm -f "$PAYLOAD_FILE" "$RECEIVED_FILE"
+	log_success "Payload signed payload-begin test PASSED"
+}
+
+# Test: fdo.payload negative — an onboard-only delegate (no PERM.7) sends an
+# UNSIGNED payload-begin. payload-begin is authorization-gated, so the device
+# MUST refuse it (error 15).
+test_payload_delegate_noperm() {
+	log_section "TEST: Payload FSIM — Onboard-Only Delegate, Unsigned (negative)"
+
+	mkdir -p "$EPHEMERAL_DIR"
+	rm -f "$DB_FILE" "$CRED_FILE"
+	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload_noperm.bin"
+	RECEIVED_FILE="examples/test_payload_noperm.bin"
+	rm -f "$RECEIVED_FILE"
+	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=4 2>/dev/null
+
+	start_server "-owner-certs"
+	stop_server
+	run_cmd go run ./cmd delegate -db "../$DB_FILE" create payOnboardOnly onboard SECP256R1 ec256 || return 1
+
+	start_server "-owner-certs -onboardDelegate payOnboardOnly -payload-file ../$PAYLOAD_FILE -payload-mime application/octet-stream"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
+	run_cmd go run ./cmd client -kex ECDH256 2>/dev/null || true
+	stop_server
+
+	if [ -f "$RECEIVED_FILE" ]; then
+		log_error "Device accepted an unsigned payload-begin from an onboard-only delegate"
+		rm -f "$PAYLOAD_FILE" "$RECEIVED_FILE"
+		return 1
+	fi
+	log_success "Device refused unsigned payload-begin from onboard-only delegate"
+	rm -f "$PAYLOAD_FILE"
+	log_success "Payload onboard-only delegate negative test PASSED"
+}
+
 test_payload() {
 	log_section "TEST: Payload FSIM"
 
@@ -902,7 +967,9 @@ test_payload() {
 	# Create a random test file (10KB to test multi-chunk transfer)
 	# Default chunk size is 1014 bytes, so 10KB will require ~10 chunks
 	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload.bin"
-	RECEIVED_FILE="$EPHEMERAL_DIR/test_payload.bin"
+	# The client saves received payloads to examples/<name>.
+	RECEIVED_FILE="examples/test_payload.bin"
+	rm -f "$RECEIVED_FILE"
 	log_step "Creating random test file (10KB for multi-chunk transfer)"
 	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=10 2>/dev/null
 	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
@@ -1214,7 +1281,9 @@ test_payload_large_mtu() {
 	# Create a 100KB test file — with large MTU (65535), this should use ~60KB chunks
 	# (only ~2 chunks), whereas with the old 1014-byte default it would need ~100 chunks.
 	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload_large_mtu.bin"
-	RECEIVED_FILE="$EPHEMERAL_DIR/test_payload_large_mtu.bin"
+	# The client saves received payloads to examples/<name>.
+	RECEIVED_FILE="examples/test_payload_large_mtu.bin"
+	rm -f "$RECEIVED_FILE"
 	log_step "Creating 100KB test file"
 	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=100 2>/dev/null
 	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
@@ -1267,7 +1336,9 @@ test_payload_default_mtu() {
 	# Same 100KB file — with default MTU (14000), chunks should be ~13897 bytes,
 	# needing ~8 chunks instead of ~2 with large MTU.
 	PAYLOAD_FILE="$EPHEMERAL_DIR/test_payload_default_mtu.bin"
-	RECEIVED_FILE="$EPHEMERAL_DIR/test_payload_default_mtu.bin"
+	# The client saves received payloads to examples/<name>.
+	RECEIVED_FILE="examples/test_payload_default_mtu.bin"
+	rm -f "$RECEIVED_FILE"
 	log_step "Creating 100KB test file"
 	dd if=/dev/urandom of="$PAYLOAD_FILE" bs=1024 count=100 2>/dev/null
 	ORIGINAL_HASH=$(sha256sum "$PAYLOAD_FILE" | awk '{print $1}')
@@ -1401,9 +1472,8 @@ test_bmo() {
 	ORIGINAL_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
 	log_success "Created test boot image: $BMO_FILE (hash: $ORIGINAL_HASH)"
 
-	# -bmo-sign is required: commit be69942 enforces spec-compliant signed
-	# provisioning messages (image-begin MUST be COSE_Sign1 when device has
-	# owner public key from TO2).
+	# -bmo-sign exercises artifact authority here. (Unsigned from the Owner
+	# is also valid — channel authority — see test_bmo_owner_unsigned.)
 	start_server "-bmo application/x-iso9660-image:../$BMO_FILE -bmo-sign"
 
 	log_step "Running DI"
@@ -1500,52 +1570,52 @@ test_bmo_signed() {
 test_bmo_signed_scope() {
 	log_section "TEST: BMO FSIM Authenticated Provisioning with Scope"
 
-	mkdir -p "$EPHEMERAL_DIR"
-	rm -f "$DB_FILE" "$CRED_FILE"
-
 	BMO_FILE="$EPHEMERAL_DIR/test_bmo_scope_image.bin"
-	log_step "Creating random test boot image (10KB) for scoped delivery"
+	mkdir -p "$EPHEMERAL_DIR"
 	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=10 2>/dev/null
 	ORIGINAL_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
 
-	# Use scope constraints: not_before in the past, not_after in the future, generation=1
-	start_server "-bmo application/x-iso9660-image:../$BMO_FILE -bmo-sign -bmo-scope-not-before 2025-01-01T00:00:00Z -bmo-scope-not-after 2030-01-01T00:00:00Z -bmo-scope-generation 1"
+	# scope_leg <description> <expect: accept|reject> <scope flags...>
+	scope_leg() {
+		local desc="$1" expect="$2"
+		shift 2
+		log_step "Scope leg: $desc (expect $expect)"
+		rm -f "$DB_FILE" "$CRED_FILE" examples/bmo-*
+		start_server "-bmo application/x-iso9660-image:../$BMO_FILE -bmo-sign $*"
+		run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
+		run_cmd go run ./cmd client -kex ECDH256 2>/dev/null || true
+		stop_server
+		local received
+		received=$(find examples/ -maxdepth 1 -name "bmo-*" -type f 2>/dev/null | head -1)
+		if [ "$expect" = "accept" ]; then
+			if [ -z "$received" ] || [ "$(sha256sum "$received" | awk '{print $1}')" != "$ORIGINAL_HASH" ]; then
+				log_error "Scope leg '$desc': image not delivered intact"
+				return 1
+			fi
+		elif [ -n "$received" ]; then
+			log_error "Scope leg '$desc': device accepted an artifact whose scope it must reject"
+			return 1
+		fi
+		log_success "Scope leg '$desc' behaved as expected ($expect)"
+	}
 
-	log_step "Running DI"
-	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
-	log_success "DI completed"
+	# Positive: validity window containing now. go-fdo runs with an OS clock,
+	# so it can evaluate not_before/not_after.
+	scope_leg "validity window contains now" accept \
+		-bmo-scope-not-before 2025-01-01T00:00:00Z -bmo-scope-not-after 2035-01-01T00:00:00Z || return 1
 
-	log_step "Running TO1/TO2 with SCOPED signed BMO image-begin"
-	run_cmd go run ./cmd client -kex ECDH256 || return 1
-	log_success "TO1/TO2 completed with scoped signed BMO provisioning"
+	# Negative: expired window (error 17).
+	scope_leg "expired validity window" reject \
+		-bmo-scope-not-before 2024-01-01T00:00:00Z -bmo-scope-not-after 2025-01-01T00:00:00Z || return 1
 
-	stop_server
+	# Negative: generation. go-fdo has no rollback-protected storage, so it
+	# MUST reject an artifact carrying generation rather than ignore it
+	# (error 18, chunking-strategy.md "Unevaluable constraints"). This used
+	# to be accepted because the device did not evaluate scope at all.
+	scope_leg "generation without rollback-protected storage" reject \
+		-bmo-scope-not-before 2025-01-01T00:00:00Z -bmo-scope-not-after 2035-01-01T00:00:00Z -bmo-scope-generation 1 || return 1
 
-	# Find received file
-	RECEIVED_FILE=$(find examples/ -maxdepth 1 -name "bmo-*" -type f 2>/dev/null | head -1)
-	if [ -z "$RECEIVED_FILE" ]; then
-		log_error "No BMO received file found"
-		rm -f "$BMO_FILE"
-		return 1
-	fi
-	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
-
-	if [ "$ORIGINAL_HASH" = "$RECEIVED_HASH" ]; then
-		log_success "Scoped signed BMO transfer integrity verified"
-	else
-		log_error "Hash mismatch! Original: $ORIGINAL_HASH, Received: $RECEIVED_HASH"
-		rm -f "$BMO_FILE" "$RECEIVED_FILE"
-		return 1
-	fi
-
-	# Check server log for scope output
-	if grep -q "scope:" "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null; then
-		log_success "Server logged scope constraints"
-	else
-		log_warn "Server did not log scope constraints (check log manually)"
-	fi
-
-	rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
+	rm -f "$BMO_FILE" examples/bmo-*
 	log_success "BMO FSIM scoped signed-provisioning test PASSED"
 }
 
@@ -1879,9 +1949,32 @@ test_bmo_meta_url() {
 	fi
 	log_success "Created meta-payload: $META_FILE"
 
-	# Start FDO server with meta-URL mode
 	META_URL="http://127.0.0.1:$HTTP_PORT/meta.cbor"
+
+	# Negative leg: an unsigned meta-payload over plain HTTP with no image hash
+	# pinned in image-begin is authenticated by nothing, so the device MUST
+	# refuse it (error 19, chunking-strategy.md "Authenticating Fetched Content").
+	log_step "Negative: unsigned meta over HTTP, no pinned hash (expect refusal)"
 	start_server "-bmo-meta-url $META_URL -bmo-sign"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || {
+		kill $HTTP_PID 2>/dev/null
+		return 1
+	}
+	run_cmd go run ./cmd client -kex ECDH256 2>/dev/null || true
+	stop_server
+	if [ -f "$RECEIVED_FILE" ]; then
+		log_error "Device accepted an unauthenticated meta-payload with no pinned image hash"
+		kill $HTTP_PID 2>/dev/null
+		rm -f "$BMO_FILE" "$META_FILE" "$RECEIVED_FILE"
+		return 1
+	fi
+	log_success "Device refused unauthenticated meta-payload (no image delivered)"
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	# Positive leg: the same unsigned meta-payload, used as a pointer, with the
+	# image hash pinned in the (signed) image-begin.
+	log_step "Positive: unsigned meta as pointer, image hash pinned in image-begin"
+	start_server "-bmo-meta-url $META_URL -bmo-meta-hash $IMAGE_HASH -bmo-sign"
 
 	log_step "Running DI"
 	# Use EC-P256 key type to match the BMO signing key
@@ -1928,6 +2021,87 @@ test_bmo_meta_url() {
 	# Cleanup
 	rm -f "$BMO_FILE" "$META_FILE" "$RECEIVED_FILE" bmo-*
 	log_success "BMO FSIM Meta-URL Mode test PASSED"
+}
+
+# Test: BMO meta-URL with a meta-payload signed by a PERM.7 delegate chain
+# ("Owner's release train"). image-begin names NO meta_signer; the device
+# verifies the meta-payload's embedded x5chain against the TO2-proven Owner
+# key. Also checks that `fdo meta` refuses to sign with an onboard-only chain.
+test_bmo_meta_delegate_signed() {
+	log_section "TEST: BMO Meta-URL — Delegate (x5chain) Signed Meta-Payload"
+
+	mkdir -p "$EPHEMERAL_DIR"
+	rm -f "$DB_FILE" "$CRED_FILE" examples/bmo-*
+
+	BMO_FILE="$EPHEMERAL_DIR/actual_image_x5.bin"
+	META_FILE="$EPHEMERAL_DIR/meta-x5.cbor"
+	RECEIVED_FILE="examples/bmo-x5-image"
+	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=6 2>/dev/null
+	IMAGE_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
+
+	log_step "Creating database and delegate chains (PERM.7 and onboard-only)"
+	start_server "-owner-certs"
+	stop_server
+	run_cmd go run ./cmd delegate -db "../$DB_FILE" create relDelegate provision SECP256R1 ec256 || return 1
+	run_cmd go run ./cmd delegate -db "../$DB_FILE" create noProvDelegate onboard SECP256R1 ec256 || return 1
+	for d in relDelegate noProvDelegate; do
+		(cd examples && go run ./cmd delegate -db "../$DB_FILE" print $d) >"$EPHEMERAL_DIR/$d.chain.pem" || return 1
+		(cd examples && go run ./cmd delegate -db "../$DB_FILE" key $d) >"$EPHEMERAL_DIR/$d.key.pem" || return 1
+	done
+
+	HTTP_PORT=18083
+	IMAGE_URL="http://127.0.0.1:$HTTP_PORT/$(basename "$BMO_FILE")"
+	META_URL="http://127.0.0.1:$HTTP_PORT/$(basename "$META_FILE")"
+
+	log_step "Negative: fdo meta refuses to sign with a chain lacking PERM.7"
+	if (cd examples && go run ./cmd meta create-signed -mime application/x-raw-disk-image -url "$IMAGE_URL" \
+		-hash-file "../$BMO_FILE" -name x5-image -key "../$EPHEMERAL_DIR/noProvDelegate.key.pem" \
+		-chain "../$EPHEMERAL_DIR/noProvDelegate.chain.pem" -out "../$META_FILE") 2>/dev/null; then
+		log_error "fdo meta signed a meta-payload with an onboard-only delegate chain"
+		return 1
+	fi
+	log_success "fdo meta refused the onboard-only chain"
+
+	log_step "Signing meta-payload with the PERM.7 delegate chain"
+	(cd examples && go run ./cmd meta create-signed -mime application/x-raw-disk-image -url "$IMAGE_URL" \
+		-hash-file "../$BMO_FILE" -name x5-image -key "../$EPHEMERAL_DIR/relDelegate.key.pem" \
+		-chain "../$EPHEMERAL_DIR/relDelegate.chain.pem" -out "../$META_FILE") || return 1
+
+	log_step "fdo meta verify -owner: x5chain validates to the Owner key"
+	(cd examples && go run ./cmd server -db "../$DB_FILE" -print-owner-public SECP256R1) >"$EPHEMERAL_DIR/owner_pub.pem" || return 1
+	if ! (cd examples && go run ./cmd meta verify -owner -in "../$META_FILE" -key "../$EPHEMERAL_DIR/owner_pub.pem"); then
+		log_error "fdo meta verify -owner rejected a valid delegate-signed meta-payload"
+		return 1
+	fi
+	log_success "fdo meta verify -owner accepted the delegate-signed meta-payload"
+
+	cd "$EPHEMERAL_DIR" || return 1
+	python3 -m http.server $HTTP_PORT &>/dev/null &
+	HTTP_PID=$!
+	cd - >/dev/null || return 1
+	sleep 1
+
+	# No signer key in the spec: image-begin carries no meta_signer.
+	start_server "-owner-certs -bmo-meta-url $META_URL -bmo-sign"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || {
+		kill $HTTP_PID 2>/dev/null
+		return 1
+	}
+	run_cmd go run ./cmd client -kex ECDH256 || {
+		kill $HTTP_PID 2>/dev/null
+		return 1
+	}
+	stop_server
+	kill $HTTP_PID 2>/dev/null
+
+	if [ ! -f "$RECEIVED_FILE" ] || [ "$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')" != "$IMAGE_HASH" ]; then
+		log_error "Delegate-signed meta-payload: image not delivered intact"
+		return 1
+	fi
+	log_success "Delegate (x5chain) signed meta-payload verified against the Owner key; image intact"
+
+	rm -f "$BMO_FILE" "$META_FILE" "$RECEIVED_FILE" "$EPHEMERAL_DIR"/*Delegate.*.pem
+	log_success "BMO meta-URL delegate-signed test PASSED"
 }
 
 # Test: BMO FSIM Meta-URL Signed Mode
@@ -2489,14 +2663,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create BeginFields with expected hash in FSIMFields[-9]
+	// Create BeginFields with the expected image hash (generic key 8).
 	hash := sha256.Sum256(imageData)
 	bf := chunking.BeginMessage{
-		TotalSize:  uint64(len(imageData)),
-		HashAlg:    "sha256",
+		TotalSize:    uint64(len(imageData)),
+		HashAlg:      "sha256",
+		ExpectedHash: hash[:],
 		FSIMFields: map[int]any{
 			-1: "application/x-iso9660-image",
-			-9: hash[:],
 		},
 	}
 
@@ -2759,69 +2933,57 @@ GOCBOR
 	log_success "Meta-Tool Round-Trip test PASSED"
 }
 
-# Test: BMO provisioning COSE negative test — unsigned provisioning rejected
-# when the device has an Owner public key (from TO2 voucher walk).
-# This verifies the device enforces the spec requirement that provisioning
-# messages MUST be signed when the device knows the Owner key.
-test_bmo_signed_negative() {
-	log_section "TEST: BMO Signed Provisioning — Negative (unsigned rejected)"
+# Test: BMO Model 1 — the Owner itself is the TO2 peer and sends UNSIGNED
+# provisioning. Channel authority is REQUIRED and enabled by default
+# (chunking-strategy.md §Channel Authority), so the device MUST accept it.
+#
+# This test replaces an earlier negative test that asserted the opposite: the
+# device rejected unsigned provisioning from the Owner whenever it knew the
+# Owner key, because a single bool could not distinguish Owner-direct from an
+# onboard-only delegate. The device now records the TO2 peer authority
+# explicitly (fdo.PeerAuthority). Unsigned rejection is covered by
+# bmo-delegate-unsigned-noperm (onboard-only delegate).
+test_bmo_owner_unsigned() {
+	log_section "TEST: BMO Model 1 — Owner-Direct Unsigned Provisioning (positive)"
 
 	mkdir -p "$EPHEMERAL_DIR"
 	rm -f "$DB_FILE" "$CRED_FILE"
 
-	BMO_FILE="$EPHEMERAL_DIR/test_bmo_neg.bin"
-	RECEIVED_FILE="examples/bmo-test_bmo_neg.bin"
+	BMO_FILE="$EPHEMERAL_DIR/test_bmo_owner_unsigned.bin"
+	RECEIVED_FILE="examples/bmo-test_bmo_owner_unsigned.bin"
 	log_step "Creating random test boot image (5KB)"
 	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=5 2>/dev/null
+	ORIGINAL_HASH=$(sha256sum "$BMO_FILE" | awk '{print $1}')
 
-	# Start server WITHOUT -bmo-sign — sends unsigned image-begin.
-	# The go-fdo device should reject this because it has the Owner public key
-	# from the TO2 voucher walk and requires signed provisioning.
+	# Start server WITHOUT -bmo-sign and without a delegate: the Owner sends
+	# an unsigned image-begin over its own TO2 session.
 	start_server "-bmo application/x-iso9660-image:../$BMO_FILE"
 
 	log_step "Running DI"
 	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
 	log_success "DI completed"
 
-	log_step "Running TO1/TO2 (expecting BMO rejection of unsigned provisioning)"
-	if run_cmd go run ./cmd client -kex ECDH256 2>/dev/null; then
-		# The protocol may complete at the TO2 level, but the BMO payload
-		# should NOT have been accepted.
-		if [ -f "$RECEIVED_FILE" ]; then
-			log_error "Device accepted unsigned BMO — should have rejected it"
-			rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
-			return 1
-		fi
-		# TO2 completed but BMO was rejected — check logs
-		if grep -q "unsigned.*MUST sign\|unsigned.*Owner public key" "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null; then
-			log_success "TO2 completed but device correctly rejected unsigned provisioning"
-		else
-			# The error might appear differently — check for any BMO error
-			if grep -q "BMO.*error\|BMOError\|unsigned" "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null; then
-				log_success "TO2 completed, BMO rejection detected in server log"
-			else
-				log_error "TO2 completed without BMO error — device may have accepted unsigned provisioning"
-				cat "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null | tail -20
-				rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
-				return 1
-			fi
-		fi
-	else
-		log_success "TO2 correctly failed — device rejected unsigned provisioning"
-	fi
+	log_step "Running TO1/TO2 (Owner-direct, unsigned BMO, expecting acceptance)"
+	run_cmd go run ./cmd client -kex ECDH256 || return 1
+	log_success "TO1/TO2 completed"
 
 	stop_server
 
-	# The received file should NOT exist
-	if [ -f "$RECEIVED_FILE" ]; then
-		log_error "Received file exists despite unsigned provisioning — should have been rejected"
+	if [ ! -f "$RECEIVED_FILE" ]; then
+		log_error "Received file not found — device rejected unsigned BMO from the Owner (Model 1 must be accepted)"
+		rm -f "$BMO_FILE"
+		return 1
+	fi
+	RECEIVED_HASH=$(sha256sum "$RECEIVED_FILE" | awk '{print $1}')
+	if [ "$ORIGINAL_HASH" != "$RECEIVED_HASH" ]; then
+		log_error "Hash mismatch after Owner-direct unsigned BMO transfer"
 		rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
 		return 1
 	fi
-	log_success "No payload file created — device correctly blocked unsigned provisioning"
+	log_success "Owner-direct unsigned BMO accepted and integrity verified"
 
 	rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
-	log_success "BMO Signed Provisioning negative test PASSED"
+	log_success "BMO Model 1 Owner-direct unsigned test PASSED"
 }
 
 # Test: Payload FSIM NAK (device rejects first type, accepts second)
@@ -2835,7 +2997,9 @@ test_payload_nak() {
 	# Create test files
 	PAYLOAD_FILE_1="$EPHEMERAL_DIR/test_unsupported_payload.bin"
 	PAYLOAD_FILE_2="$EPHEMERAL_DIR/test_supported_payload.json"
-	RECEIVED_FILE="$EPHEMERAL_DIR/test_supported_payload.json"
+	# The client saves received payloads to examples/<name>.
+	RECEIVED_FILE="examples/test_supported_payload.json"
+	rm -f "$RECEIVED_FILE"
 
 	log_step "Creating test payloads"
 	echo '{"unsupported": true}' >"$PAYLOAD_FILE_1"
@@ -3273,7 +3437,10 @@ test_all() {
 	test_bmo_delegate_unsigned_noperm || failed=1
 	test_bmo_presigned || failed=1
 	test_bmo_presigned_metatool || failed=1
-	test_bmo_signed_negative || failed=1
+	test_bmo_owner_unsigned || failed=1
+	test_payload_signed || failed=1
+	test_payload_delegate_noperm || failed=1
+	test_bmo_meta_delegate_signed || failed=1
 	test_payload_nak || failed=1
 	test_rv_firmware_tags || failed=1
 	test_credentials || failed=1
@@ -3434,8 +3601,17 @@ main() {
 	bmo-presigned-metatool)
 		test_bmo_presigned_metatool || rc=$?
 		;;
-	bmo-signed-negative)
-		test_bmo_signed_negative || rc=$?
+	payload-signed)
+		test_payload_signed || rc=$?
+		;;
+	payload-delegate-noperm)
+		test_payload_delegate_noperm || rc=$?
+		;;
+	bmo-owner-unsigned)
+		test_bmo_owner_unsigned || rc=$?
+		;;
+	bmo-meta-delegate-signed)
+		test_bmo_meta_delegate_signed || rc=$?
 		;;
 	payload-nak)
 		test_payload_nak || rc=$?
@@ -3454,7 +3630,7 @@ main() {
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, delegate-csr, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-signed-negative, rv-firmware-tags, credentials, auth, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, delegate-csr, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-owner-unsigned, bmo-meta-delegate-signed, payload-signed, payload-delegate-noperm, rv-firmware-tags, credentials, auth, all"
 		exit 1
 		;;
 	esac

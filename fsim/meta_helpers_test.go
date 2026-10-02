@@ -301,13 +301,10 @@ func TestAutoDefaultVerifier(t *testing.T) {
 		t.Fatalf("MarshalSignerPublicKey failed: %v", err)
 	}
 
-	// Simulate auto-default: this mirrors bmo_device.go behavior
-	// where nil → &CoseSign1Verifier{}
-	var verifier MetaPayloadVerifier = &CoseSign1Verifier{}
-
+	verifier := &CoseSign1Verifier{}
 	payload, err := verifier.Verify(signed, pubKeyCBOR)
 	if err != nil {
-		t.Fatalf("Auto-defaulted verifier failed: %v", err)
+		t.Fatalf("CoseSign1Verifier failed: %v", err)
 	}
 
 	var meta MetaPayload
