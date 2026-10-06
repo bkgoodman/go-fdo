@@ -508,7 +508,9 @@ func (b *BMOOwner) produceInfo(ctx context.Context, producer *serviceinfo.Produc
 				}
 
 				b.biosParamIndex = len(b.biosParams) // all sent in one message
-				b.biosSendState = bmoBiosStateIdle
+				// The set is atomic and the device answers it with exactly
+				// one response (fdo.bmo.md "Atomicity"); wait for it.
+				b.biosSendState = bmoBiosStateWaitingResponse
 				return false, false, nil
 			}
 		}
@@ -619,7 +621,13 @@ func (b *BMOOwner) receive(ctx context.Context, key string, messageBody io.Reade
 		}
 
 		if len(responseData) >= 1 {
-			statusCode, _ := responseData[0].(int)
+			statusCode := -1
+			switch v := responseData[0].(type) {
+			case int64:
+				statusCode = int(v)
+			case uint64:
+				statusCode = int(v) //nolint:gosec // status codes are small
+			}
 			message := ""
 			if len(responseData) >= 2 {
 				message, _ = responseData[1].(string)
@@ -640,11 +648,12 @@ func (b *BMOOwner) receive(ctx context.Context, key string, messageBody io.Reade
 				errorCode:   nil,
 			}
 
-			// If status is an error, we might want to stop sending BIOS parameters
 			if statusCode == 2 {
-				b.biosSendState = bmoBiosStateIdle
+				slog.Warn("fdo.bmo: device rejected BIOS set; no parameters applied", "message", message)
 			}
 		}
+		// One response completes the set (atomic, fdo.bmo.md "Atomicity")
+		b.biosSendState = bmoBiosStateIdle
 
 	default:
 		if debugEnabled() {

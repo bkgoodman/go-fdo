@@ -64,32 +64,29 @@ func TO1(ctx context.Context, transport Transport, cred DeviceCredential, key cr
 
 // HelloRV(30) -> HelloRVAck(31)
 func helloRv(ctx context.Context, transport Transport, cred DeviceCredential, key crypto.Signer, opts crypto.SignerOpts) (protocol.Nonce, error) {
-	var usePSS bool
-	if _, ok := opts.(*rsa.PSSOptions); ok {
-		usePSS = true
-	}
-	eASigInfo, err := sigInfoFor(key, usePSS)
-	if err != nil {
-		return protocol.Nonce{}, fmt.Errorf("error determining eASigInfo for TO1.HelloRV: %w", err)
-	}
-
-	// FDO 2.0 includes CapabilityFlags, FDO 1.1 does not
+	// FDO 2.0: [CapabilityFlags, VendorCapFlags, Guid] (no eASigInfo)
+	// FDO 1.1: [Guid, eASigInfo]
 	version := protocol.VersionFromContext(ctx)
 
 	var typ uint8
 	var resp io.ReadCloser
+	var err error
 
 	if version == protocol.Version200 {
-		var msg struct {
-			GUID     protocol.GUID
-			ASigInfo sigInfo
-			CapabilityFlags
+		msg := helloRV20{
+			CapabilityFlags: GlobalCapabilityFlags,
+			GUID:            cred.GUID,
 		}
-		msg.GUID = cred.GUID
-		msg.ASigInfo = *eASigInfo
-		msg.CapabilityFlags = GlobalCapabilityFlags
 		typ, resp, err = transport.Send(ctx, protocol.TO1HelloRVMsgType, msg, nil)
 	} else {
+		var usePSS bool
+		if _, ok := opts.(*rsa.PSSOptions); ok {
+			usePSS = true
+		}
+		eASigInfo, sigErr := sigInfoFor(key, usePSS)
+		if sigErr != nil {
+			return protocol.Nonce{}, fmt.Errorf("error determining eASigInfo for TO1.HelloRV: %w", sigErr)
+		}
 		var msg struct {
 			GUID     protocol.GUID
 			ASigInfo sigInfo
@@ -108,11 +105,7 @@ func helloRv(ctx context.Context, transport Transport, cred DeviceCredential, ke
 	case protocol.TO1HelloRVAckMsgType:
 		captureMsgType(ctx, typ)
 		if version == protocol.Version200 {
-			var ack struct {
-				NonceTO1Proof protocol.Nonce
-				BSigInfo      sigInfo
-				CapabilityFlags
-			}
+			var ack rvAck20
 			if err := cbor.NewDecoder(resp).Decode(&ack); err != nil {
 				captureErr(ctx, protocol.MessageBodyErrCode, "")
 				return protocol.Nonce{}, fmt.Errorf("error parsing TO1.HelloRVAck contents: %w", err)
@@ -151,6 +144,18 @@ type rvAckBase struct {
 	BSigInfo      sigInfo
 }
 
+// helloRV20 is TO1.HelloRV for FDO 2.0
+type helloRV20 struct {
+	CapabilityFlags
+	GUID protocol.GUID
+}
+
+// rvAck20 is TO1.HelloRVAck for FDO 2.0
+type rvAck20 struct {
+	CapabilityFlags
+	NonceTO1Proof protocol.Nonce
+}
+
 // HelloRV(30) -> HelloRVAck(31)
 func (s *TO1Server) helloRVAck(ctx context.Context, msg io.Reader) (any, error) {
 	// FDO 2.0 includes CapabilityFlags in the request, FDO 1.1 does not
@@ -159,16 +164,11 @@ func (s *TO1Server) helloRVAck(ctx context.Context, msg io.Reader) (any, error) 
 	var guid protocol.GUID
 	var aSigInfo sigInfo
 	if version == protocol.Version200 {
-		var hello struct {
-			GUID     protocol.GUID
-			ASigInfo sigInfo
-			CapabilityFlags
-		}
+		var hello helloRV20
 		if err := cbor.NewDecoder(msg).Decode(&hello); err != nil {
 			return nil, fmt.Errorf("error decoding TO1.HelloRV request: %w", err)
 		}
 		guid = hello.GUID
-		aSigInfo = hello.ASigInfo
 	} else {
 		var hello helloRVBase
 		if err := cbor.NewDecoder(msg).Decode(&hello); err != nil {
@@ -197,14 +197,9 @@ func (s *TO1Server) helloRVAck(ctx context.Context, msg io.Reader) (any, error) 
 
 	// FDO 2.0 includes CapabilityFlags in the response
 	if version == protocol.Version200 {
-		return &struct {
-			NonceTO1Proof protocol.Nonce
-			BSigInfo      sigInfo
-			CapabilityFlags
-		}{
-			NonceTO1Proof:   nonce,
-			BSigInfo:        aSigInfo,
+		return &rvAck20{
 			CapabilityFlags: GlobalCapabilityFlags,
+			NonceTO1Proof:   nonce,
 		}, nil
 	}
 
@@ -241,6 +236,19 @@ func proveToRv(ctx context.Context, transport Transport, cred DeviceCredential, 
 	switch typ {
 	case protocol.TO1RVRedirectMsgType:
 		captureMsgType(ctx, typ)
+		if protocol.VersionFromContext(ctx) == protocol.Version200 {
+			var redirect rvRedirect20
+			if err := cbor.NewDecoder(resp).Decode(&redirect); err != nil {
+				captureErr(ctx, protocol.MessageBodyErrCode, "")
+				return nil, fmt.Errorf("error parsing TO1.RVRedirect contents: %w", err)
+			}
+			to1d, err := firstTo1d(redirect)
+			if err != nil {
+				captureErr(ctx, protocol.MessageBodyErrCode, "")
+				return nil, err
+			}
+			return to1d, nil
+		}
 		var redirect cose.Sign1Tag[protocol.To1d, []byte]
 		if err := cbor.NewDecoder(resp).Decode(&redirect); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
@@ -261,8 +269,25 @@ func proveToRv(ctx context.Context, transport Transport, cred DeviceCredential, 
 	}
 }
 
+// rvRedirect20 is TO1.RVRedirect for FDO 2.0: a (possibly partial) list of
+// rendezvous blobs. Without Delegation there is exactly one blob.
+type rvRedirect20 struct {
+	NumTo1ds uint
+	IdxTo1ds uint
+	MsgTo1ds []cose.Sign1Tag[protocol.To1d, []byte]
+}
+
+// firstTo1d returns the first rendezvous blob of a TO1.RVRedirect. Fetching
+// further blobs with TO1.RVMore (Delegation only) is not supported.
+func firstTo1d(r rvRedirect20) (*cose.Sign1[protocol.To1d, []byte], error) {
+	if r.IdxTo1ds != 0 || len(r.MsgTo1ds) == 0 || r.NumTo1ds < uint(len(r.MsgTo1ds)) {
+		return nil, fmt.Errorf("malformed TO1.RVRedirect: numTo1ds=%d idxTo1ds=%d len=%d", r.NumTo1ds, r.IdxTo1ds, len(r.MsgTo1ds))
+	}
+	return r.MsgTo1ds[0].Untag(), nil
+}
+
 // ProveToRV(32) -> RVRedirect(33)
-func (s *TO1Server) rvRedirect(ctx context.Context, msg io.Reader) (*cose.Sign1Tag[protocol.To1d, []byte], error) {
+func (s *TO1Server) rvRedirect(ctx context.Context, msg io.Reader) (any, error) {
 	// Decode a fully-parsed and raw COSE Sign1. The latter is used for
 	// verifying in a more lenient way, as it doesn't require deterministic
 	// encoding of CBOR (even though FDO requires this).
@@ -332,5 +357,12 @@ func (s *TO1Server) rvRedirect(ctx context.Context, msg io.Reader) (*cose.Sign1T
 	}
 
 	// Return RV blob
+	if protocol.VersionFromContext(ctx) == protocol.Version200 {
+		return &rvRedirect20{
+			NumTo1ds: 1,
+			IdxTo1ds: 0,
+			MsgTo1ds: []cose.Sign1Tag[protocol.To1d, []byte]{*blob.Tag()},
+		}, nil
+	}
 	return blob.Tag(), nil
 }

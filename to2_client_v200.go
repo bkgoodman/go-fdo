@@ -8,11 +8,13 @@ import (
 	"context"
 	"crypto"
 	"crypto/rand"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,15 +52,17 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 	}
 
 	// Step 1: Send HelloDeviceProbe, receive HelloDeviceAck20
-	ack, err := sendHelloDeviceProbe(ctx, transport, c)
+	ack, ackBytes, err := sendHelloDeviceProbe(ctx, transport, c)
 	if err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
 	}
+	// NonceTO2ProveDv: signed in the ProveDevice20 EAT, echoed in Done20
+	proveDvNonce := ack.NonceTO2ProveDVPrep
 
 	// Step 2: Device proves itself FIRST (key 2.0 difference)
 	// Send ProveDevice20, receive ProveOVHdr20
-	proveOVNonce, ownerInfo, sess, err := sendProveDevice20(ctx, transport, ack, c)
+	ownerInfo, sess, err := sendProveDevice20(ctx, transport, ack, ackBytes, c)
 	if err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
@@ -77,7 +81,7 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 
 	// Step 4: Service info exchange
 	// Send DeviceSvcInfoRdy20 and receive SetupDevice20 with GUID/RvInfo
-	setupDeviceNonce, partialOVH, err := sendDeviceSvcInfoRdy20(ctx, transport, sess, ownerInfo.DelegateChain, c)
+	setupDeviceNonce, partialOVH, err := sendDeviceSvcInfoRdy20(ctx, transport, sess, ownerInfo, c)
 	if err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
@@ -88,9 +92,12 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 	alg := c.Cred.PublicKeyHash.Algorithm
 	var replacementOVH *VoucherHeader
 	if partialOVH != nil {
-		// The new owner's public key becomes the ManufacturerKey in the replacement header
-		// Use the full protocol.PublicKey from the server (includes cert chain for X5Chain encoding)
-		alg, err = hashAlgFor(c.Key.Public(), ownerInfo.OwnerPublicKey)
+		// The Owner2 key becomes the ManufacturerKey in the replacement header
+		owner2Pub, err := partialOVH.ManufacturerKey.Public()
+		if err != nil {
+			return nil, fmt.Errorf("error parsing Owner2 key: %w", err)
+		}
+		alg, err = hashAlgFor(c.Key.Public(), owner2Pub)
 		if err != nil {
 			return nil, fmt.Errorf("error selecting hash algorithm: %w", err)
 		}
@@ -99,7 +106,7 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 			GUID:            partialOVH.GUID,
 			RvInfo:          partialOVH.RvInfo,
 			DeviceInfo:      ownerInfo.OVH.DeviceInfo,
-			ManufacturerKey: ownerInfo.OwnerPublicKeyPKI,
+			ManufacturerKey: partialOVH.ManufacturerKey,
 			CertChainHash:   ownerInfo.OVH.CertChainHash,
 		}
 	}
@@ -150,7 +157,7 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 
 	go c.Devmod.Write(ctx, c.DeviceModules, sendMTU, serviceInfoWriter)
 
-	if err := exchangeServiceInfo20(ctx, transport, proveOVNonce, setupDeviceNonce, sendMTU, serviceInfoReader, replacementHMAC, sess, c); err != nil {
+	if err := exchangeServiceInfo20(ctx, transport, proveDvNonce, setupDeviceNonce, sendMTU, serviceInfoReader, replacementHMAC, sess, c); err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
 	}
@@ -189,12 +196,13 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 	}, nil
 }
 
-// sendHelloDeviceProbe sends TO2.HelloDeviceProbe (80) and receives TO2.HelloDeviceAck20 (81)
-func sendHelloDeviceProbe(ctx context.Context, transport Transport, c *TO2Config) (*HelloDeviceAck20Msg, error) {
+// sendHelloDeviceProbe sends TO2.HelloDeviceProbe (80) and receives TO2.HelloDeviceAck20 (81).
+// It returns the ack and its bytes as received (hashed into ProveDevice20.hashPrev2).
+func sendHelloDeviceProbe(ctx context.Context, transport Transport, c *TO2Config) (*HelloDeviceAck20Msg, []byte, error) {
 	// Generate random sugar for hash binding
 	var sugar [16]byte
 	if _, err := rand.Read(sugar[:]); err != nil {
-		return nil, fmt.Errorf("error generating sugar: %w", err)
+		return nil, nil, fmt.Errorf("error generating sugar: %w", err)
 	}
 
 	probe := HelloDeviceProbeMsg{
@@ -204,25 +212,52 @@ func sendHelloDeviceProbe(ctx context.Context, transport Transport, c *TO2Config
 		HashTypes:            []protocol.HashAlg{protocol.Sha384Hash, protocol.Sha256Hash},
 		Sugar:                sugar,
 	}
+	// Encoding is deterministic, so these are the bytes the transport sends.
+	probeBytes, err := cbor.Marshal(probe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error encoding TO2.HelloDeviceProbe: %w", err)
+	}
 
 	typ, resp, err := transport.Send(ctx, protocol.TO2HelloDeviceProbeMsgType, probe, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error sending TO2.HelloDeviceProbe: %w", err)
+		return nil, nil, fmt.Errorf("error sending TO2.HelloDeviceProbe: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
 	switch typ {
 	case protocol.TO2HelloDeviceAck20MsgType:
 		captureMsgType(ctx, typ)
+		ackBytes, err := io.ReadAll(resp)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error reading TO2.HelloDeviceAck20: %w", err)
+		}
 		var ack HelloDeviceAck20Msg
-		if err := cbor.NewDecoder(resp).Decode(&ack); err != nil {
+		if err := cbor.Unmarshal(ackBytes, &ack); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
-			return nil, fmt.Errorf("error parsing TO2.HelloDeviceAck20: %w", err)
+			return nil, nil, fmt.Errorf("error parsing TO2.HelloDeviceAck20: %w", err)
+		}
+		if ack.GUID != c.Cred.GUID {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 GUID does not match device credential")
+		}
+
+		// hashPrev must be the hash of the probe we sent, with a hash type we offered
+		if !slices.Contains(probe.HashTypes, ack.HashPrev.Algorithm) {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 hashPrev uses a hash type the device did not offer")
+		}
+		want, err := hashMessage(ack.HashPrev.Algorithm, probeBytes)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !bytes.Equal(want.Value, ack.HashPrev.Value) {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 hashPrev does not match TO2.HelloDeviceProbe")
 		}
 
 		// Check server's capability flags for version negotiation (FDO 2.0 spec)
-		if len(ack.CapabilityFlags.Flags) > 0 {
-			serverFlags := ack.CapabilityFlags.Flags[0]
+		if len(ack.Flags) > 0 {
+			serverFlags := ack.Flags[0]
 			// Check if server supports FDO 2.0
 			if serverFlags&Capb0SupFDO20 == 0 {
 				// Server doesn't support FDO 2.0, check for FDO 1.1
@@ -238,18 +273,18 @@ func sendHelloDeviceProbe(ctx context.Context, transport Transport, c *TO2Config
 			}
 		}
 
-		return &ack, nil
+		return &ack, ackBytes, nil
 
 	case protocol.ErrorMsgType:
 		var errMsg protocol.ErrorMessage
 		if err := cbor.NewDecoder(resp).Decode(&errMsg); err != nil {
-			return nil, fmt.Errorf("error parsing error message: %w", err)
+			return nil, nil, fmt.Errorf("error parsing error message: %w", err)
 		}
-		return nil, fmt.Errorf("error from TO2.HelloDeviceProbe: %w", errMsg)
+		return nil, nil, fmt.Errorf("error from TO2.HelloDeviceProbe: %w", errMsg)
 
 	default:
 		captureErr(ctx, protocol.MessageBodyErrCode, "")
-		return nil, fmt.Errorf("unexpected response type %d to TO2.HelloDeviceProbe", typ)
+		return nil, nil, fmt.Errorf("unexpected response type %d to TO2.HelloDeviceProbe", typ)
 	}
 }
 
@@ -258,8 +293,8 @@ type OwnerInfo20 struct {
 	OVH               VoucherHeader
 	OVHHmac           protocol.Hmac
 	NumVoucherEntries int
-	OwnerPublicKey    crypto.PublicKey   // Raw public key for signature verification
-	OwnerPublicKeyPKI protocol.PublicKey // Full PKI structure for replacement header
+	OwnerPublicKey    crypto.PublicKey   // Key that signed ProveOVHdr20 (Owner, or Delegate leaf)
+	OwnerPublicKeyPKI protocol.PublicKey // OwnerPubKey from the ProveOVHdr20 payload
 	OriginalOwnerKey  crypto.PublicKey
 	DelegateChain     *protocol.PublicKey // Delegate chain if using delegation (nil if direct owner)
 }
@@ -268,9 +303,17 @@ type OwnerInfo20 struct {
 // This is where the device proves itself FIRST in 2.0
 //
 //nolint:gocyclo // Protocol implementation with key exchange and validation
-func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDeviceAck20Msg, c *TO2Config) (protocol.Nonce, *OwnerInfo20, kex.Session, error) {
-	// Use the nonce from the server's HelloDeviceAck20 (echo it back for anti-replay)
-	proveOVNonce := ack.NonceTO2ProveDVPrep
+func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDeviceAck20Msg, ackBytes []byte, c *TO2Config) (*OwnerInfo20, kex.Session, error) {
+	// NonceTO2ProveOV is generated by the Device and must come back in the
+	// Owner's signed ProveOVHdr20, proving that message is fresh.
+	var proveOVNonce protocol.Nonce
+	if _, err := rand.Read(proveOVNonce[:]); err != nil {
+		return nil, nil, fmt.Errorf("error generating NonceTO2ProveOV: %w", err)
+	}
+
+	if len(ack.KexSuites) == 0 || len(ack.CipherSuites) == 0 {
+		return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 offers no key exchange or cipher suites")
+	}
 
 	// Select key exchange suite from server's offered options
 	var selectedKex kex.Suite
@@ -298,22 +341,17 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 	sess := selectedKex.New(nil, selectedCipher)
 	xA, err := sess.Parameter(rand.Reader, nil)
 	if err != nil {
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error generating key exchange parameter: %w", err)
+		return nil, nil, fmt.Errorf("error generating key exchange parameter: %w", err)
 	}
 
-	// Hash the HelloDeviceAck20 for binding
-	hashAlg := protocol.Sha384Hash // Default to SHA384
-	ackHash := protocol.Hash{Algorithm: hashAlg}
-	hasher := hashAlg.HashFunc().New()
-	ackBytes, err := cbor.Marshal(ack)
+	// hashPrev2 = hash[TO2.HelloDeviceAck20] as received, same hash type as hashPrev
+	ackHash, err := hashMessage(ack.HashPrev.Algorithm, ackBytes)
 	if err != nil {
 		clear(xA)
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error encoding ack for hash: %w", err)
+		return nil, nil, err
 	}
-	hasher.Write(ackBytes)
-	ackHash.Value = hasher.Sum(nil)
 
-	// Build ProveDevice20 payload
+	// Build ProveDevice20 EAT: nonce claim is NonceTO2ProveDv, FDO claim is the payload
 	payload := ProveDevice20Payload{
 		KexSuiteName:        selectedKex,
 		CipherSuiteName:     selectedCipher,
@@ -321,26 +359,24 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 		NonceTO2ProveOVPrep: proveOVNonce,
 		HashPrev2:           ackHash,
 	}
-
-	// Sign with device key (EAT token)
-	s1 := cose.Sign1[ProveDevice20Payload, []byte]{
-		Payload: cbor.NewByteWrap(payload),
+	s1 := cose.Sign1[eatoken, []byte]{
+		Payload: cbor.NewByteWrap(newProveDevice20EAT(c.Cred.GUID, ack.NonceTO2ProveDVPrep, payload)),
 	}
 	opts, err := signOptsFor(c.Key, c.PSS)
 	if err != nil {
 		clear(xA)
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error determining signing options for ProveDevice20: %w", err)
+		return nil, nil, fmt.Errorf("error determining signing options for ProveDevice20: %w", err)
 	}
 	if err := s1.Sign(c.Key, nil, cose.AADProveDevice, opts); err != nil {
 		clear(xA)
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error signing ProveDevice20: %w", err)
+		return nil, nil, fmt.Errorf("error signing ProveDevice20: %w", err)
 	}
 
 	// Send ProveDevice20
-	typ, resp, err := transport.Send(ctx, protocol.TO2ProveDevice20MsgType, cose.Sign1Tag[ProveDevice20Payload, []byte]{Sign1: s1}, nil)
+	typ, resp, err := transport.Send(ctx, protocol.TO2ProveDevice20MsgType, s1.Tag(), nil)
 	if err != nil {
 		clear(xA)
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error sending TO2.ProveDevice20: %w", err)
+		return nil, nil, fmt.Errorf("error sending TO2.ProveDevice20: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -351,78 +387,83 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 		if err := cbor.NewDecoder(resp).Decode(&proveOVHdr); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing TO2.ProveOVHdr20: %w", err)
+			return nil, nil, fmt.Errorf("error parsing TO2.ProveOVHdr20: %w", err)
 		}
+		hdr := proveOVHdr.Payload.Val
 
-		// Get owner public key from COSE header (like 1.01)
-		var ownerPubKeyProto protocol.PublicKey
-		if found, err := proveOVHdr.Unprotected.Parse(to2OwnerPubKeyClaim, &ownerPubKeyProto); !found {
-			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("owner public key not found in COSE header")
-		} else if err != nil {
-			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing owner public key from header: %w", err)
-		}
-		ownerPubKey, err := ownerPubKeyProto.Public()
+		// Owner public key is carried in the signed payload
+		ownerPubKey, err := hdr.OwnerPubKey.Public()
 		if err != nil {
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing owner public key: %w", err)
+			return nil, nil, fmt.Errorf("error parsing owner public key: %w", err)
 		}
 
-		// Parse delegate chain if present (optional)
+		// If a delegate chain is present, ProveOVHdr20 is signed by its leaf.
+		// The chain itself is validated against the voucher in verifyOwner20.
+		signerKey := ownerPubKey
 		var delegateChain *protocol.PublicKey
-		var delegatePubKeyProto protocol.PublicKey
-		if found, err := proveOVHdr.Unprotected.Parse(to2DelegateClaim, &delegatePubKeyProto); found && err == nil {
-			delegateChain = &delegatePubKeyProto
-			// If delegate is present, verify signature with delegate key instead
-			delegatePubKey, err := delegatePubKeyProto.Public()
+		if hdr.DelegateChain != nil {
+			if len(*hdr.DelegateChain) == 0 {
+				sess.Destroy()
+				return nil, nil, fmt.Errorf("TO2.ProveOVHdr20 has an empty delegate chain")
+			}
+			chain := make([]*x509.Certificate, len(*hdr.DelegateChain))
+			for i, cert := range *hdr.DelegateChain {
+				chain[i] = (*x509.Certificate)(cert)
+			}
+			leafType, err := protocol.KeyTypeFromPublicKey(chain[0].PublicKey)
 			if err != nil {
 				sess.Destroy()
-				return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing delegate public key: %w", err)
+				return nil, nil, fmt.Errorf("error determining delegate key type: %w", err)
 			}
-			ownerPubKey = delegatePubKey
+			delegateChain, err = protocol.NewPublicKey(leafType, chain, false)
+			if err != nil {
+				sess.Destroy()
+				return nil, nil, fmt.Errorf("error encoding delegate chain: %w", err)
+			}
+			signerKey = chain[0].PublicKey
 		}
 
 		// Verify owner's (or delegate's) signature
-		if ok, err := proveOVHdr.Verify(ownerPubKey, nil, cose.AADProveOVHdr); err != nil {
+		if ok, err := proveOVHdr.Verify(signerKey, nil, cose.AADProveOVHdr); err != nil {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error verifying owner signature: %w", err)
+			return nil, nil, fmt.Errorf("error verifying owner signature: %w", err)
 		} else if !ok {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("owner signature verification failed")
+			return nil, nil, fmt.Errorf("owner signature verification failed")
 		}
 
-		// Verify nonce matches
-		if proveOVHdr.Payload.Val.NonceTO2ProveOV != proveOVNonce {
+		// Verify the Owner echoed the Device's NonceTO2ProveOV (after the signature check)
+		if hdr.NonceTO2ProveOV != proveOVNonce {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("nonce mismatch in TO2.ProveOVHdr20")
+			return nil, nil, fmt.Errorf("nonce mismatch in TO2.ProveOVHdr20")
 		}
 
 		// Get voucher header directly from Bstr wrapper
-		ovh := proveOVHdr.Payload.Val.OVHeader.Val
+		ovh := hdr.OVHeader.Val
 
 		// Complete key exchange with server's parameter
-		if err := sess.SetParameter(proveOVHdr.Payload.Val.XBKeyExchange, nil); err != nil {
+		if err := sess.SetParameter(hdr.XBKeyExchange, nil); err != nil {
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error setting peer key exchange parameter: %w", err)
+			return nil, nil, fmt.Errorf("error setting peer key exchange parameter: %w", err)
 		}
 
 		// Get original owner key from voucher header
 		originalOwnerKey, err := ovh.ManufacturerKey.Public()
 		if err != nil {
 			sess.Destroy()
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing manufacturer key: %w", err)
+			return nil, nil, fmt.Errorf("error parsing manufacturer key: %w", err)
 		}
 
-		return proveOVNonce, &OwnerInfo20{
+		return &OwnerInfo20{
 			OVH:               ovh,
-			OVHHmac:           proveOVHdr.Payload.Val.HMac,
-			NumVoucherEntries: int(proveOVHdr.Payload.Val.NumOVEntries),
-			OwnerPublicKey:    ownerPubKey,
-			OwnerPublicKeyPKI: ownerPubKeyProto,
+			OVHHmac:           hdr.HMac,
+			NumVoucherEntries: int(hdr.NumOVEntries),
+			OwnerPublicKey:    signerKey,
+			OwnerPublicKeyPKI: hdr.OwnerPubKey,
 			OriginalOwnerKey:  originalOwnerKey,
 			DelegateChain:     delegateChain,
 		}, sess, nil
@@ -430,15 +471,15 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 	case protocol.ErrorMsgType:
 		var errMsg protocol.ErrorMessage
 		if err := cbor.NewDecoder(resp).Decode(&errMsg); err != nil {
-			return protocol.Nonce{}, nil, nil, fmt.Errorf("error parsing error message: %w", err)
+			return nil, nil, fmt.Errorf("error parsing error message: %w", err)
 		}
 		sess.Destroy()
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("error from TO2.ProveDevice20: %w", errMsg)
+		return nil, nil, fmt.Errorf("error from TO2.ProveDevice20: %w", errMsg)
 
 	default:
 		captureErr(ctx, protocol.MessageBodyErrCode, "")
 		sess.Destroy()
-		return protocol.Nonce{}, nil, nil, fmt.Errorf("unexpected response type %d to TO2.ProveDevice20", typ)
+		return nil, nil, fmt.Errorf("unexpected response type %d to TO2.ProveDevice20", typ)
 	}
 }
 
@@ -487,6 +528,35 @@ func verifyOwner20(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 	}); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
 		return err
+	}
+
+	// ProveOVHdr20 carried the owner key; it must be the voucher's owner.
+	ownerPub, err := info.OwnerPublicKeyPKI.Public()
+	if err != nil {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
+		return fmt.Errorf("error parsing ProveOVHdr20 owner key: %w", err)
+	}
+	if eq, ok := ownerPub.(interface{ Equal(crypto.PublicKey) bool }); !ok || !eq.Equal(ownerKeyForValidation) {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
+		return fmt.Errorf("ProveOVHdr20 owner key does not match the ownership voucher")
+	}
+
+	// A delegate that signed ProveOVHdr20 must chain to the voucher's owner
+	// and hold an onboard permission.
+	if info.DelegateChain != nil {
+		chain, err := info.DelegateChain.Chain()
+		if err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return fmt.Errorf("error parsing delegate chain: %w", err)
+		}
+		if err := VerifyDelegateChain(chain, &ownerKeyForValidation, nil); err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return fmt.Errorf("delegate chain verification failed: %w", err)
+		}
+		if !DelegateCanOnboard(chain) {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return fmt.Errorf("delegate certificate does not have any fdo-ekt-permit-onboard-* permission")
+		}
 	}
 
 	return nil
@@ -539,12 +609,20 @@ type partialOVH20 struct {
 	ManufacturerKey protocol.PublicKey
 }
 
-// sendDeviceSvcInfoRdy20 sends TO2.DeviceSvcInfoRdy20 (86) and receives TO2.SetupDevice20 (87)
-// Note: HMAC is computed and sent in Done20 (not here) so client can compute it
-// after receiving GUID/RvInfo from SetupDevice20
-func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.Session, delegateChain *protocol.PublicKey, c *TO2Config) (protocol.Nonce, *partialOVH20, error) {
+// sendDeviceSvcInfoRdy20 sends TO2.DeviceSvcInfoRdy20 (86) and receives TO2.SetupDevice20 (87).
+// It returns the Device's NonceTO2SetupDv (echoed in DoneAck20) and, for the
+// Resale disposition, the replacement credentials.
+// Note: the replacement HMAC is sent in Done20 (FDO 2.0 Errata 1), after the
+// Device has the new credentials from SetupDevice20.
+func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.Session, ownerInfo *OwnerInfo20, c *TO2Config) (protocol.Nonce, *partialOVH20, error) {
+	var setupDvNonce protocol.Nonce
+	if _, err := rand.Read(setupDvNonce[:]); err != nil {
+		return protocol.Nonce{}, nil, fmt.Errorf("error generating NonceTO2SetupDv: %w", err)
+	}
 	req := DeviceSvcInfoRdy20Msg{
+		ReplacementHMac:       nil, // Not used (FDO 2.0 Errata 1)
 		MaxOwnerServiceInfoSz: &c.MaxServiceInfoSizeReceive,
+		NonceTO2SetupDVPrep:   setupDvNonce,
 	}
 
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceSvcInfoRdy20MsgType, req, sess)
@@ -556,40 +634,17 @@ func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.S
 	switch typ {
 	case protocol.TO2SetupDevice20MsgType:
 		captureMsgType(ctx, typ)
-		var setup SetupDevice20Msg
+		var setup cose.Sign1Tag[SetupDevice20Payload, []byte]
 		if err := cbor.NewDecoder(resp).Decode(&setup); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
 			return protocol.Nonce{}, nil, fmt.Errorf("error parsing TO2.SetupDevice20: %w", err)
 		}
-
-		// Check for credential reuse
-		if setup.ReplacementGUID == nil {
-			if !c.AllowCredentialReuse {
-				captureErr(ctx, protocol.CredReuseErrCode, "")
-				return protocol.Nonce{}, nil, fmt.Errorf("credential reuse not allowed")
-			}
-			// If using delegate, verify it has fdo-ekt-permit-onboard-reuse-cred permission
-			if delegateChain != nil {
-				chain, err := delegateChain.Chain()
-				if err != nil {
-					captureErr(ctx, protocol.InvalidMessageErrCode, "")
-					return protocol.Nonce{}, nil, fmt.Errorf("error parsing delegate chain: %w", err)
-				}
-				if !DelegateCanReuseCred(chain) {
-					captureErr(ctx, protocol.CredReuseErrCode, "")
-					return protocol.Nonce{}, nil, fmt.Errorf("delegate certificate does not have fdo-ekt-permit-onboard-reuse-cred permission")
-				}
-			}
-			return setup.NonceTO2SetupDV, nil, nil
+		partial, err := checkSetupDevice20(setup.Untag(), setupDvNonce, ownerInfo.OwnerPublicKey, ownerInfo.DelegateChain, c.AllowCredentialReuse)
+		if err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return protocol.Nonce{}, nil, err
 		}
-
-		// Build partial replacement header
-		// Note: ManufacturerKey will be the new owner's key
-		return setup.NonceTO2SetupDV, &partialOVH20{
-			GUID:   *setup.ReplacementGUID,
-			RvInfo: *setup.ReplacementRvInfo,
-			// ManufacturerKey will be filled from owner info
-		}, nil
+		return setupDvNonce, partial, nil
 
 	case protocol.ErrorMsgType:
 		var errMsg protocol.ErrorMessage
@@ -604,8 +659,75 @@ func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.S
 	}
 }
 
+// checkSetupDevice20 applies the TO2.SetupDevice20 rules (FDO 2.0 Errata 1)
+// and returns the replacement credentials for DispResale, or nil.
+//
+//   - DispResale: MUST be signed by ReplacementCred.Owner2PubKey (proof of
+//     possession), and ReplacementCred.NonceTO2SetupDv MUST equal the nonce the
+//     Device sent in DeviceSvcInfoRdy20.
+//   - DispCredReuse: signed by the ProveOVHdr20 signer (Owner or Delegate).
+//     The Device MAY skip verification; this implementation verifies.
+//   - DispDisable: not supported by this implementation.
+func checkSetupDevice20(setup *cose.Sign1[SetupDevice20Payload, []byte], setupDvNonce protocol.Nonce, proveOVHdrSigner crypto.PublicKey, delegateChain *protocol.PublicKey, allowReuse bool) (*partialOVH20, error) {
+	payload := setup.Payload.Val
+	switch payload.DispositionCode {
+	case DispResale:
+		cred := payload.ReplacementCred
+		if cred == nil {
+			return nil, fmt.Errorf("TO2.SetupDevice20 DispResale without ReplacementCred")
+		}
+		owner2Pub, err := cred.Owner2PubKey.Public()
+		if err != nil {
+			return nil, fmt.Errorf("error parsing TO2.SetupDevice20 Owner2PubKey: %w", err)
+		}
+		if ok, err := setup.Verify(owner2Pub, nil, cose.AADSetupDevice); err != nil {
+			return nil, fmt.Errorf("error verifying TO2.SetupDevice20 signature: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("%w: TO2.SetupDevice20 signature does not verify against Owner2PubKey", ErrCryptoVerifyFailed)
+		}
+		if cred.NonceTO2SetupDv != setupDvNonce {
+			return nil, fmt.Errorf("nonce mismatch in TO2.SetupDevice20")
+		}
+		return &partialOVH20{
+			GUID:            cred.GUID,
+			RvInfo:          cred.RvInfo,
+			ManufacturerKey: cred.Owner2PubKey,
+		}, nil
+
+	case DispCredReuse:
+		if payload.ReplacementCred != nil {
+			return nil, fmt.Errorf("TO2.SetupDevice20 DispCredReuse must not carry ReplacementCred")
+		}
+		if ok, err := setup.Verify(proveOVHdrSigner, nil, cose.AADSetupDevice); err != nil {
+			return nil, fmt.Errorf("error verifying TO2.SetupDevice20 signature: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("%w: TO2.SetupDevice20 signature does not verify against the ProveOVHdr20 signer", ErrCryptoVerifyFailed)
+		}
+		if !allowReuse {
+			return nil, fmt.Errorf("credential reuse not allowed")
+		}
+		// A delegate needs fdo-ekt-permit-onboard-reuse-cred for credential reuse
+		if delegateChain != nil {
+			chain, err := delegateChain.Chain()
+			if err != nil {
+				return nil, fmt.Errorf("error parsing delegate chain: %w", err)
+			}
+			if !DelegateCanReuseCred(chain) {
+				return nil, fmt.Errorf("delegate certificate does not have fdo-ekt-permit-onboard-reuse-cred permission")
+			}
+		}
+		return nil, nil
+
+	case DispDisable:
+		return nil, fmt.Errorf("TO2.SetupDevice20 DispDisable is not supported")
+
+	default:
+		return nil, fmt.Errorf("TO2.SetupDevice20 has unknown DispositionCode %d", payload.DispositionCode)
+	}
+}
+
 // exchangeServiceInfo20 handles the service info exchange loop for 2.0
-func exchangeServiceInfo20(ctx context.Context, transport Transport, proveOVNonce, setupDeviceNonce protocol.Nonce, sendMTU uint16, serviceInfoReader *serviceinfo.ChunkReader, replacementHMAC *protocol.Hmac, sess kex.Session, c *TO2Config) error {
+func exchangeServiceInfo20(ctx context.Context, transport Transport, proveDvNonce, setupDvNonce protocol.Nonce, sendMTU uint16, serviceInfoReader *serviceinfo.ChunkReader, replacementHMAC *protocol.Hmac, sess kex.Session, c *TO2Config) error {
 	// Track active modules (same as 1.0.1)
 	modules := deviceModuleMap{modules: c.DeviceModules, active: make(map[string]bool)}
 	defer stopDevicePlugins(&modules)
@@ -642,8 +764,9 @@ func exchangeServiceInfo20(ctx context.Context, transport Transport, proveOVNonc
 		}
 
 		req := DeviceSvcInfo20Msg{
-			IsMoreServiceInfo: !deviceDone,
-			ServiceInfo:       kvs,
+			ReplacementHMacOrNull: nil, // Not used (FDO 2.0 Errata 1)
+			IsMoreServiceInfo:     !deviceDone,
+			ServiceInfo:           kvs,
 		}
 
 		typ, resp, err := transport.Send(ctx, protocol.TO2DeviceSvcInfo20MsgType, req, sess)
@@ -678,7 +801,7 @@ func exchangeServiceInfo20(ctx context.Context, transport Transport, proveOVNonc
 			// Check if done
 			if ownerInfoMsg.IsDone && deviceDone && !ownerInfoMsg.IsMoreServiceInfo {
 				// Send Done20 with replacement HMAC
-				return sendDone20(ctx, transport, proveOVNonce, setupDeviceNonce, replacementHMAC, sess)
+				return sendDone20(ctx, transport, proveDvNonce, setupDvNonce, replacementHMAC, sess)
 			}
 
 		case protocol.ErrorMsgType:
@@ -696,9 +819,9 @@ func exchangeServiceInfo20(ctx context.Context, transport Transport, proveOVNonc
 }
 
 // sendDone20 sends TO2.Done20 (90) and receives TO2.DoneAck20 (91)
-func sendDone20(ctx context.Context, transport Transport, proveOVNonce, setupDeviceNonce protocol.Nonce, replacementHMAC *protocol.Hmac, sess kex.Session) error {
+func sendDone20(ctx context.Context, transport Transport, proveDvNonce, setupDvNonce protocol.Nonce, replacementHMAC *protocol.Hmac, sess kex.Session) error {
 	req := Done20Msg{
-		NonceTO2SetupDV: setupDeviceNonce,
+		NonceTO2ProveDv: proveDvNonce,
 		ReplacementHMAC: replacementHMAC,
 	}
 
@@ -717,8 +840,8 @@ func sendDone20(ctx context.Context, transport Transport, proveOVNonce, setupDev
 			return fmt.Errorf("error parsing TO2.DoneAck20: %w", err)
 		}
 
-		// Verify nonce
-		if !bytes.Equal(ack.NonceTO2ProveOV[:], proveOVNonce[:]) {
+		// DoneAck20 must echo the Device's NonceTO2SetupDv
+		if !bytes.Equal(ack.NonceTO2SetupDv[:], setupDvNonce[:]) {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
 			return fmt.Errorf("nonce mismatch in TO2.DoneAck20")
 		}

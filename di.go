@@ -49,6 +49,10 @@ type DIConfig struct {
 	// When true and an RSA key is used as a crypto.Signer argument, RSA-SSAPSS
 	// will be used for signing
 	PSS bool
+
+	// Version specifies the FDO protocol version to use.
+	// Defaults to Version101 if not set.
+	Version protocol.Version
 }
 
 // DI runs the DI protocol and returns the voucher header and manufacturer
@@ -72,6 +76,9 @@ type DIConfig struct {
 // [Java server]: https://github.com/fido-device-onboard/pri-fidoiot
 func DI(ctx context.Context, transport Transport, info any, c DIConfig) (*DeviceCredential, error) {
 	ctx = contextWithErrMsg(ctx)
+	if c.Version != 0 {
+		ctx = protocol.ContextWithVersion(ctx, c.Version)
+	}
 
 	// Emit DI started event for client-side tracking
 	EmitDIStarted(ctx)
@@ -148,8 +155,8 @@ func appStart(ctx context.Context, transport Transport, info any) (*VoucherHeade
 	if version == protocol.Version200 {
 		// FDO 2.0: Include CapabilityFlags
 		var msg struct {
-			Info            *cbor.Bstr[any]
-			CapabilityFlags CapabilityFlags
+			CapabilityFlags
+			Info *cbor.Bstr[any]
 		}
 		if info != nil {
 			msg.Info = cbor.NewBstr(info)
@@ -179,6 +186,14 @@ func appStart(ctx context.Context, transport Transport, info any) (*VoucherHeade
 	switch typ {
 	case protocol.DISetCredentialsMsgType:
 		captureMsgType(ctx, typ)
+		if version == protocol.Version200 {
+			var setCredentials setCredentialsMsg20
+			if err := cbor.NewDecoder(resp).Decode(&setCredentials); err != nil {
+				captureErr(ctx, protocol.MessageBodyErrCode, "")
+				return nil, fmt.Errorf("error parsing DI.SetCredentials request: %w", err)
+			}
+			return &setCredentials.OVHeader.Val, nil
+		}
 		var setCredentials setCredentialsMsg
 		if err := cbor.NewDecoder(resp).Decode(&setCredentials); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
@@ -203,10 +218,16 @@ type setCredentialsMsg struct {
 	OVHeader cbor.Bstr[VoucherHeader]
 }
 
+// setCredentialsMsg20 is DI.SetCredentials for FDO 2.0.
+type setCredentialsMsg20 struct {
+	CapabilityFlags
+	OVHeader cbor.Bstr[VoucherHeader]
+}
+
 // AppStart(10) -> SetCredentials(11)
 //
 //nolint:gocyclo // Protocol handling requires multiple conditional branches
-func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCredentialsMsg, error) {
+func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (any, error) {
 	// Emit DI started event
 	EmitDIStarted(ctx)
 
@@ -218,8 +239,8 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 	if version == protocol.Version200 {
 		// FDO 2.0: AppStart includes CapabilityFlags
 		var appStart struct {
-			Info            *cbor.Bstr[T]
-			CapabilityFlags CapabilityFlags
+			CapabilityFlags
+			Info *cbor.Bstr[T]
 		}
 		if err := cbor.NewDecoder(msg).Decode(&appStart); err != nil {
 			return nil, fmt.Errorf("error decoding device manufacturing info: %w", err)
@@ -286,8 +307,10 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 	if _, err := rand.Read(guid[:]); err != nil {
 		return nil, fmt.Errorf("error generating device GUID: %w", err)
 	}
+	// The voucher is created at the DI protocol version. This decides the
+	// AAD policy for all voucher-related signatures (FDO 2.0 Errata 1, E7).
 	ovh := &VoucherHeader{
-		Version:         101,
+		Version:         uint16(version),
 		GUID:            guid,
 		DeviceInfo:      deviceInfo,
 		ManufacturerKey: mfgPubKey,
@@ -297,7 +320,7 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 		},
 	}
 	rvInfo, err := s.RvInfo(ctx, &Voucher{
-		Version:   101,
+		Version:   ovh.Version,
 		Header:    *cbor.NewBstr(*ovh),
 		CertChain: &certChain,
 	})
@@ -309,6 +332,12 @@ func (s *DIServer[T]) setCredentials(ctx context.Context, msg io.Reader) (*setCr
 	// Store and return voucher header
 	if err := s.Session.SetIncompleteVoucherHeader(ctx, ovh); err != nil {
 		return nil, fmt.Errorf("error storing incomplete voucher header: %w", err)
+	}
+	if version == protocol.Version200 {
+		return &setCredentialsMsg20{
+			CapabilityFlags: GlobalCapabilityFlags,
+			OVHeader:        *cbor.NewBstr(*ovh),
+		}, nil
 	}
 	return &setCredentialsMsg{
 		OVHeader: *cbor.NewBstr(*ovh),
@@ -377,7 +406,7 @@ func (s *DIServer[T]) diDone(ctx context.Context, msg io.Reader) (struct{}, erro
 		certChain[i] = (*cbor.X509Certificate)(cert)
 	}
 	ov := &Voucher{
-		Version:   101,
+		Version:   ovh.Version,
 		Header:    *cbor.NewBstr(*ovh),
 		Hmac:      req.Hmac,
 		CertChain: &certChain,

@@ -69,10 +69,12 @@ export PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
 ### Known Pre-existing Failure
 
-`make lint` fails in the **TPM** package only, with
-`fatal error: openssl/aes.h: No such file or directory`. This is the
-`go-tpm-tools` simulator's cgo build needing OpenSSL headers, not a code
-problem. The base library, FSIM, and sqlite lint targets all report 0 issues.
+The TPM package needs OpenSSL headers (`libssl-dev`) for the `go-tpm-tools`
+simulator's cgo build; without them `make lint` and `make test` stop in the
+TPM package with `fatal error: openssl/aes.h`. With them installed, the base
+library, FSIM, sqlite and TPM lint targets report 0 issues, and `make lint`
+then stops on 4 pre-existing findings in `examples/cmd/server.go`
+(gocyclo on `ownerModules`, gosec G301/G115).
 
 ### Building and Testing
 
@@ -148,6 +150,7 @@ Run via `./test_examples.sh` with specific test scenarios:
 | `rv-blob` | Rendezvous blob registration flow |
 | `kex` | Key exchange with ASYMKEX2048 (RSA keys) |
 | `fdo200` | FDO 2.0 protocol |
+| `fdo200-di200` | FDO 2.0 end-to-end with DI also at 2.0 (2.0 AppStart with capability flags) |
 | `delegate` | Delegate certificate support (FDO 1.01) |
 | `delegate-fdo200` | Delegate certificate support with FDO 2.0 |
 | `attested-payload` | Attested payload creation and verification |

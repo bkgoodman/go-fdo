@@ -6,7 +6,7 @@ package fdo
 // CapabilityFlags represents FDO capability flags exchanged during protocol negotiation.
 type CapabilityFlags struct {
 	Flags        []byte
-	VendorUnique []string `cbor:",omitempty"`
+	VendorUnique []string
 }
 
 // Capability flag bits for version support (FDO 2.0 spec)

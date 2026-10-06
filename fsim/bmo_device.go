@@ -91,6 +91,18 @@ type BiosParamHandler interface {
 	SetBiosParameter(name, value string) (statusCode int, message string, err error)
 }
 
+// AtomicBiosParamHandler applies all parameters of one fdo.bmo:set message
+// atomically: either every parameter is applied, or none is (fdo.bmo.md
+// "Atomicity"). A BiosParamHandler that also implements this interface is
+// used for multi-parameter sets; one that does not can only accept a set
+// with a single parameter.
+type AtomicBiosParamHandler interface {
+	// SetBiosParameters applies params all-or-nothing and returns one
+	// result for the whole set: statusCode 0=success (all applied),
+	// 1=warning (all applied), 2=error (none applied).
+	SetBiosParameters(params []BiosParam) (statusCode int, message string, err error)
+}
+
 // BiosParam represents a BIOS parameter name/value pair.
 type BiosParam struct {
 	Name  string `cbor:"name"`
@@ -154,8 +166,8 @@ type BMO struct {
 	resultMsg    string
 	beginHasher  hash.Hash // chunked mode: running hash for begin expected_hash
 
-	// BIOS parameter state
-	pendingBiosResponses []BiosResponse
+	// BIOS parameter state: the single response to the last set message
+	pendingBiosResponse *BiosResponse
 }
 
 // BiosResponse represents a BIOS parameter response to be sent to the owner.
@@ -253,26 +265,22 @@ func (b *BMO) unwrapProvisioning(ctx context.Context, messageBody io.Reader, exp
 
 // Yield implements serviceinfo.DeviceModule.
 func (b *BMO) Yield(ctx context.Context, respond func(string) io.Writer, yield func()) error {
-	// Send pending BIOS responses
-	if len(b.pendingBiosResponses) > 0 {
-		for _, response := range b.pendingBiosResponses {
-			responseData := []any{response.StatusCode}
-			if response.Message != "" {
-				responseData = append(responseData, response.Message)
-			}
-
-			w := respond("response")
-			if err := cbor.NewEncoder(w).Encode(responseData); err != nil {
-				return fmt.Errorf("failed to encode BIOS response: %w", err)
-			}
-
-			if debugEnabled() {
-				slog.Debug("fdo.bmo: sent BIOS response", "status", response.StatusCode, "message", response.Message)
-			}
+	// Send the response to the last set message (exactly one per set)
+	if response := b.pendingBiosResponse; response != nil {
+		responseData := []any{response.StatusCode}
+		if response.Message != "" {
+			responseData = append(responseData, response.Message)
 		}
 
-		// Clear pending responses
-		b.pendingBiosResponses = nil
+		w := respond("response")
+		if err := cbor.NewEncoder(w).Encode(responseData); err != nil {
+			return fmt.Errorf("failed to encode BIOS response: %w", err)
+		}
+
+		if debugEnabled() {
+			slog.Debug("fdo.bmo: sent BIOS response", "status", response.StatusCode, "message", response.Message)
+		}
+		b.pendingBiosResponse = nil
 	}
 
 	return nil
@@ -285,7 +293,7 @@ func (b *BMO) reset() {
 	}
 	b.receiver = nil
 	b.buffer = nil
-	b.pendingBiosResponses = nil
+	b.pendingBiosResponse = nil
 }
 
 // handleChunkedMessage processes image-begin, image-data-<n>, and image-end messages.
@@ -639,81 +647,66 @@ func (b *BMO) sendError(respond func(string) io.Writer, code int, message, detai
 	return nil
 }
 
-// handleBiosSet handles BIOS parameter set messages from the owner.
+// handleBiosSet handles a BIOS parameter set message from the owner.
+//
+// A set is atomic (fdo.bmo.md "Atomicity"): every parameter is applied or
+// none is, and exactly one response describes the outcome. A device that
+// cannot apply the set atomically rejects all of it.
 func (b *BMO) handleBiosSet(messageBody io.Reader, respond func(string) io.Writer) error {
-	// If no BIOS handler is configured, ignore the message
-	if b.BiosParamHandler == nil {
-		if debugEnabled() {
-			slog.Debug("fdo.bmo: no BiosParamHandler configured, ignoring set message")
-		}
-		return nil
+	b.pendingBiosResponse = b.applyBiosSet(messageBody)
+	return nil
+}
+
+func (b *BMO) applyBiosSet(messageBody io.Reader) *BiosResponse {
+	reject := func(msg string) *BiosResponse {
+		return &BiosResponse{StatusCode: 2, Message: msg}
 	}
 
-	// Decode the set message (array of [name, value] pairs)
-	var params [][]any
-	if err := cbor.NewDecoder(messageBody).Decode(&params); err != nil {
-		return fmt.Errorf("error decoding BIOS set message: %w", err)
+	// Decode the set message (array of [name, value] pairs). Validate every
+	// parameter before applying any.
+	var raw [][]any
+	if err := cbor.NewDecoder(messageBody).Decode(&raw); err != nil {
+		return reject("Invalid set message; no parameters applied")
 	}
-
-	if debugEnabled() {
-		slog.Debug("fdo.bmo: received BIOS parameters", "count", len(params))
+	if len(raw) == 0 {
+		return reject("Empty set message")
 	}
-
-	// Process each parameter and collect responses
-	var responses []BiosResponse
-
-	for _, param := range params {
+	params := make([]BiosParam, 0, len(raw))
+	for _, param := range raw {
 		if len(param) != 2 {
-			response := BiosResponse{
-				StatusCode: 2, // Error
-				Message:    "Invalid parameter format, expected [name, value]",
-			}
-			responses = append(responses, response)
-			continue
+			return reject("Invalid parameter format, expected [name, value]; no parameters applied")
 		}
-
 		name, nameOk := param[0].(string)
 		value, valueOk := param[1].(string)
 		if !nameOk || !valueOk {
-			response := BiosResponse{
-				StatusCode: 2, // Error
-				Message:    "Invalid parameter types, expected string name and value",
-			}
-			responses = append(responses, response)
-			continue
+			return reject("Invalid parameter types, expected string name and value; no parameters applied")
 		}
-
-		// Call the BIOS parameter handler
-		statusCode, message, err := b.BiosParamHandler.SetBiosParameter(name, value)
-		if err != nil {
-			// Internal error - don't send to owner, just log
-			slog.Error("fdo.bmo: internal error setting BIOS parameter", "parameter", name, "error", err)
-			response := BiosResponse{
-				StatusCode: 2, // Error
-				Message:    "Internal error processing parameter",
-			}
-			responses = append(responses, response)
-			continue
-		}
-
-		response := BiosResponse{
-			StatusCode: statusCode,
-			Message:    message,
-		}
-		responses = append(responses, response)
-
-		if debugEnabled() {
-			slog.Debug("fdo.bmo: processed BIOS parameter", "parameter", name, "value", value, "status", statusCode, "message", message)
-		}
+		params = append(params, BiosParam{Name: name, Value: value})
 	}
 
-	// Store responses for Yield() to send
-	b.pendingBiosResponses = responses
+	if b.BiosParamHandler == nil {
+		return reject("BIOS configuration not supported")
+	}
 
-	// If there was an error and atomic behavior is expected, we could rollback here
-	// For now, we send individual responses as per the protocol
-
-	return nil
+	var statusCode int
+	var message string
+	var err error
+	if atomic, ok := b.BiosParamHandler.(AtomicBiosParamHandler); ok {
+		statusCode, message, err = atomic.SetBiosParameters(params)
+	} else if len(params) == 1 {
+		statusCode, message, err = b.BiosParamHandler.SetBiosParameter(params[0].Name, params[0].Value)
+	} else {
+		return reject("Multi-parameter set requires atomic application, which this device does not support; no parameters applied")
+	}
+	if err != nil {
+		// Internal error - don't send details to owner, just log
+		slog.Error("fdo.bmo: internal error applying BIOS parameters", "count", len(params), "error", err)
+		return reject("Internal error processing parameters")
+	}
+	if debugEnabled() {
+		slog.Debug("fdo.bmo: applied BIOS set", "count", len(params), "status", statusCode, "message", message)
+	}
+	return &BiosResponse{StatusCode: statusCode, Message: message}
 }
 
 // handleBiosResponse handles BIOS parameter response messages (for owner side).

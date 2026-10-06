@@ -41,6 +41,10 @@ type TO0Client struct {
 	//
 	// If TTL is 0, [DefaultRVBlobTTL] will be used.
 	TTL uint32
+
+	// Version specifies the FDO protocol version to use.
+	// Defaults to Version101 if not set.
+	Version protocol.Version
 }
 
 // RegisterBlob tells a Rendezvous Server where to direct a given device to its
@@ -48,6 +52,9 @@ type TO0Client struct {
 // before the rendezvous blob must be refreshed by calling [RegisterBlob] again.
 func (c *TO0Client) RegisterBlob(ctx context.Context, transport Transport, guid protocol.GUID, addrs []protocol.RvTO2Addr, delegateName string) (uint32, error) {
 	ctx = contextWithErrMsg(ctx)
+	if c.Version != 0 {
+		ctx = protocol.ContextWithVersion(ctx, c.Version)
+	}
 
 	nonce, err := c.hello(ctx, transport)
 	if err != nil {
@@ -78,6 +85,14 @@ func (c *TO0Client) hello(ctx context.Context, transport Transport) (protocol.No
 	switch typ {
 	case protocol.TO0HelloAckMsgType:
 		captureMsgType(ctx, typ)
+		if protocol.VersionFromContext(ctx) == protocol.Version200 {
+			var ack to0Ack20
+			if err := cbor.NewDecoder(resp).Decode(&ack); err != nil {
+				captureErr(ctx, protocol.MessageBodyErrCode, "")
+				return protocol.Nonce{}, fmt.Errorf("error parsing TO0.HelloAck contents: %w", err)
+			}
+			return ack.NonceTO0Sign, nil
+		}
 		var ack to0Ack
 		if err := cbor.NewDecoder(resp).Decode(&ack); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
@@ -102,8 +117,13 @@ type to0Ack struct {
 	NonceTO0Sign protocol.Nonce
 }
 
+type to0Ack20 struct {
+	CapabilityFlags
+	NonceTO0Sign protocol.Nonce
+}
+
 // Hello(20) -> HelloAck(21)
-func (s *TO0Server) helloAck(ctx context.Context, msg io.Reader) (*to0Ack, error) {
+func (s *TO0Server) helloAck(ctx context.Context, msg io.Reader) (any, error) {
 	var hello CapabilityFlags
 	if err := cbor.NewDecoder(msg).Decode(&hello); err != nil {
 		return nil, fmt.Errorf("error decoding TO0.Hello request: %w", err)
@@ -118,6 +138,12 @@ func (s *TO0Server) helloAck(ctx context.Context, msg io.Reader) (*to0Ack, error
 		return nil, fmt.Errorf("error storing nonce for TO0.OwnerSign: %w", err)
 	}
 
+	if protocol.VersionFromContext(ctx) == protocol.Version200 {
+		return &to0Ack20{
+			CapabilityFlags: GlobalCapabilityFlags,
+			NonceTO0Sign:    nonce,
+		}, nil
+	}
 	return &to0Ack{
 		NonceTO0Sign: nonce,
 	}, nil
@@ -133,6 +159,14 @@ type ownerSign struct {
 	To0d          cbor.Bstr[to0d]
 	To1d          cose.Sign1Tag[protocol.To1d, []byte]
 	DelegateChain *[]*cbor.X509Certificate `cbor:",omitempty"`
+}
+
+// ownerSign20 is TO0.OwnerSign for FDO 2.0. The delegate chain, if any, is
+// inside the signed to1d payload.
+type ownerSign20 struct {
+	CapabilityFlags
+	To0d cbor.Bstr[to0d]
+	To1d cose.Sign1Tag[protocol.To1d, []byte]
 }
 
 // OwnerSign(22) -> AcceptOwner(23)
@@ -176,15 +210,22 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 		Unprotected: map[cose.Label]any{},
 	}
 
+	v20 := protocol.VersionFromContext(ctx) == protocol.Version200
+	payload := protocol.To1d{
+		RV: addrs,
+		To0dHash: protocol.Hash{
+			Algorithm: alg,
+			Value:     to0dHash.Sum(nil),
+		},
+	}
+	if v20 {
+		// FDO 2.0: DelegateChain is part of the signed payload (null for Owner)
+		payload.DelegateChain = cbor.NewBstr[*[]*cbor.X509Certificate](nil)
+	}
 	to1d := cose.Sign1[protocol.To1d, []byte]{
-		Header: header,
-		Payload: cbor.NewByteWrap(protocol.To1d{
-			RV: addrs,
-			To0dHash: protocol.Hash{
-				Algorithm: alg,
-				Value:     to0dHash.Sum(nil),
-			},
-		})}
+		Header:  header,
+		Payload: cbor.NewByteWrap(payload),
+	}
 
 	// Sign blob with OwnerKey - or Delegate, if requested
 	if delegateName != "" {
@@ -207,7 +248,16 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 		if err != nil {
 			return 0, fmt.Errorf("error creating delegate public key: %w", err)
 		}
-		header.Unprotected[to2DelegateClaim] = chain
+		if v20 {
+			certs := make([]*cbor.X509Certificate, len(ch))
+			for i, cert := range ch {
+				certs[i] = (*cbor.X509Certificate)(cert)
+			}
+			payload.DelegateChain = cbor.NewBstr(&certs)
+			to1d.Payload = cbor.NewByteWrap(payload)
+		} else {
+			to1d.Unprotected[to2DelegateClaim] = chain
+		}
 
 		// FDO 2.0 uses domain-specific AAD; FDO 1.01 uses empty AAD
 		var aad []byte
@@ -245,9 +295,16 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 		}
 	}
 	// Define request structure
-	msg := ownerSign{
+	var msg any = ownerSign{
 		To0d: *cbor.NewBstr(to0d),
 		To1d: *to1d.Tag(),
+	}
+	if v20 {
+		msg = ownerSign20{
+			CapabilityFlags: GlobalCapabilityFlags,
+			To0d:            *cbor.NewBstr(to0d),
+			To1d:            *to1d.Tag(),
+		}
 	}
 
 	// Make request
@@ -288,7 +345,17 @@ type to0AcceptOwner struct {
 // OwnerSign(22) -> AcceptOwner(23)
 func (s *TO0Server) acceptOwner(ctx context.Context, msg io.Reader) (*to0AcceptOwner, error) {
 	var sig ownerSign
-	if err := cbor.NewDecoder(msg).Decode(&sig); err != nil {
+	if protocol.VersionFromContext(ctx) == protocol.Version200 {
+		var sig20 ownerSign20
+		if err := cbor.NewDecoder(msg).Decode(&sig20); err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, fmt.Errorf("error decoding TO0.OwnerSign request: %w", err)
+		}
+		sig = ownerSign{To0d: sig20.To0d, To1d: sig20.To1d}
+		if dc := sig20.To1d.Payload.Val.DelegateChain; dc != nil {
+			sig.DelegateChain = dc.Val
+		}
+	} else if err := cbor.NewDecoder(msg).Decode(&sig); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
 		return nil, fmt.Errorf("error decoding TO0.OwnerSign request: %w", err)
 	}

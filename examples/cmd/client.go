@@ -352,6 +352,7 @@ func di(ctx context.Context) (err error) {
 		HmacSha256: hmacSha256,
 		HmacSha384: hmacSha384,
 		Key:        key,
+		Version:    version,
 	})
 	if err != nil {
 		return err
@@ -554,6 +555,31 @@ func (h *bmoHandler) HandleImage(ctx context.Context, imageType, name string, si
 	}
 	fmt.Printf("[fdo.bmo] Saved image to: %s (%d bytes)\n", filename, len(image))
 	return 0, fmt.Sprintf("saved to %s", filename), nil
+}
+
+// bmoBiosHandler records BIOS parameters to bmo-bios-params. A set is
+// applied atomically: the whole file is written to a temporary file and
+// renamed into place, so either every parameter is recorded or none is.
+type bmoBiosHandler struct{}
+
+func (h *bmoBiosHandler) SetBiosParameter(name, value string) (int, string, error) {
+	return h.SetBiosParameters([]fsim.BiosParam{{Name: name, Value: value}})
+}
+
+func (h *bmoBiosHandler) SetBiosParameters(params []fsim.BiosParam) (int, string, error) {
+	var buf strings.Builder
+	for _, p := range params {
+		fmt.Fprintf(&buf, "%s=%s\n", p.Name, p.Value)
+	}
+	tmp := "bmo-bios-params.tmp"
+	if err := os.WriteFile(tmp, []byte(buf.String()), 0600); err != nil {
+		return 2, "", err
+	}
+	if err := os.Rename(tmp, "bmo-bios-params"); err != nil {
+		return 2, "", err
+	}
+	fmt.Printf("[fdo.bmo] Applied %d BIOS parameter(s) atomically\n", len(params))
+	return 0, fmt.Sprintf("applied %d parameter(s)", len(params)), nil
 }
 
 // bmoAckHandler implements fsim.ImageAckHandler to accept/reject images based on MIME type.
@@ -824,9 +850,10 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	// Add BMO handler to receive boot images
 	// Using UnifiedHandler - the framework handles chunking transparently
 	bmoFSIM := &fsim.BMO{
-		UnifiedHandler: &bmoHandler{},
-		URLFetcher:     &defaultURLFetcher{timeout: 30 * time.Second},
-		URLTimeout:     30,
+		UnifiedHandler:   &bmoHandler{},
+		BiosParamHandler: &bmoBiosHandler{},
+		URLFetcher:       &defaultURLFetcher{timeout: 30 * time.Second},
+		URLTimeout:       30,
 	}
 	// Add AckHandler if supported types are specified (for NAK testing)
 	if bmoSupportedTypes != "" {

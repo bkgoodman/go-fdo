@@ -283,6 +283,26 @@ test_fdo200() {
 	log_success "FDO 2.0 Protocol test PASSED"
 }
 
+# Test: FDO 2.0 end-to-end, including DI at 2.0 (2.0 AppStart with capability flags)
+test_fdo200_di200() {
+	log_section "TEST: FDO 2.0 Protocol (DI at 2.0)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	start_server "-reuse-cred"
+
+	log_step "Running DI with FDO 2.0"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -fdo-version 200 || return 1
+	log_success "DI completed with FDO 2.0"
+
+	log_step "Running TO1/TO2 with FDO 2.0"
+	run_cmd go run ./cmd client -fdo-version 200 || return 1
+	log_success "TO1/TO2 completed with FDO 2.0"
+
+	stop_server
+	log_success "FDO 2.0 Protocol (DI at 2.0) test PASSED"
+}
+
 # Test: Delegate (from delegate.md)
 # NOTE: Delegate TO2 now works after the fix to use original owner key for voucher validation
 test_delegate() {
@@ -1511,6 +1531,47 @@ test_bmo() {
 	rm -f "$BMO_FILE" "$RECEIVED_FILE" bmo-*
 	rm -f "$BMO_FILE" "$RECEIVED_FILE"
 	log_success "BMO FSIM test PASSED"
+}
+
+# Test: BMO FSIM multi-parameter BIOS set. A set is atomic and answered by
+# exactly one fdo.bmo:response (fdo.bmo.md "Atomicity"); the owner waits for
+# it before completing the module.
+test_bmo_set() {
+	log_section "TEST: BMO FSIM Multi-Parameter BIOS Set (atomic)"
+
+	mkdir -p "$EPHEMERAL_DIR"
+	rm -f "$DB_FILE" "$CRED_FILE" examples/bmo-bios-params
+
+	BMO_FILE="$EPHEMERAL_DIR/test_bmo_set_image.bin"
+	dd if=/dev/urandom of="$BMO_FILE" bs=1024 count=2 2>/dev/null
+
+	start_server "-bmo application/x-iso9660-image:../$BMO_FILE -bmo-sign -bmo-set secure-boot=true -bmo-set boot-order=pxe,disk,usb -bmo-set bios-password=TestKey"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key ec256 || return 1
+
+	log_step "Running TO1/TO2 with a 3-parameter BIOS set"
+	run_cmd go run ./cmd client -kex ECDH256 || return 1
+	stop_server
+
+	if grep -q "did not read full body" "$EPHEMERAL_DIR/fdo_server.log" 2>/dev/null; then
+		log_error "Owner could not parse the BIOS response"
+		return 1
+	fi
+	if [ ! -f examples/bmo-bios-params ]; then
+		log_error "BIOS parameters were not applied (examples/bmo-bios-params missing)"
+		return 1
+	fi
+	for p in "secure-boot=true" "boot-order=pxe,disk,usb" "bios-password=TestKey"; do
+		if ! grep -qx "$p" examples/bmo-bios-params; then
+			log_error "Parameter $p missing from examples/bmo-bios-params"
+			return 1
+		fi
+	done
+	log_success "All 3 BIOS parameters applied in one atomic set"
+
+	rm -f "$BMO_FILE" examples/bmo-bios-params examples/bmo-test_bmo_set_image.bin
+	log_success "BMO FSIM multi-parameter BIOS set test PASSED"
 }
 
 # Test: BMO FSIM with authenticated provisioning (COSE_Sign1 via -bmo-sign).
@@ -3403,6 +3464,7 @@ test_all() {
 	test_rv_blob || failed=1
 	test_kex || failed=1
 	test_fdo200 || failed=1
+	test_fdo200_di200 || failed=1
 	test_delegate || failed=1
 	test_delegate_fdo200 || failed=1
 	test_delegate_csr || failed=1
@@ -3423,6 +3485,7 @@ test_all() {
 	test_wifi_fdo200 || failed=1
 	test_wifi_single_sided || failed=1
 	test_bmo || failed=1
+	test_bmo_set || failed=1
 	test_bmo_signed || failed=1
 	test_bmo_signed_scope || failed=1
 	test_bmo_efi || failed=1
@@ -3496,6 +3559,9 @@ main() {
 	fdo200)
 		test_fdo200 || rc=$?
 		;;
+	fdo200-di200)
+		test_fdo200_di200 || rc=$?
+		;;
 	delegate)
 		test_delegate || rc=$?
 		;;
@@ -3558,6 +3624,9 @@ main() {
 		;;
 	bmo)
 		test_bmo || rc=$?
+		;;
+	bmo-set)
+		test_bmo_set || rc=$?
 		;;
 	bmo-signed)
 		test_bmo_signed || rc=$?
@@ -3630,7 +3699,7 @@ main() {
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, delegate, delegate-fdo200, delegate-csr, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-owner-unsigned, bmo-meta-delegate-signed, payload-signed, payload-delegate-noperm, rv-firmware-tags, credentials, auth, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, fdo200-di200, delegate, delegate-fdo200, delegate-csr, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-set, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-owner-unsigned, bmo-meta-delegate-signed, payload-signed, payload-delegate-noperm, rv-firmware-tags, credentials, auth, all"
 		exit 1
 		;;
 	esac

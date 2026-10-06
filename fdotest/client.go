@@ -261,6 +261,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 	to0 := &fdo.TO0Client{
 		Vouchers:  conf.State,
 		OwnerKeys: conf.State,
+		Version:   conf.Version,
 	}
 
 	for _, table := range []struct {
@@ -387,6 +388,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						HmacSha384: hmacSha384,
 						Key:        key,
 						PSS:        table.keyType == protocol.RsaPssKeyType,
+						Version:    conf.Version,
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -407,7 +409,8 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
 				if _, err := fdo.TO1(ctx, transport, *cred, key, &fdo.TO1Options{
-					PSS: table.keyType == protocol.RsaPssKeyType,
+					PSS:     table.keyType == protocol.RsaPssKeyType,
+					Version: conf.Version,
 				}); err == nil || !strings.HasSuffix(err.Error(), fdo.ErrNotFound.Error()) {
 					t.Fatalf("expected TO1 to fail with no resource found, got %v", err)
 				}
@@ -433,7 +436,8 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
 				to1d, err := fdo.TO1(ctx, transport, *cred, key, &fdo.TO1Options{
-					PSS: table.keyType == protocol.RsaPssKeyType,
+					PSS:     table.keyType == protocol.RsaPssKeyType,
+					Version: conf.Version,
 				})
 				if err != nil {
 					t.Fatal(err)

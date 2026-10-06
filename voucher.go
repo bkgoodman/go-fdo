@@ -326,22 +326,37 @@ func (v *Voucher) VerifyCrypto(o VerifyOptions) error {
 	// immediately with an error code message.
 	//
 	// When a delegate is used, the TO1d is signed by the delegate key, not the
-	// owner key. Check if a delegate chain is present in the TO1d unprotected
-	// header and verify against the delegate key if so.
+	// owner key. The delegate chain is in the signed to1d payload (FDO 2.0) or
+	// the to1d unprotected header (FDO 1.1). The chain MUST root to the Owner
+	// key and carry the redirect permission; otherwise any self-made chain
+	// could redirect the Device.
 	verifyKey := expectedOwnerPub
-	var delegatePubKey protocol.PublicKey
-	if found, err := o.To1d.Unprotected.Parse(cose.Label{Int64: 258}, &delegatePubKey); found && err == nil {
-		// Delegate chain present - verify against delegate key
-		delegateKey, err := delegatePubKey.Public()
-		if err != nil {
-			return fmt.Errorf("error parsing delegate key from TO1d: %w", err)
+	var delegateChain []*x509.Certificate
+	if dc := o.To1d.Payload.Val.DelegateChain; dc != nil && dc.Val != nil {
+		for _, cert := range *dc.Val {
+			delegateChain = append(delegateChain, (*x509.Certificate)(cert))
 		}
-		verifyKey = delegateKey
+	} else {
+		var delegatePubKey protocol.PublicKey
+		if found, err := o.To1d.Unprotected.Parse(cose.Label{Int64: 258}, &delegatePubKey); found && err == nil {
+			if delegateChain, err = delegatePubKey.Chain(); err != nil {
+				return fmt.Errorf("error parsing delegate chain from TO1d: %w", err)
+			}
+		}
+	}
+	if len(delegateChain) > 0 {
+		if err := VerifyDelegateChain(delegateChain, &expectedOwnerPub, &OIDPermitRedirect); err != nil {
+			return fmt.Errorf("to1d delegate chain verification failed: %w", err)
+		}
+		verifyKey = delegateChain[0].PublicKey
 	}
 
-	// FDO 2.0 uses domain-specific AAD; FDO 1.01 uses empty AAD
+	// The voucher's protocol version (OVHProtVer) decides whether the to1d
+	// uses domain-specific AAD, as for voucher entries (FDO 2.0 Errata 1,
+	// E7). The TO2 session version cannot be used: the Owner signs the to1d
+	// during TO0, before it knows which version a Device will use.
 	var aad []byte
-	if o.Version == protocol.Version200 {
+	if v.Header.Val.Version >= uint16(protocol.Version200) {
 		aad = cose.AADOwnerSign
 	}
 	if ok, err := o.To1d.Verify(verifyKey, nil, aad); err != nil {
@@ -371,7 +386,8 @@ type VerifyOptions struct {
 	// May be nil in the case of RV bypass
 	To1d *cose.Sign1[protocol.To1d, []byte]
 
-	// FDO protocol version; FDO 2.0 uses domain-specific AAD, FDO 1.01 uses empty AAD
+	// TO2 session protocol version. Not used to choose AAD: voucher entry
+	// and to1d AAD follow the voucher header's version (FDO 2.0 Errata 1, E7).
 	Version protocol.Version
 }
 
