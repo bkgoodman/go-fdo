@@ -8,8 +8,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/fido-device-onboard/go-fdo"
 )
@@ -671,4 +674,89 @@ func TestDelegateWithAllPermissions(t *testing.T) {
 	}
 
 	t.Log("Delegate with all permissions correctly allowed all operations")
+}
+
+// utf8Name encodes a Name the way OpenSSL does by default (and RFC 5280
+// requires for new certificates): every attribute as UTF8String, which Go's
+// pkix.Name encoder never produces for printable strings.
+func utf8Name(t *testing.T, cn, org string) []byte {
+	t.Helper()
+	attr := func(oid asn1.ObjectIdentifier, v string) pkix.RelativeDistinguishedNameSET {
+		return pkix.RelativeDistinguishedNameSET{{Type: oid, Value: asn1.RawValue{Tag: asn1.TagUTF8String, Bytes: []byte(v)}}}
+	}
+	raw, err := asn1.Marshal(pkix.RDNSequence{
+		attr(asn1.ObjectIdentifier{2, 5, 4, 10}, org),
+		attr(asn1.ObjectIdentifier{2, 5, 4, 3}, cn),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func issueTestCert(t *testing.T, subject, issuer []byte, pub any, signer *ecdsa.PrivateKey, isCA bool) *x509.Certificate {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		RawSubject:            subject,
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  isCA,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		UnknownExtKeyUsage:    []asn1.ObjectIdentifier{fdo.OIDPermitProvision},
+	}
+	if isCA {
+		tmpl.KeyUsage |= x509.KeyUsageCertSign
+	}
+	parent := &x509.Certificate{RawSubject: issuer}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, pub, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// TestDelegateChainUTF8OwnerName: chains whose top issuer name is not a bare
+// PrintableString CN (OpenSSL's UTF8String default, extra RDNs) must verify.
+// The synthesized Owner root is bound by signature, not by its rebuilt name;
+// real certificate-to-certificate links must still match by name.
+func TestDelegateChainUTF8OwnerName(t *testing.T) {
+	ownerKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	midKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ownerPub := ownerKey.Public()
+	otherPub := otherKey.Public()
+
+	ownerName := utf8Name(t, "Test Owner CA", "Example Corp")
+	ownerCA := issueTestCert(t, ownerName, ownerName, ownerKey.Public(), ownerKey, true)
+	leaf := issueTestCert(t, utf8Name(t, "Delegate", "Example Corp"), ownerName, leafKey.Public(), ownerKey, false)
+
+	if err := fdo.VerifyDelegateChain([]*x509.Certificate{leaf}, &ownerPub, &fdo.OIDPermitProvision); err != nil {
+		t.Errorf("leaf issued by Owner key (UTF8 issuer) rejected: %v", err)
+	}
+	if err := fdo.VerifyDelegateChain([]*x509.Certificate{leaf, ownerCA}, &ownerPub, &fdo.OIDPermitProvision); err != nil {
+		t.Errorf("chain including self-signed Owner CA (UTF8 name) rejected: %v", err)
+	}
+	if err := fdo.VerifyDelegateChain([]*x509.Certificate{leaf}, &otherPub, &fdo.OIDPermitProvision); err == nil {
+		t.Error("SECURITY FAILURE: chain accepted against the wrong Owner key")
+	}
+
+	// A real link whose issuer name does not match its signer's subject is
+	// still rejected, even though the signature is valid.
+	midName := utf8Name(t, "Intermediate", "Example Corp")
+	mid := issueTestCert(t, midName, ownerName, midKey.Public(), ownerKey, true)
+	badLeaf := issueTestCert(t, utf8Name(t, "Delegate", "Example Corp"), utf8Name(t, "Someone Else", "Example Corp"), leafKey.Public(), midKey, false)
+	if err := fdo.VerifyDelegateChain([]*x509.Certificate{badLeaf, mid}, &ownerPub, &fdo.OIDPermitProvision); err == nil {
+		t.Error("SECURITY FAILURE: issuer/subject name mismatch between real certificates accepted")
+	}
+	goodLeaf := issueTestCert(t, utf8Name(t, "Delegate", "Example Corp"), midName, leafKey.Public(), midKey, false)
+	if err := fdo.VerifyDelegateChain([]*x509.Certificate{goodLeaf, mid}, &ownerPub, &fdo.OIDPermitProvision); err != nil {
+		t.Errorf("valid 2-cert UTF8 chain rejected: %v", err)
+	}
 }

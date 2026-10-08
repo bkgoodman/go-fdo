@@ -40,6 +40,25 @@
   but it also blocks the `wait` action of the proposed `fdo.defer` FSIM --
   see `DESIGN-PROPOSALS.md` §1.
 
+- [x] **FIXED 2026-10-08:** the name comparison is skipped only for the link
+  to the synthesized Owner root (bound by signature against the Owner key);
+  real links still match by name. Test: `TestDelegateChainUTF8OwnerName`
+  (mutation-checked). Original report: **Delegate chains with a UTF8String (or multi-RDN) top issuer were
+  rejected** (found 2026-10-08 via go-fdo-meta-tool Test 26).
+  `processDelegateChain` (`delegate.go` ~374) synthesizes an ephemeral Owner
+  root via `GenerateDelegate(..., issuer.CommonName, ...)`, then requires
+  `bytes.Equal(chain[i].RawIssuer, chain[i+1].RawSubject)` (~425). Go encodes
+  the rebuilt name as PrintableString `CN=x`; OpenSSL (and RFC 5280) use
+  UTF8String, and real CAs have O=/C=. So OpenSSL-issued delegate chains fail
+  whenever an Owner key is supplied — BMO x5chain, meta x5chain, and TO2
+  delegates alike. Fix: give the synthesized root the top cert's exact
+  `RawIssuer` (or skip the name comparison for the synthesized link — its
+  signature check already binds it to the Owner key). go-fdo's own tests use
+  go-fdo-generated certs, which is why this was never seen. fdo-uefi-rs is
+  not affected (issuers are matched by signature only).
+- [ ] **Owner side never checks `ProveDevice20.hashPrev2`** (Errata 1 made it
+  well-defined; the device side checks `hashPrev`). `to2_server_v200.go`.
+
 ### Code Quality
 
 - [✅] Fix goimports formatting issues in examples/cmd/client.go
@@ -60,7 +79,7 @@ See `provisioning-security.md` for the narrative. The four models are:
 #### Status Matrix (go-fdo library + server + device)
 
 | Model | Library | Server | Unit tests | Integration test | Negative integration |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | 1 | **Working** (Owner-direct unsigned accepted — channel authority) | Works (omit `-bmo-sign`) | unwrap tests + `TestUnsignedProvisioningAllowed_Matrix` | **`bmo-owner-unsigned`** | `bmo-delegate-unsigned-noperm` (onboard-only peer) |
 | 2 | **Implemented** (delegate PERM.7 → accept unsigned) | Works (`-onboardDelegate` with PERM.7 chain) | 6 unwrap tests | **`bmo-delegate-unsigned`** | **`bmo-delegate-unsigned-noperm`** |
 | 3 | Implemented | `-bmo-sign` works | Yes (5 tests) | **`bmo-signed`** | Unit: tampered / wrong key / wrong content type |

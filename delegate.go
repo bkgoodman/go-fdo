@@ -368,6 +368,10 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 	if oid != nil {
 		oidArray = append(oidArray, *oid)
 	}
+	// Index of the synthesized Owner root, or -1. Its name is rebuilt from the
+	// top issuer's CommonName only, so it is bound to the chain by signature
+	// (CheckSignatureFrom against the Owner key), never by name.
+	synthRoot := -1
 	// If requested, verify that chain was rooted by Owner Key since we will often not have a cert for the Owner Key,
 	// we will have to add a self-signed owner cert at the root of the chain
 	if ownerKey != nil {
@@ -394,6 +398,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 			return fmt.Errorf("VerifyDelegate Error createing ephemerial Owner Root Cert: %v", err)
 		}
 		chain = append(chain, rootOwner)
+		synthRoot = len(chain) - 1
 	}
 
 	permstr := ""
@@ -422,7 +427,7 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 				}
 				return fmt.Errorf("verifyDelegate chain validation error - (#%d) %s not signed by (#%d) %s: %w", i, chain[i].Subject, i+1, chain[i+1].Subject, err)
 			}
-			if !bytes.Equal(chain[i].RawIssuer, chain[i+1].RawSubject) {
+			if i+1 != synthRoot && !bytes.Equal(chain[i].RawIssuer, chain[i+1].RawSubject) {
 				return fmt.Errorf("subject %s issued by issuer=%s, expected %s", c.Subject, c.Issuer, chain[i+1].Subject)
 			}
 		}
