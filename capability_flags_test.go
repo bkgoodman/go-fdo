@@ -61,3 +61,22 @@ func TestCapabilityFlagsWireLayout(t *testing.T) {
 		})
 	}
 }
+
+// TestGlobalCapabilityFlags checks the advertised versions (no FDO 1.0) and
+// that an emptied vendor flag list still encodes as a CBOR array.
+func TestGlobalCapabilityFlags(t *testing.T) {
+	if got := GlobalCapabilityFlags.Flags[0]; got != Capb0SupFDO11|Capb0SupFDO20|DelegateSupportFlag {
+		t.Errorf("flags byte 0 = %#x, want SupFDO11|SupFDO20|DELEG (%#x)", got, Capb0SupFDO11|Capb0SupFDO20|DelegateSupportFlag)
+	}
+	b, err := cbor.Marshal(CapabilityFlags{Flags: GlobalCapabilityFlags.Flags, VendorUnique: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var elems []cbor.RawBytes
+	if err := cbor.Unmarshal(b, &elems); err != nil || len(elems) != 2 {
+		t.Fatalf("expected a 2-element array: %x (%v)", b, err)
+	}
+	if !bytes.Equal(elems[1], []byte{0x80}) {
+		t.Errorf("empty VendorCapFlags encoded as %x, want an empty array (80)", []byte(elems[1]))
+	}
+}

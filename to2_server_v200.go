@@ -6,11 +6,16 @@ package fdo
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
@@ -66,23 +71,140 @@ func (s *TO2Server) helloDeviceAck20(ctx context.Context, msg io.Reader) (*Hello
 		return nil, fmt.Errorf("error storing nonce: %w", err)
 	}
 
-	// hashPrev = hash[TO2.HelloDeviceProbe], using a hash type the Device offered
-	probeHash, err := hashMessage(probe.HashTypes[0], probeBytes)
+	// hashPrev = hash[TO2.HelloDeviceProbe], using the first hash type the
+	// Device offered that the Owner supports
+	hashAlg, ok := selectHashType20(probe.HashTypes)
+	if !ok {
+		captureErr(ctx, protocol.MessageBodyErrCode, "")
+		return nil, fmt.Errorf("TO2.HelloDeviceProbe offers no supported hash type: %v", probe.HashTypes)
+	}
+	probeHash, err := hashMessage(hashAlg, probeBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build response with supported crypto options
-	// For now, offer common suites - this could be made configurable
+	// Offer the key exchange suites the spec allows for this device and
+	// owner attestation key pair
+	kexSuites, err := kexSuitesForVoucher20(ov)
+	if err != nil {
+		return nil, err
+	}
+	if len(kexSuites) == 0 {
+		return nil, fmt.Errorf("no key exchange suite is valid for the device and owner attestation keys")
+	}
+
 	return &HelloDeviceAck20Msg{
 		CapabilityFlags:     GlobalCapabilityFlags,
 		GUID:                probe.GUID,
 		MaxOwnerMessageSize: 65535,
-		KexSuites:           []kex.Suite{kex.ECDH384Suite, kex.ECDH256Suite},
-		CipherSuites:        []kex.CipherSuiteID{kex.A256GcmCipher, kex.A128GcmCipher},
+		KexSuites:           kexSuites,
+		CipherSuites:        cipherSuites20,
 		NonceTO2ProveDVPrep: proveDeviceNonce,
 		HashPrev:            probeHash,
 	}, nil
+}
+
+// selectHashType20 returns the first hash type in the Device's preference
+// order that can be used for hashPrev.
+func selectHashType20(offered []protocol.HashAlg) (protocol.HashAlg, bool) {
+	for _, alg := range offered {
+		switch alg {
+		case protocol.Sha256Hash, protocol.Sha384Hash:
+			return alg, true
+		}
+	}
+	return 0, false
+}
+
+// kexSuites20 lists key exchange suites in the Owner's order of preference.
+//
+// ASYMKEX2048/ASYMKEX3072 are not offered: the Device encrypts its random
+// with the Owner public key, which in the FDO 2.0 device-proves-first flow it
+// only receives in TO2.ProveOVHdr20, after it has already sent its key
+// exchange parameter in TO2.ProveDevice20.
+var kexSuites20 = []kex.Suite{
+	kex.ECDH384Suite, kex.ECDH256Suite, kex.DHKEXid15Suite, kex.DHKEXid14Suite,
+}
+
+// cipherSuites20 lists the cipher suites the Owner offers, in order of
+// preference.
+var cipherSuites20 = []kex.CipherSuiteID{kex.A256GcmCipher, kex.A128GcmCipher}
+
+// kexSuitesFor20 returns the key exchange suites that the spec allows for the
+// given device and owner attestation keys and that are available.
+func kexSuitesFor20(device, owner crypto.PublicKey) []kex.Suite {
+	var suites []kex.Suite
+	for _, suite := range kexSuites20 {
+		if validKex20(suite, device, owner) {
+			suites = append(suites, suite)
+		}
+	}
+	return suites
+}
+
+// validKex20 reports whether a key exchange suite may be used in FDO 2.0 TO2
+// for the given device and owner attestation keys.
+func validKex20(suite kex.Suite, device, owner crypto.PublicKey) bool {
+	return slices.Contains(kexSuites20, suite) &&
+		kex.Available(suite, kex.A128GcmCipher) &&
+		suite.Valid(device, owner) &&
+		ownerAllowsKex(suite, owner)
+}
+
+// lenientKex20 is the relaxed check used with TO2Server.LenientKeyExchange:
+// any FDO 2.0 suite of the family matching the owner key (ECDH for ECDSA
+// owners, DHKEX for RSA owners) is accepted, regardless of curve or modulus.
+func lenientKex20(suite kex.Suite, owner crypto.PublicKey) bool {
+	if !slices.Contains(kexSuites20, suite) || !kex.Available(suite, kex.A128GcmCipher) {
+		return false
+	}
+	switch owner.(type) {
+	case *ecdsa.PublicKey:
+		return suite == kex.ECDH256Suite || suite == kex.ECDH384Suite
+	case *rsa.PublicKey:
+		return suite == kex.DHKEXid14Suite || suite == kex.DHKEXid15Suite
+	default:
+		return false
+	}
+}
+
+// ownerAllowsKex applies the owner side of the spec's key exchange mapping.
+// kex.Suite.Valid accepts any suite for RSA device keys (the spec table only
+// covers ECDSA devices); the suite must still match the owner key.
+func ownerAllowsKex(suite kex.Suite, owner crypto.PublicKey) bool {
+	switch key := owner.(type) {
+	case *ecdsa.PublicKey:
+		return (suite == kex.ECDH256Suite && key.Curve == elliptic.P256()) ||
+			(suite == kex.ECDH384Suite && key.Curve == elliptic.P384())
+	case *rsa.PublicKey:
+		return (suite == kex.DHKEXid14Suite && key.Size() == 2048/8) ||
+			(suite == kex.DHKEXid15Suite && key.Size() == 3072/8)
+	default:
+		return false
+	}
+}
+
+// kexSuitesForVoucher20 returns the key exchange suites to offer for a
+// voucher's device (leaf of the device certificate chain) and owner.
+func kexSuitesForVoucher20(ov *Voucher) ([]kex.Suite, error) {
+	device, owner, err := attestationKeys20(ov)
+	if err != nil {
+		return nil, err
+	}
+	return kexSuitesFor20(device, owner), nil
+}
+
+// attestationKeys20 returns the device and owner attestation public keys of
+// a voucher.
+func attestationKeys20(ov *Voucher) (device, owner crypto.PublicKey, err error) {
+	if ov.CertChain == nil || len(*ov.CertChain) == 0 {
+		return nil, nil, fmt.Errorf("voucher has no device certificate chain")
+	}
+	owner, err = ov.OwnerPublicKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("error getting owner public key: %w", err)
+	}
+	return (*ov.CertChain)[0].PublicKey, owner, nil
 }
 
 // proveOVHdr20 handles TO2.ProveDevice20 (82) -> TO2.ProveOVHdr20 (83)
@@ -144,8 +266,19 @@ func (s *TO2Server) proveOVHdr20(ctx context.Context, msg io.Reader) (*cose.Sign
 
 	// Now that device is verified, proceed with owner proof (similar to 1.01 proveOVHdr)
 	// Begin key exchange with device's selected suite
-	if !kex.Available(payload.KexSuiteName, payload.CipherSuiteName) {
+	if !kex.Available(payload.KexSuiteName, payload.CipherSuiteName) || !slices.Contains(cipherSuites20, payload.CipherSuiteName) {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
 		return nil, fmt.Errorf("unsupported key exchange/cipher suite")
+	}
+	if device, owner, err := attestationKeys20(ov); err != nil {
+		return nil, err
+	} else if !validKex20(payload.KexSuiteName, device, owner) {
+		if !s.LenientKeyExchange || !lenientKex20(payload.KexSuiteName, owner) {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, fmt.Errorf("key exchange %s is invalid for the device and owner attestation types", payload.KexSuiteName)
+		}
+		slog.Warn("LenientKeyExchange: accepting a key exchange suite the spec does not allow for these attestation keys",
+			"suite", payload.KexSuiteName, "guid", guid.String())
 	}
 
 	expectedOwnerPubKey, err := ov.OwnerPublicKey()
@@ -228,7 +361,7 @@ func (s *TO2Server) proveOVHdr20(ctx context.Context, msg io.Reader) (*cose.Sign
 			Payload: cbor.NewByteWrap(proveOVHdrPayload),
 		},
 	}
-	opts, err := signOptsFor(ownerKey, false)
+	opts, err := signOptsFor(ownerKey, keyType == protocol.RsaPssKeyType)
 	if err != nil {
 		return nil, fmt.Errorf("error determining signing options for ProveOVHdr20: %w", err)
 	}
@@ -339,6 +472,11 @@ func (s *TO2Server) setupDevice20(ctx context.Context, msg io.Reader) (*cose.Sig
 		return nil, fmt.Errorf("error getting owner key: %w", err)
 	}
 
+	// A delegate needs the onboard permission matching the disposition
+	if err := s.checkOnboardDelegateDisposition(mfgKey.Type, reuseCredential); err != nil {
+		return nil, err
+	}
+
 	payload := SetupDevice20Payload{
 		DispositionCode:        DispCredReuse,
 		MaxDeviceServiceInfoSz: &maxSvcInfoSz,
@@ -393,6 +531,28 @@ func (s *TO2Server) setupDevice20(ctx context.Context, msg io.Reader) (*cose.Sig
 		return nil, fmt.Errorf("error signing SetupDevice20: %w", err)
 	}
 	return s1, nil
+}
+
+// checkOnboardDelegateDisposition enforces the onboarding delegate's
+// permission for the chosen TO2 disposition: credential reuse requires
+// fdo-ekt-permit-onboard-reuse-cred and new credentials require
+// fdo-ekt-permit-onboard-new-cred.
+func (s *TO2Server) checkOnboardDelegateDisposition(keyType protocol.KeyType, reuse bool) error {
+	if s.OnboardDelegate == "" {
+		return nil
+	}
+	name := strings.ReplaceAll(s.OnboardDelegate, "=", keyType.KeyString())
+	_, chain, err := s.DelegateKeys.DelegateKey(name)
+	if err != nil {
+		return fmt.Errorf("delegate chain %q not found: %w", name, err)
+	}
+	if reuse && !DelegateCanReuseCred(chain) {
+		return fmt.Errorf("onboarding delegate %q lacks fdo-ekt-permit-onboard-reuse-cred, required for credential reuse", name)
+	}
+	if !reuse && !DelegateHasPermission(chain, OIDPermitOnboardNewCred) {
+		return fmt.Errorf("onboarding delegate %q lacks fdo-ekt-permit-onboard-new-cred, required to provide new credentials", name)
+	}
+	return nil
 }
 
 // proveOVHdrSigner20 returns the key that signs TO2.ProveOVHdr20: the

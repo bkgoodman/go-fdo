@@ -196,7 +196,17 @@ func Key2String(key any) string {
 		return fmt.Sprintf("%T Fingerprint: %s", key, fingerprint)
 	}
 }
+
 func (pub PublicKey) String() string {
+	s := fmt.Sprintf("Type      %s\n", pub.Type)
+	s += fmt.Sprintf("Encoding  %s\n", pub.Encoding)
+	s += fmt.Sprintf("Body      %x\n", pub.Body)
+	return s
+}
+
+// Summary returns a one-line description of the public key with its SHA-256
+// fingerprint (see [Key2String]).
+func (pub PublicKey) Summary() string {
 	key, err := pub.Public()
 	if err != nil {
 		return fmt.Sprintf("Err: %v", err)

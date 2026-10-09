@@ -295,7 +295,19 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 			cipherSuite: kex.A128GcmCipher,
 		},
 	} {
-		t.Run(fmt.Sprintf("Key %q Encoding %q Exchange %q Cipher %q", table.keyType, table.keyEncoding, table.keyExchange, table.cipherSuite), func(t *testing.T) {
+		// ASYMKEX cannot be used in the FDO 2.0 device-proves-first flow (the
+		// Device would need the Owner key before TO2.ProveOVHdr20), so 2.0
+		// uses the Diffie-Hellman suite for the same Owner key size.
+		keyExchange := table.keyExchange
+		if conf.Version == protocol.Version200 {
+			switch keyExchange {
+			case kex.ASYMKEX2048Suite:
+				keyExchange = kex.DHKEXid14Suite
+			case kex.ASYMKEX3072Suite:
+				keyExchange = kex.DHKEXid15Suite
+			}
+		}
+		t.Run(fmt.Sprintf("Key %q Encoding %q Exchange %q Cipher %q", table.keyType, table.keyEncoding, keyExchange, table.cipherSuite), func(t *testing.T) {
 			newCredential := func(keyType protocol.KeyType) (hmacSha256, hmacSha384 hash.Hash, key crypto.Signer, toDeviceCred func(fdo.DeviceCredential) any) {
 				secret := make([]byte, 32)
 				if _, err := rand.Read(secret); err != nil {
@@ -421,7 +433,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						Port:              8080,
 						TransportProtocol: protocol.HTTPTransport,
 					},
-				}, "")
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -458,7 +470,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						FileSep: ";",
 						Bin:     runtime.GOARCH,
 					},
-					KeyExchange:          table.keyExchange,
+					KeyExchange:          keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
 				}, conf.Version)
@@ -504,7 +516,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						FileSep: ";",
 						Bin:     runtime.GOARCH,
 					},
-					KeyExchange:          table.keyExchange,
+					KeyExchange:          keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
 				}, conf.Version)
@@ -551,7 +563,7 @@ func RunClientTestSuite(t *testing.T, conf Config) {
 						Bin:     runtime.GOARCH,
 					},
 					DeviceModules:        conf.DeviceModules,
-					KeyExchange:          table.keyExchange,
+					KeyExchange:          keyExchange,
 					CipherSuite:          table.cipherSuite,
 					AllowCredentialReuse: conf.Reuse,
 				}, conf.Version)

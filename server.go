@@ -158,6 +158,13 @@ type TO0Server struct {
 	// vouchers will be accepted with the requested TTL.
 	AcceptVoucherWithInfo func(ctx context.Context, info TO0OwnerSignInfo) (ttlSecs uint32, err error)
 
+	// VerifyTo1d makes the Rendezvous Server verify the to1d signature in
+	// TO0.OwnerSign before storing it: against the voucher's Owner key, or
+	// against a delegate chain rooted in the Owner key that carries the
+	// fdo-ekt-permit-redirect permission. The Device always performs this
+	// check in TO2; enabling it here rejects bad blobs at registration time.
+	VerifyTo1d bool
+
 	// VoucherReplacementPolicy controls how the RV service handles voucher
 	// replacements for the same GUID. Default is RVPolicyAllowAny (Option 0).
 	// See SECURITY_CONSIDERATIONS.md for detailed policy descriptions.
@@ -291,6 +298,16 @@ type TO2Server struct {
 	// Use this delegate cert for onboarding (or empty string)
 	OnboardDelegate string
 
+	// LenientKeyExchange relaxes the FDO 2.0 TO2 key exchange check: a Device
+	// may select any ECDH suite for an ECDSA Owner key (or any DHKEX suite for
+	// an RSA Owner key), even one that is not offered in
+	// TO2.HelloDeviceAck20 and that the spec's key exchange mapping does not
+	// allow for the attestation keys (e.g. ECDH384 with P-256 device and
+	// Owner keys). The offer itself is unchanged. This is NOT spec compliant;
+	// it exists for interoperability testing with Devices that do not choose
+	// from the Owner's offer.
+	LenientKeyExchange bool
+
 	// Use this delegate cert for rendezvous (or empty string)
 	RvDelegate string
 
@@ -404,12 +421,7 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 		resp, err = s.setupDevice20(ctx, msg)
 	case protocol.TO2DeviceSvcInfo20MsgType:
 		respType = protocol.TO2OwnerSvcInfo20MsgType
-		var req DeviceSvcInfo20Msg
-		if err := cbor.NewDecoder(msg).Decode(&req); err != nil {
-			return protocol.TO2OwnerSvcInfo20MsgType, nil
-		}
-		// Convert 2.0 message to 1.0.1 format and reuse existing logic
-		resp, err = s.ownerServiceInfo20(ctx, &req)
+		resp, err = s.ownerServiceInfo20(ctx, msg)
 		if err != nil {
 			s.Modules.CleanupModules(ctx)
 		}
@@ -453,7 +465,13 @@ func (s *TO2Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessag
 }
 
 // ownerServiceInfo20 converts 2.0 DeviceSvcInfo20Msg to 1.0.1 format and reuses existing logic
-func (s *TO2Server) ownerServiceInfo20(ctx context.Context, req *DeviceSvcInfo20Msg) (*OwnerSvcInfo20Msg, error) {
+func (s *TO2Server) ownerServiceInfo20(ctx context.Context, msg io.Reader) (*OwnerSvcInfo20Msg, error) {
+	var req DeviceSvcInfo20Msg
+	if err := cbor.NewDecoder(msg).Decode(&req); err != nil {
+		captureErr(ctx, protocol.MessageBodyErrCode, "")
+		return nil, fmt.Errorf("error decoding TO2.DeviceSvcInfo20 request: %w", err)
+	}
+
 	// Convert 2.0 message to 1.0.1 format and encode as CBOR
 	deviceInfo := deviceServiceInfo{
 		ServiceInfo:       req.ServiceInfo,

@@ -6,6 +6,7 @@ package fdo
 import (
 	"crypto/x509"
 	"fmt"
+	"strings"
 
 	"github.com/fido-device-onboard/go-fdo/protocol"
 )
@@ -152,29 +153,9 @@ func (l *LegacyCertificateCheckerAdapter) CheckCertificate(cert *x509.Certificat
 }
 
 func isRevocationError(err error) bool {
-	errStr := err.Error()
-	revocationIndicators := []string{
-		"revoked", "ocsp", "crl", "revocation",
-	}
-	for _, indicator := range revocationIndicators {
-		if contains(errStr, indicator) {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		(len(s) > len(substr) &&
-			(s[:len(substr)] == substr ||
-				s[len(s)-len(substr):] == substr ||
-				findSubstring(s, substr))))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+	errStr := strings.ToLower(err.Error())
+	for _, indicator := range []string{"revoked", "ocsp", "crl", "revocation"} {
+		if strings.Contains(errStr, indicator) {
 			return true
 		}
 	}

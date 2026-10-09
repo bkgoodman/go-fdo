@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +49,17 @@ type TO0Client struct {
 // RegisterBlob tells a Rendezvous Server where to direct a given device to its
 // owner service for onboarding. The returned uint32 is the number of seconds
 // before the rendezvous blob must be refreshed by calling [RegisterBlob] again.
-func (c *TO0Client) RegisterBlob(ctx context.Context, transport Transport, guid protocol.GUID, addrs []protocol.RvTO2Addr, delegateName string) (uint32, error) {
+// The rendezvous blob is signed by the Owner key.
+func (c *TO0Client) RegisterBlob(ctx context.Context, transport Transport, guid protocol.GUID, addrs []protocol.RvTO2Addr) (uint32, error) {
+	return c.RegisterBlobWithDelegate(ctx, transport, guid, addrs, "")
+}
+
+// RegisterBlobWithDelegate is like [TO0Client.RegisterBlob], but signs the
+// rendezvous blob with the named delegate from DelegateKeys (a "=" in the name
+// is replaced by the Owner key type). The delegate chain must carry the
+// fdo-ekt-permit-redirect permission. An empty delegateName signs with the
+// Owner key.
+func (c *TO0Client) RegisterBlobWithDelegate(ctx context.Context, transport Transport, guid protocol.GUID, addrs []protocol.RvTO2Addr, delegateName string) (uint32, error) {
 	ctx = contextWithErrMsg(ctx)
 	if c.Version != 0 {
 		ctx = protocol.ContextWithVersion(ctx, c.Version)
@@ -156,9 +165,8 @@ type to0d struct {
 }
 
 type ownerSign struct {
-	To0d          cbor.Bstr[to0d]
-	To1d          cose.Sign1Tag[protocol.To1d, []byte]
-	DelegateChain *[]*cbor.X509Certificate `cbor:",omitempty"`
+	To0d cbor.Bstr[to0d]
+	To1d cose.Sign1Tag[protocol.To1d, []byte]
 }
 
 // ownerSign20 is TO0.OwnerSign for FDO 2.0. The delegate chain, if any, is
@@ -268,9 +276,6 @@ func (c *TO0Client) ownerSign(ctx context.Context, transport Transport, guid pro
 			return 0, fmt.Errorf("error signing To1d payload for w/ Delegate TO0.OwnerSign: %w", err)
 		}
 
-		// TODO Do a veryify just to check if this is okay
-		//ok,err := to1d.Verify(delegateKey.Public(),nil,nil)
-
 		// This will fail if the device has been DI'd with a key of one type,
 		// but the Delegate chain was rooted by a different key of a different type
 		p, err := chain.Public()
@@ -352,9 +357,6 @@ func (s *TO0Server) acceptOwner(ctx context.Context, msg io.Reader) (*to0AcceptO
 			return nil, fmt.Errorf("error decoding TO0.OwnerSign request: %w", err)
 		}
 		sig = ownerSign{To0d: sig20.To0d, To1d: sig20.To1d}
-		if dc := sig20.To1d.Payload.Val.DelegateChain; dc != nil {
-			sig.DelegateChain = dc.Val
-		}
 	} else if err := cbor.NewDecoder(msg).Decode(&sig); err != nil {
 		captureErr(ctx, protocol.InvalidMessageErrCode, "")
 		return nil, fmt.Errorf("error decoding TO0.OwnerSign request: %w", err)
@@ -392,11 +394,24 @@ func (s *TO0Server) acceptOwner(ctx context.Context, msg io.Reader) (*to0AcceptO
 		return nil, fmt.Errorf("TO0 owner sign nonces not match")
 	}
 
-	// Extract delegate chain from ownerSign message (if present)
-	var delegateChain []*x509.Certificate
-	if sig.DelegateChain != nil {
-		for _, cborCert := range *sig.DelegateChain {
-			delegateChain = append(delegateChain, (*x509.Certificate)(cborCert))
+	// Delegate chain that signed the to1d, if any (signed payload in FDO 2.0,
+	// unprotected header in FDO 1.1)
+	delegateChain, err := to1dDelegateChain(sig.To1d.Untag())
+	if err != nil {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
+		return nil, err
+	}
+
+	// Optionally verify the to1d signature, as the Device will in TO2
+	if s.VerifyTo1d {
+		ownerPub, err := ov.OwnerPublicKey()
+		if err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, fmt.Errorf("error getting voucher owner public key: %w", err)
+		}
+		if err := verifyTo1d(sig.To1d.Untag(), ownerPub, ov.Header.Val.Version); err != nil {
+			captureErr(ctx, protocol.InvalidMessageErrCode, "")
+			return nil, fmt.Errorf("rendezvous blob rejected: %w", err)
 		}
 	}
 

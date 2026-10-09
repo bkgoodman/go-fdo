@@ -60,6 +60,8 @@ var (
 	resaleKey             string
 	reuseCred             bool
 	rvBypass              bool
+	rvVerifyTo1d          bool
+	lenientKex            bool
 	rvDelay               int
 	rvReplacementPolicy   string
 	printOwnerPubKey      string
@@ -136,6 +138,8 @@ func init() {
 	serverFlags.BoolVar(&ownerCert, "owner-certs", false, "Generate Owner Certificatats (in addition to keys)")
 	serverFlags.BoolVar(&rvBypass, "rv-bypass", false, "Skip TO1")
 	serverFlags.IntVar(&rvDelay, "rv-delay", 0, "Delay TO1 by N `seconds`")
+	serverFlags.BoolVar(&lenientKex, "lenient-kex", false, "NOT spec compliant: in FDO 2.0 TO2 accept any ECDH (EC owner) or DHKEX (RSA owner) suite the device selects, even if not offered")
+	serverFlags.BoolVar(&rvVerifyTo1d, "rv-verify-to1d", false, "Verify the to1d signature (and any delegate chain) in TO0.OwnerSign before storing it")
 	serverFlags.StringVar(&rvReplacementPolicy, "rv-replacement-policy", "allow-any", "RV voucher replacement `policy`: allow-any (0), manufacturer-key-consistency (1), first-registration-lock (2), owner-key-consistency (3)")
 	serverFlags.StringVar(&printOwnerPubKey, "print-owner-public", "", "Print owner public key of `type` and exit")
 	serverFlags.StringVar(&printOwnerPrivKey, "print-owner-private", "", "Print owner private key of `type` and exit")
@@ -924,7 +928,7 @@ func registerRvBlob(ctx context.Context, state *sqlite.DB) error {
 		Vouchers:     state,
 		OwnerKeys:    state,
 		DelegateKeys: state,
-	}).RegisterBlob(ctx, tlsTransport(to0Addr, nil), guid, to2Addrs, rvDelegate)
+	}).RegisterBlobWithDelegate(ctx, tlsTransport(to0Addr, nil), guid, to2Addrs, rvDelegate)
 	if err != nil {
 		return fmt.Errorf("error performing to0: %w", err)
 	}
@@ -1042,22 +1046,24 @@ func newHandler(ctx context.Context, rvInfo [][]protocol.RvInstruction, state *s
 			Session:                  state,
 			RVBlobs:                  state,
 			VoucherReplacementPolicy: replacementPolicy,
+			VerifyTo1d:               rvVerifyTo1d,
 		},
 		TO1Responder: &fdo.TO1Server{
 			Session: state,
 			RVBlobs: state,
 		},
 		TO2Responder: &fdo.TO2Server{
-			Session:         state,
-			Modules:         moduleStateMachines{DB: state, states: make(map[string]*moduleStateMachineState)},
-			Vouchers:        state,
-			OwnerKeys:       state,
-			DelegateKeys:    state,
-			RvInfo:          func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) { return rvInfo, nil },
-			OnboardDelegate: onboardDelegate,
-			RvDelegate:      rvDelegate,
-			ReuseCredential: func(context.Context, fdo.Voucher) (bool, error) { return reuseCred, nil },
-			SingleSidedMode: singleSidedWiFi,
+			Session:            state,
+			Modules:            moduleStateMachines{DB: state, states: make(map[string]*moduleStateMachineState)},
+			Vouchers:           state,
+			OwnerKeys:          state,
+			DelegateKeys:       state,
+			RvInfo:             func(context.Context, fdo.Voucher) ([][]protocol.RvInstruction, error) { return rvInfo, nil },
+			OnboardDelegate:    onboardDelegate,
+			RvDelegate:         rvDelegate,
+			LenientKeyExchange: lenientKex,
+			ReuseCredential:    func(context.Context, fdo.Voucher) (bool, error) { return reuseCred, nil },
+			SingleSidedMode:    singleSidedWiFi,
 		},
 	}, nil
 }

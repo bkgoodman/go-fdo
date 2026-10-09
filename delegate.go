@@ -377,16 +377,15 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 	if ownerKey != nil {
 		issuer := chain[len(chain)-1].Issuer.CommonName
 		public := ownerKey
-		var rootPriv crypto.Signer
-		var err error
 		switch (*ownerKey).(type) {
-		case *ecdsa.PublicKey:
-			rootPriv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		case *rsa.PublicKey:
-			rootPriv, err = rsa.GenerateKey(rand.Reader, 2048)
+		case *ecdsa.PublicKey, *rsa.PublicKey:
 		default:
 			return fmt.Errorf("unknown key type %T", ownerKey)
 		}
+		// The synthesized root certificate carries the Owner public key; the
+		// key that self-signs it is never used for verification, so a cheap
+		// ephemeral P-256 key suffices for any Owner key type.
+		rootPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			return fmt.Errorf("VerifyDelegate Error making ephemeral root CA key: %v", err)
 		}
@@ -397,7 +396,8 @@ func processDelegateChain(chain []*x509.Certificate, ownerKey *crypto.PublicKey,
 		if err != nil {
 			return fmt.Errorf("VerifyDelegate Error createing ephemerial Owner Root Cert: %v", err)
 		}
-		chain = append(chain, rootOwner)
+		// Full slice expression: never append into the caller's backing array
+		chain = append(chain[:len(chain):len(chain)], rootOwner)
 		synthRoot = len(chain) - 1
 	}
 

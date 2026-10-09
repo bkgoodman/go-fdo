@@ -324,47 +324,61 @@ func (v *Voucher) VerifyCrypto(o VerifyOptions) error {
 	// If the TO1.RVRedirect signature does not verify, the Device must assume
 	// that a man in the middle is monitoring its traffic, and fail TO2
 	// immediately with an error code message.
-	//
-	// When a delegate is used, the TO1d is signed by the delegate key, not the
-	// owner key. The delegate chain is in the signed to1d payload (FDO 2.0) or
-	// the to1d unprotected header (FDO 1.1). The chain MUST root to the Owner
-	// key and carry the redirect permission; otherwise any self-made chain
-	// could redirect the Device.
-	verifyKey := expectedOwnerPub
-	var delegateChain []*x509.Certificate
-	if dc := o.To1d.Payload.Val.DelegateChain; dc != nil && dc.Val != nil {
-		for _, cert := range *dc.Val {
-			delegateChain = append(delegateChain, (*x509.Certificate)(cert))
+	return verifyTo1d(o.To1d, expectedOwnerPub, v.Header.Val.Version)
+}
+
+// to1dDelegateChain returns the delegate chain carried with a to1d: in the
+// signed to1d payload (FDO 2.0) or the to1d unprotected header (FDO 1.1). It
+// returns nil if the to1d was signed by the Owner key.
+func to1dDelegateChain(to1d *cose.Sign1[protocol.To1d, []byte]) ([]*x509.Certificate, error) {
+	if dc := to1d.Payload.Val.DelegateChain; dc != nil && dc.Val != nil {
+		chain := make([]*x509.Certificate, len(*dc.Val))
+		for i, cert := range *dc.Val {
+			chain[i] = (*x509.Certificate)(cert)
 		}
-	} else {
-		var delegatePubKey protocol.PublicKey
-		if found, err := o.To1d.Unprotected.Parse(cose.Label{Int64: 258}, &delegatePubKey); found && err == nil {
-			if delegateChain, err = delegatePubKey.Chain(); err != nil {
-				return fmt.Errorf("error parsing delegate chain from TO1d: %w", err)
-			}
-		}
+		return chain, nil
+	}
+	var delegatePubKey protocol.PublicKey
+	if found, err := to1d.Unprotected.Parse(to2DelegateClaim, &delegatePubKey); !found || err != nil {
+		return nil, nil
+	}
+	chain, err := delegatePubKey.Chain()
+	if err != nil {
+		return nil, fmt.Errorf("error parsing delegate chain from TO1d: %w", err)
+	}
+	return chain, nil
+}
+
+// verifyTo1d verifies a to1d signature against the Owner key, or against a
+// delegate chain that roots to the Owner key and carries the redirect
+// permission (otherwise any self-made chain could redirect the Device).
+//
+// The voucher's protocol version (OVHProtVer) decides whether the to1d uses
+// domain-specific AAD, as for voucher entries (FDO 2.0 Errata 1, E7). The TO2
+// session version cannot be used: the Owner signs the to1d during TO0, before
+// it knows which version a Device will use.
+func verifyTo1d(to1d *cose.Sign1[protocol.To1d, []byte], ownerPub crypto.PublicKey, voucherVersion uint16) error {
+	verifyKey := ownerPub
+	delegateChain, err := to1dDelegateChain(to1d)
+	if err != nil {
+		return err
 	}
 	if len(delegateChain) > 0 {
-		if err := VerifyDelegateChain(delegateChain, &expectedOwnerPub, &OIDPermitRedirect); err != nil {
+		if err := VerifyDelegateChain(delegateChain, &ownerPub, &OIDPermitRedirect); err != nil {
 			return fmt.Errorf("to1d delegate chain verification failed: %w", err)
 		}
 		verifyKey = delegateChain[0].PublicKey
 	}
 
-	// The voucher's protocol version (OVHProtVer) decides whether the to1d
-	// uses domain-specific AAD, as for voucher entries (FDO 2.0 Errata 1,
-	// E7). The TO2 session version cannot be used: the Owner signs the to1d
-	// during TO0, before it knows which version a Device will use.
 	var aad []byte
-	if v.Header.Val.Version >= uint16(protocol.Version200) {
+	if voucherVersion >= uint16(protocol.Version200) {
 		aad = cose.AADOwnerSign
 	}
-	if ok, err := o.To1d.Verify(verifyKey, nil, aad); err != nil {
+	if ok, err := to1d.Verify(verifyKey, nil, aad); err != nil {
 		return fmt.Errorf("error verifying to1d signature: %w", err)
 	} else if !ok {
 		return fmt.Errorf("%w: to1d signature verification failed", ErrCryptoVerifyFailed)
 	}
-
 	return nil
 }
 

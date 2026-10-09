@@ -395,6 +395,10 @@ go run ./cmd server -rv-delay 30
 
 # Configure RV voucher replacement policy (security controls)
 go run ./cmd server -rv-replacement-policy manufacturer-key-consistency
+
+# Verify each to1d (Owner signature, or a delegate chain rooted in the Owner
+# key with fdo-ekt-permit-redirect) at TO0, rejecting bad rendezvous blobs
+go run ./cmd server -rv-verify-to1d
 ```
 
 **Real-world context:** Used in large-scale deployments for:
@@ -402,6 +406,20 @@ go run ./cmd server -rv-replacement-policy manufacturer-key-consistency
 - Distributed manufacturing with separate rendezvous infrastructure
 - Load balancing and device registration management
 - Security policy enforcement for voucher replacement
+
+### FDO 2.0 Key Exchange
+
+In FDO 2.0 the Owner offers key exchange suites in TO2.HelloDeviceAck20 (only
+those the spec's mapping allows for the device and owner attestation keys,
+e.g. ECDH256 for P-256 keys; ASYMKEX is never offered because it cannot work
+in the device-proves-first flow) and the Device must choose one of them.
+
+```bash
+# NOT spec compliant, for interop testing: also accept any ECDH suite for an
+# ECDSA owner key (any DHKEX suite for RSA) that the Device selects, even if
+# it was not offered (e.g. a Device that always sends ECDH384)
+go run ./cmd server -lenient-kex
+```
 
 ### Delegate Configuration
 

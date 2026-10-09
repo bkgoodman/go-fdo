@@ -61,16 +61,10 @@ func (m AttestationMode) String() string {
 	}
 }
 
-// COSE unprotected header labels for TO2.ProveOVHdr
-// These are in the "Reserved for Private Use" space of COSE Header Parameters.
-//
-// TODO: There is an open debate about whether OwnerPubKey and DelegateChain
-// should remain in unprotected headers or be moved into the signed payload.
-// The spec (TO2ProveOVHdrPayload) shows them in the payload, but this
-// implementation keeps them in unprotected headers for consistency with FDO 1.x.
-// Security argument for unprotected headers: these provide verification materials,
-// so if tampered, signature verification fails anyway - the security properties
-// are equivalent whether signed or unsigned.
+// COSE unprotected header labels for FDO 1.01 TO2.ProveOVHdr (and the FDO
+// 1.01 to1d delegate chain). These are in the "Reserved for Private Use" space
+// of COSE Header Parameters. In FDO 2.0, OwnerPubKey and DelegateChain are
+// part of the signed TO2.ProveOVHdr20 and to1d payloads instead.
 var (
 	CUPHNonce         = cose.Label{Int64: 256} // FDO assigned
 	CUPHOwnerPubKey   = cose.Label{Int64: 257} // FDO assigned
@@ -296,7 +290,10 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 	go c.Devmod.WriteFiltered(ctx, c.DeviceModules, sendMTU, serviceInfoWriter, moduleFilter)
 
 	// Loop, sending and receiving service info until done
-	if err := exchangeServiceInfo(ctx, transport, proveDeviceNonce, setupDeviceNonce, sendMTU, serviceInfoReader, sess, &c); err != nil {
+	sendDone := func(ctx context.Context) error {
+		return sendDone(ctx, transport, proveDeviceNonce, setupDeviceNonce, sess)
+	}
+	if err := exchangeServiceInfo(ctx, transport, sendMTU, serviceInfoReader, sess, &c, sendDone); err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
 	}
@@ -1222,13 +1219,15 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 	mfgKey := ov.Header.Val.ManufacturerKey
 	keyType, rsaBits := mfgKey.Type, mfgKey.RsaBits()
 	ownerKey, ownerPublicKey, err := s.ownerKey(ctx, keyType, ov.Header.Val.ManufacturerKey.Encoding, rsaBits)
+	if err != nil {
+		return nil, err
+	}
 	sessionOwnerKey := ownerKey
 	if s.OnboardDelegate != "" {
 		OnboardDelegateName := strings.ReplaceAll(s.OnboardDelegate, "=", keyType.KeyString())
-		sessionOwnerKey, _, err = s.DelegateKeys.DelegateKey(OnboardDelegateName)
-	}
-	if err != nil {
-		return nil, err
+		if sessionOwnerKey, _, err = s.DelegateKeys.DelegateKey(OnboardDelegateName); err != nil {
+			return nil, err
+		}
 	}
 
 	// For the sake of Session Parameters, must use delegate key
@@ -1244,6 +1243,12 @@ func (s *TO2Server) setupDevice(ctx context.Context, msg io.Reader) (*cose.Sign1
 	// Get replacement GUID and rendezvous directives
 	replacementGUID, replacementRvInfo, err := s.replacementCredential(ctx, ov)
 	if err != nil {
+		return nil, err
+	}
+
+	// A delegate needs the onboard permission matching the disposition
+	// (replacementCredential returns the current GUID for credential reuse)
+	if err := s.checkOnboardDelegateDisposition(keyType, replacementGUID == ov.Header.Val.GUID); err != nil {
 		return nil, err
 	}
 
@@ -1421,14 +1426,16 @@ type done2Msg struct {
 	NonceTO2SetupDv protocol.Nonce
 }
 
-// loop[DeviceServiceInfo(68) -> OwnerServiceInfo(69)]
+// loop[DeviceServiceInfo(68) -> OwnerServiceInfo(69)], or for FDO 2.0
+// loop[DeviceSvcInfo20(88) -> OwnerSvcInfo20(89)] (see withTO2v200). done is
+// called to finish TO2 once the Owner sends IsDone.
 func exchangeServiceInfo(ctx context.Context,
 	transport Transport,
-	proveDvNonce, setupDvNonce protocol.Nonce,
 	mtu uint16,
 	initInfo *serviceinfo.ChunkReader,
 	sess kex.Session,
 	c *TO2Config,
+	done func(context.Context) error,
 ) error {
 	// Shadow context to ensure that any goroutines still running after this
 	// function exits will shutdown
@@ -1446,7 +1453,7 @@ func exchangeServiceInfo(ctx context.Context,
 	ownerInfo, ownerInfoIn := serviceinfo.NewChunkInPipe(1000)
 
 	// Send initial device info (devmod)
-	totalRounds, done, err := exchangeServiceInfoRound(ctx, transport, mtu, initInfo, ownerInfoIn, sess)
+	totalRounds, isDone, err := exchangeServiceInfoRound(ctx, transport, mtu, initInfo, ownerInfoIn, sess)
 	_ = initInfo.Close()
 	if err != nil {
 		return fmt.Errorf("error sending devmod: %w", err)
@@ -1457,8 +1464,8 @@ func exchangeServiceInfo(ctx context.Context,
 	if totalRounds >= 1_000_000 {
 		return fmt.Errorf("exceeded 1e6 rounds of service info exchange")
 	}
-	if done {
-		return sendDone(ctx, transport, proveDvNonce, setupDvNonce, sess)
+	if isDone {
+		return done(ctx)
 	}
 
 	// Track active modules
@@ -1491,7 +1498,7 @@ func exchangeServiceInfo(ctx context.Context,
 		// the owner service without it allowing the device to respond, the
 		// device will deadlock.
 		nextOwnerInfo, ownerInfoIn := serviceinfo.NewChunkInPipe(1000)
-		rounds, done, err := exchangeServiceInfoRound(ctx, transport, mtu, deviceInfo, ownerInfoIn, sess)
+		rounds, isDone, err := exchangeServiceInfoRound(ctx, transport, mtu, deviceInfo, ownerInfoIn, sess)
 		if err != nil {
 			_ = ownerInfoIn.CloseWithError(err)
 			return err
@@ -1505,7 +1512,7 @@ func exchangeServiceInfo(ctx context.Context,
 		if totalRounds >= 1_000_000 {
 			return fmt.Errorf("exceeded 1e6 rounds of service info exchange")
 		}
-		if done {
+		if isDone {
 			// Process final service info from message with IsDone
 			deviceInfo, discard := serviceinfo.NewChunkOutPipe(1000)
 			go discardDeviceInfo(deviceInfo)
@@ -1513,7 +1520,7 @@ func exchangeServiceInfo(ctx context.Context,
 			_ = handleOwnerModuleMessages(ctxWithMTU, prevModuleName, modules, nextOwnerInfo, discard)
 
 			// Continue TO2
-			return sendDone(ctx, transport, proveDvNonce, setupDvNonce, sess)
+			return done(ctx)
 		}
 
 		// If there is no ServiceInfo to send and the last owner response did
@@ -1670,6 +1677,10 @@ func exchangeServiceInfoRound(ctx context.Context, transport Transport, mtu uint
 
 // DeviceServiceInfo(68) -> OwnerServiceInfo(69)
 func sendDeviceServiceInfo(ctx context.Context, transport Transport, msg deviceServiceInfo, sess kex.Session) (*ownerServiceInfo, error) {
+	if isTO2v200(ctx) {
+		return sendDeviceSvcInfo20(ctx, transport, msg, sess)
+	}
+
 	// Make request
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceServiceInfoMsgType, msg, sess)
 	if err != nil {

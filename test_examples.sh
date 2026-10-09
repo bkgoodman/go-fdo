@@ -283,6 +283,38 @@ test_fdo200() {
 	log_success "FDO 2.0 Protocol test PASSED"
 }
 
+# Test: FDO 2.0 key exchange negotiation. The Owner offers only the suites the
+# spec allows for the attestation keys (RSA2048 owner: DHKEXid14; ASYMKEX is
+# never offered in 2.0), and the Device must pick from that offer.
+test_kex_fdo200() {
+	log_section "TEST: FDO 2.0 Key Exchange Negotiation"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	start_server "-reuse-cred"
+
+	log_step "Running DI with RSA2048 key"
+	run_cmd go run ./cmd client -di "$SERVER_URL" -di-key rsa2048 || return 1
+	log_success "DI completed with RSA2048"
+
+	log_step "Running TO1/TO2 at FDO 2.0, configured for ASYMKEX2048 (not offered in 2.0)"
+	local out
+	if ! out=$(cd examples && go run ./cmd client -fdo-version 200 -kex ASYMKEX2048 2>&1); then
+		echo "$out"
+		log_error "TO2 at FDO 2.0 failed"
+		return 1
+	fi
+	if ! grep -q "DHKEXid14" <<<"$out"; then
+		echo "$out"
+		log_error "client did not fall back to the offered DHKEXid14"
+		return 1
+	fi
+	log_success "Device used the Owner's offer: $(grep -o 'selected[^ ]*' <<<"$out" | head -1) $(grep -o 'DHKEXid14' <<<"$out" | head -1)"
+
+	stop_server
+	log_success "FDO 2.0 Key Exchange Negotiation test PASSED"
+}
+
 # Test: FDO 2.0 end-to-end, including DI at 2.0 (2.0 AppStart with capability flags)
 test_fdo200_di200() {
 	log_section "TEST: FDO 2.0 Protocol (DI at 2.0)"
@@ -3256,6 +3288,58 @@ test_credentials() {
 # (simulating an attacker) cannot be used for onboarding.
 # Note: Full end-to-end bad delegate injection requires Go-level testing
 # (see delegate_test.go:TestSelfSignedDelegateRejected)
+# Test: Rendezvous server verifies the to1d at TO0 (-rv-verify-to1d)
+# Positive: Owner-signed and redirect-permitted delegate to1d are accepted.
+# Negative: a delegate without fdo-ekt-permit-redirect is rejected at TO0.
+test_rv_verify_to1d() {
+	log_section "TEST: RV verifies to1d at TO0 (-rv-verify-to1d)"
+
+	rm -f "$DB_FILE" "$CRED_FILE"
+
+	log_step "Creating database with owner certs"
+	start_server "-owner-certs"
+	stop_server
+
+	log_step "Creating delegates with and without the redirect permission"
+	run_cmd go run ./cmd delegate -db "../$DB_FILE" create redirectDelegate onboard,redirect SECP384R1 ec384 || return 1
+	run_cmd go run ./cmd delegate -db "../$DB_FILE" create noRedirectDelegate onboard SECP384R1 ec384 || return 1
+
+	start_server "-owner-certs -rv-verify-to1d"
+
+	log_step "Running DI"
+	run_cmd go run ./cmd client -di "$SERVER_URL" || return 1
+	local guid
+	guid=$(sqlite3 "$DB_FILE" "SELECT hex(guid) FROM vouchers LIMIT 1;")
+	log_success "DI completed (GUID $guid)"
+
+	log_step "TO0 with Owner-signed to1d (should succeed)"
+	run_cmd go run ./cmd server -http "$SERVER_ADDR" -db "../$DB_FILE" -to0 "$SERVER_URL" -to0-guid "$guid" || return 1
+	log_success "Owner-signed to1d accepted"
+
+	log_step "TO0 with redirect-permitted delegate (should succeed)"
+	run_cmd go run ./cmd server -http "$SERVER_ADDR" -db "../$DB_FILE" -to0 "$SERVER_URL" -to0-guid "$guid" -rvDelegate redirectDelegate || return 1
+	log_success "Delegate-signed to1d accepted"
+
+	log_step "Expecting failure: TO0 with delegate lacking redirect permission"
+	local to0_out
+	if to0_out=$(cd examples && go run ./cmd server -http "$SERVER_ADDR" -db "../$DB_FILE" -to0 "$SERVER_URL" -to0-guid "$guid" -rvDelegate noRedirectDelegate 2>&1); then
+		log_error "TO0 with a delegate lacking the redirect permission should have been rejected"
+		return 1
+	fi
+	if ! grep -q "rendezvous blob rejected" <<<"$to0_out"; then
+		log_error "TO0 failed, but not because the RV server rejected the to1d: $to0_out"
+		return 1
+	fi
+	log_expected_failure "RV server rejected the to1d: $(grep -o 'rendezvous blob rejected[^"]*' <<<"$to0_out" | head -1)"
+
+	log_step "Running TO1/TO2 with FDO 2.0 (uses the last accepted, delegate-signed to1d)"
+	run_cmd go run ./cmd client -fdo-version 200 || return 1
+	log_success "TO1/TO2 completed"
+
+	stop_server
+	log_success "RV verifies to1d test PASSED"
+}
+
 test_bad_delegate() {
 	log_section "TEST: Bad Delegate Rejection (Security)"
 
@@ -3465,6 +3549,7 @@ test_all() {
 	test_kex || failed=1
 	test_fdo200 || failed=1
 	test_fdo200_di200 || failed=1
+	test_kex_fdo200 || failed=1
 	test_delegate || failed=1
 	test_delegate_fdo200 || failed=1
 	test_delegate_csr || failed=1
@@ -3508,6 +3593,7 @@ test_all() {
 	test_rv_firmware_tags || failed=1
 	test_credentials || failed=1
 	test_bad_delegate || failed=1
+	test_rv_verify_to1d || failed=1
 	test_auth || failed=1
 
 	echo ""
@@ -3562,6 +3648,9 @@ main() {
 	fdo200-di200)
 		test_fdo200_di200 || rc=$?
 		;;
+	kex-fdo200)
+		test_kex_fdo200 || rc=$?
+		;;
 	delegate)
 		test_delegate || rc=$?
 		;;
@@ -3573,6 +3662,9 @@ main() {
 		;;
 	bad-delegate)
 		test_bad_delegate || rc=$?
+		;;
+	rv-verify-to1d)
+		test_rv_verify_to1d || rc=$?
 		;;
 	attested-payload)
 		test_attested_payload || rc=$?
@@ -3699,7 +3791,7 @@ main() {
 		;;
 	*)
 		echo "Unknown test: $test_name"
-		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, fdo200-di200, delegate, delegate-fdo200, delegate-csr, bad-delegate, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-set, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-owner-unsigned, bmo-meta-delegate-signed, payload-signed, payload-delegate-noperm, rv-firmware-tags, credentials, auth, all"
+		echo "Available tests: basic, basic-reuse, rv-blob, kex, fdo200, fdo200-di200, kex-fdo200, delegate, delegate-fdo200, delegate-csr, bad-delegate, rv-verify-to1d, attested-payload, attested-payload-encrypted, attested-payload-delegate, attested-payload-shell, sysconfig, sysconfig-fdo200, payload, payload-log, payload-fdo200, payload-multiple-types, payload-selective-rejection, payload-nak, wifi, wifi-fdo200, wifi-single-sided, bmo, bmo-set, bmo-signed, bmo-signed-scope, bmo-efi, bmo-nak, bmo-multi-asset, bmo-url, bmo-meta-url, bmo-meta-signed, bmo-url-fallback, bmo-delegate-provision, bmo-delegate-unsigned, bmo-delegate-unsigned-noperm, bmo-presigned, bmo-presigned-metatool, bmo-owner-unsigned, bmo-meta-delegate-signed, payload-signed, payload-delegate-noperm, rv-firmware-tags, credentials, auth, all"
 		exit 1
 		;;
 	esac

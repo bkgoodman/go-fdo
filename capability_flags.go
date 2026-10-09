@@ -19,12 +19,25 @@ const (
 	DelegateSupportFlag = 1 << 7
 )
 
-// VendorUniqueFlags contains vendor-specific capability identifiers.
-var VendorUniqueFlags = []string{"com.example.test"}
+// ExampleVendorFlag is an EXAMPLE vendor capability flag (VendorCapFlags,
+// reverse domain name notation). It demonstrates the mechanism only and
+// enables no behavior. Implementations should replace it with their own
+// registered flags, or advertise none (see GlobalCapabilityFlags).
+const ExampleVendorFlag = "com.example.test"
 
-// GlobalCapabilityFlags is the default set of capability flags advertised by the server.
-// Includes version support flags as required by FDO 2.0 spec
+// VendorUniqueFlags contains the vendor-specific capability flags that are
+// advertised. It only holds ExampleVendorFlag, as an example.
+var VendorUniqueFlags = []string{ExampleVendorFlag}
+
+// GlobalCapabilityFlags is the default set of capability flags advertised in
+// every FDO 2.0 message that carries them: FDO 1.1 and 2.0 (this library
+// does not implement FDO 1.0) and Delegate support.
+//
+// To advertise no vendor flags, set VendorUnique to an empty, non-nil slice
+// (VendorCapFlags is a CBOR array and must not be encoded as null):
+//
+//	fdo.GlobalCapabilityFlags.VendorUnique = []string{}
 var GlobalCapabilityFlags = CapabilityFlags{
-	Flags:        []byte{Capb0SupFDO10 | Capb0SupFDO11 | Capb0SupFDO20 | DelegateSupportFlag},
+	Flags:        []byte{Capb0SupFDO11 | Capb0SupFDO20 | DelegateSupportFlag},
 	VendorUnique: VendorUniqueFlags,
 }

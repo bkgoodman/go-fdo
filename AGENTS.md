@@ -151,8 +151,10 @@ Run via `./test_examples.sh` with specific test scenarios:
 | `kex` | Key exchange with ASYMKEX2048 (RSA keys) |
 | `fdo200` | FDO 2.0 protocol |
 | `fdo200-di200` | FDO 2.0 end-to-end with DI also at 2.0 (2.0 AppStart with capability flags) |
+| `kex-fdo200` | FDO 2.0 key exchange negotiation: device configured for ASYMKEX2048 uses the Owner's offered DHKEXid14 |
 | `delegate` | Delegate certificate support (FDO 1.01) |
 | `delegate-fdo200` | Delegate certificate support with FDO 2.0 |
+| `rv-verify-to1d` | RV verifies to1d at TO0 (`-rv-verify-to1d`): Owner- and redirect-delegate-signed accepted; delegate without redirect rejected |
 | `attested-payload` | Attested payload creation and verification |
 | `sysconfig` | System configuration FSIM |
 | `payload` | File payload transfer FSIM |

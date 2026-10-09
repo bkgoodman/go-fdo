@@ -9,14 +9,11 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"log/slog"
 	"slices"
-	"strings"
-	"time"
 
 	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/cose"
@@ -35,7 +32,7 @@ import (
 
 // TO2v200 implements the FDO 2.0 TO2 protocol
 func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1d, []byte], c *TO2Config) (*DeviceCredential, error) {
-	ctx = contextWithErrMsg(ctx)
+	ctx = withTO2v200(contextWithErrMsg(ctx))
 
 	// Configure defaults (same as 1.01)
 	if c.KeyExchange == "" {
@@ -81,7 +78,7 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 
 	// Step 4: Service info exchange
 	// Send DeviceSvcInfoRdy20 and receive SetupDevice20 with GUID/RvInfo
-	setupDeviceNonce, partialOVH, err := sendDeviceSvcInfoRdy20(ctx, transport, sess, ownerInfo, c)
+	setupDeviceNonce, partialOVH, sendMTU, err := sendDeviceSvcInfoRdy20(ctx, transport, sess, ownerInfo, c)
 	if err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
@@ -130,14 +127,9 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 		replacementHMAC = &hmacVal
 	}
 
-	// Step 6: Exchange service info
-	sendMTU := uint16(serviceinfo.DefaultMTU)
-
-	// Subtract 5 bytes from MTU to account for a CBOR header indicating "array
-	// of 256-65535 items" and 2 more bytes for "array of two" plus the first
-	// item indicating "IsMoreServiceInfo" (same as FDO 1.01)
-	sendMTU -= 5
-
+	// Step 6: Exchange service info, sending at most the
+	// MaxDeviceServiceInfoSz from TO2.SetupDevice20 (exchangeServiceInfo
+	// accounts for the message overhead, as for FDO 1.01)
 	serviceInfoReader, serviceInfoWriter := serviceinfo.NewChunkOutPipe(0)
 	defer func() { _ = serviceInfoWriter.Close() }()
 
@@ -157,7 +149,10 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 
 	go c.Devmod.Write(ctx, c.DeviceModules, sendMTU, serviceInfoWriter)
 
-	if err := exchangeServiceInfo20(ctx, transport, proveDvNonce, setupDeviceNonce, sendMTU, serviceInfoReader, replacementHMAC, sess, c); err != nil {
+	sendDone := func(ctx context.Context) error {
+		return sendDone20(ctx, transport, proveDvNonce, setupDeviceNonce, replacementHMAC, sess)
+	}
+	if err := exchangeServiceInfo(ctx, transport, sendMTU, serviceInfoReader, sess, c, sendDone); err != nil {
 		errorMsg(ctx, transport, err)
 		return nil, err
 	}
@@ -255,24 +250,6 @@ func sendHelloDeviceProbe(ctx context.Context, transport Transport, c *TO2Config
 			return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 hashPrev does not match TO2.HelloDeviceProbe")
 		}
 
-		// Check server's capability flags for version negotiation (FDO 2.0 spec)
-		if len(ack.Flags) > 0 {
-			serverFlags := ack.Flags[0]
-			// Check if server supports FDO 2.0
-			if serverFlags&Capb0SupFDO20 == 0 {
-				// Server doesn't support FDO 2.0, check for FDO 1.1
-				if serverFlags&Capb0SupFDO11 != 0 {
-					// Server supports FDO 1.1, we should switch version
-					// For now, we'll continue with FDO 2.0 since that's what was requested
-					// In a full implementation, we would restart with FDO 1.1
-					slog.Info("Server doesn't support FDO 2.0, but supports FDO 1.1")
-				} else if serverFlags&Capb0SupFDO10 != 0 {
-					// Server only supports FDO 1.0
-					slog.Info("Server only supports FDO 1.0")
-				}
-			}
-		}
-
 		return &ack, ackBytes, nil
 
 	case protocol.ErrorMsgType:
@@ -297,6 +274,37 @@ type OwnerInfo20 struct {
 	OwnerPublicKeyPKI protocol.PublicKey // OwnerPubKey from the ProveOVHdr20 payload
 	OriginalOwnerKey  crypto.PublicKey
 	DelegateChain     *protocol.PublicKey // Delegate chain if using delegation (nil if direct owner)
+	KexSuite          kex.Suite           // Key exchange suite selected in ProveDevice20
+}
+
+// selectSuites20 picks the key exchange and cipher suites for
+// TO2.ProveDevice20 from those offered in TO2.HelloDeviceAck20. The
+// configured suites are used when offered; otherwise the first offered suite
+// usable in FDO 2.0 is used. Whether the key exchange suite is valid for the
+// Owner key is checked once the Owner key is known (see verifyOwner20).
+func selectSuites20(offeredKex []kex.Suite, offeredCiphers []kex.CipherSuiteID, wantKex kex.Suite, wantCipher kex.CipherSuiteID) (kex.Suite, kex.CipherSuiteID, error) {
+	usable := func(suite kex.Suite) bool {
+		return slices.Contains(kexSuites20, suite) && kex.Available(suite, kex.A128GcmCipher)
+	}
+	var suite kex.Suite
+	if slices.Contains(offeredKex, wantKex) && usable(wantKex) {
+		suite = wantKex
+	} else if i := slices.IndexFunc(offeredKex, usable); i >= 0 {
+		suite = offeredKex[i]
+		slog.Info("configured key exchange not offered by owner; using owner's choice", "configured", wantKex, "selected", suite)
+	} else {
+		return "", 0, fmt.Errorf("TO2.HelloDeviceAck20 offers no usable key exchange suite: %v", offeredKex)
+	}
+
+	if slices.Contains(offeredCiphers, wantCipher) && kex.Available(suite, wantCipher) {
+		return suite, wantCipher, nil
+	}
+	i := slices.IndexFunc(offeredCiphers, func(c kex.CipherSuiteID) bool { return kex.Available(suite, c) })
+	if i < 0 {
+		return "", 0, fmt.Errorf("TO2.HelloDeviceAck20 offers no usable cipher suite: %v", offeredCiphers)
+	}
+	slog.Info("configured cipher suite not offered by owner; using owner's choice", "configured", wantCipher, "selected", offeredCiphers[i])
+	return suite, offeredCiphers[i], nil
 }
 
 // sendProveDevice20 sends TO2.ProveDevice20 (82) and receives TO2.ProveOVHdr20 (83)
@@ -315,26 +323,11 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 		return nil, nil, fmt.Errorf("TO2.HelloDeviceAck20 offers no key exchange or cipher suites")
 	}
 
-	// Select key exchange suite from server's offered options
-	var selectedKex kex.Suite
-	var selectedCipher kex.CipherSuiteID
-	for _, s := range ack.KexSuites {
-		if s == c.KeyExchange {
-			selectedKex = s
-			break
-		}
-	}
-	if selectedKex == "" {
-		selectedKex = ack.KexSuites[0] // Use first offered if preferred not available
-	}
-	for _, cs := range ack.CipherSuites {
-		if cs == c.CipherSuite {
-			selectedCipher = cs
-			break
-		}
-	}
-	if selectedCipher == 0 {
-		selectedCipher = ack.CipherSuites[0]
+	// Select key exchange and cipher suites from the Owner's offer
+	selectedKex, selectedCipher, err := selectSuites20(ack.KexSuites, ack.CipherSuites, c.KeyExchange, c.CipherSuite)
+	if err != nil {
+		captureErr(ctx, protocol.MessageBodyErrCode, "")
+		return nil, nil, err
 	}
 
 	// Initialize key exchange session
@@ -466,6 +459,7 @@ func sendProveDevice20(ctx context.Context, transport Transport, ack *HelloDevic
 			OwnerPublicKeyPKI: hdr.OwnerPubKey,
 			OriginalOwnerKey:  originalOwnerKey,
 			DelegateChain:     delegateChain,
+			KexSuite:          selectedKex,
 		}, sess, nil
 
 	case protocol.ErrorMsgType:
@@ -541,6 +535,13 @@ func verifyOwner20(ctx context.Context, transport Transport, to1d *cose.Sign1[pr
 		return fmt.Errorf("ProveOVHdr20 owner key does not match the ownership voucher")
 	}
 
+	// The key exchange chosen before the Owner key was known must be one the
+	// spec allows for the device and owner attestation keys
+	if !validKex20(info.KexSuite, c.Key.Public(), ownerKeyForValidation) {
+		captureErr(ctx, protocol.InvalidMessageErrCode, "")
+		return fmt.Errorf("key exchange %s is invalid for the device and owner attestation types", info.KexSuite)
+	}
+
 	// A delegate that signed ProveOVHdr20 must chain to the voucher's owner
 	// and hold an onboard permission.
 	if info.DelegateChain != nil {
@@ -614,10 +615,10 @@ type partialOVH20 struct {
 // Resale disposition, the replacement credentials.
 // Note: the replacement HMAC is sent in Done20 (FDO 2.0 Errata 1), after the
 // Device has the new credentials from SetupDevice20.
-func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.Session, ownerInfo *OwnerInfo20, c *TO2Config) (protocol.Nonce, *partialOVH20, error) {
+func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.Session, ownerInfo *OwnerInfo20, c *TO2Config) (protocol.Nonce, *partialOVH20, uint16, error) {
 	var setupDvNonce protocol.Nonce
 	if _, err := rand.Read(setupDvNonce[:]); err != nil {
-		return protocol.Nonce{}, nil, fmt.Errorf("error generating NonceTO2SetupDv: %w", err)
+		return protocol.Nonce{}, nil, 0, fmt.Errorf("error generating NonceTO2SetupDv: %w", err)
 	}
 	req := DeviceSvcInfoRdy20Msg{
 		ReplacementHMac:       nil, // Not used (FDO 2.0 Errata 1)
@@ -627,7 +628,7 @@ func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.S
 
 	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceSvcInfoRdy20MsgType, req, sess)
 	if err != nil {
-		return protocol.Nonce{}, nil, fmt.Errorf("error sending TO2.DeviceSvcInfoRdy20: %w", err)
+		return protocol.Nonce{}, nil, 0, fmt.Errorf("error sending TO2.DeviceSvcInfoRdy20: %w", err)
 	}
 	defer func() { _ = resp.Close() }()
 
@@ -637,25 +638,29 @@ func sendDeviceSvcInfoRdy20(ctx context.Context, transport Transport, sess kex.S
 		var setup cose.Sign1Tag[SetupDevice20Payload, []byte]
 		if err := cbor.NewDecoder(resp).Decode(&setup); err != nil {
 			captureErr(ctx, protocol.MessageBodyErrCode, "")
-			return protocol.Nonce{}, nil, fmt.Errorf("error parsing TO2.SetupDevice20: %w", err)
+			return protocol.Nonce{}, nil, 0, fmt.Errorf("error parsing TO2.SetupDevice20: %w", err)
 		}
 		partial, err := checkSetupDevice20(setup.Untag(), setupDvNonce, ownerInfo.OwnerPublicKey, ownerInfo.DelegateChain, c.AllowCredentialReuse)
 		if err != nil {
 			captureErr(ctx, protocol.InvalidMessageErrCode, "")
-			return protocol.Nonce{}, nil, err
+			return protocol.Nonce{}, nil, 0, err
 		}
-		return setupDvNonce, partial, nil
+		mtu := uint16(serviceinfo.DefaultMTU)
+		if sz := setup.Payload.Val.MaxDeviceServiceInfoSz; sz != nil {
+			mtu = *sz
+		}
+		return setupDvNonce, partial, mtu, nil
 
 	case protocol.ErrorMsgType:
 		var errMsg protocol.ErrorMessage
 		if err := cbor.NewDecoder(resp).Decode(&errMsg); err != nil {
-			return protocol.Nonce{}, nil, fmt.Errorf("error parsing error message: %w", err)
+			return protocol.Nonce{}, nil, 0, fmt.Errorf("error parsing error message: %w", err)
 		}
-		return protocol.Nonce{}, nil, fmt.Errorf("error from TO2.DeviceSvcInfoRdy20: %w", errMsg)
+		return protocol.Nonce{}, nil, 0, fmt.Errorf("error from TO2.DeviceSvcInfoRdy20: %w", errMsg)
 
 	default:
 		captureErr(ctx, protocol.MessageBodyErrCode, "")
-		return protocol.Nonce{}, nil, fmt.Errorf("unexpected response type %d to TO2.DeviceSvcInfoRdy20", typ)
+		return protocol.Nonce{}, nil, 0, fmt.Errorf("unexpected response type %d to TO2.DeviceSvcInfoRdy20", typ)
 	}
 }
 
@@ -726,98 +731,6 @@ func checkSetupDevice20(setup *cose.Sign1[SetupDevice20Payload, []byte], setupDv
 	}
 }
 
-// exchangeServiceInfo20 handles the service info exchange loop for 2.0
-func exchangeServiceInfo20(ctx context.Context, transport Transport, proveDvNonce, setupDvNonce protocol.Nonce, sendMTU uint16, serviceInfoReader *serviceinfo.ChunkReader, replacementHMAC *protocol.Hmac, sess kex.Session, c *TO2Config) error {
-	// Track active modules (same as 1.0.1)
-	modules := deviceModuleMap{modules: c.DeviceModules, active: make(map[string]bool)}
-	defer stopDevicePlugins(&modules)
-
-	// Simple service info exchange - send device info, receive owner info
-	var deviceDone bool
-	var pendingResponses []*serviceinfo.KV // Device module responses to send in next request
-	for {
-		// Read next chunk of device service info
-		var kvs []*serviceinfo.KV
-
-		// Include any pending responses from previous round
-		if len(pendingResponses) > 0 {
-			kvs = append(kvs, pendingResponses...)
-			pendingResponses = nil
-		}
-
-		if !deviceDone {
-			kv, err := serviceInfoReader.ReadChunk(sendMTU)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					deviceDone = true
-				} else if strings.Contains(err.Error(), "not enough size for chunk") {
-					time.Sleep(10 * time.Millisecond)
-					continue
-				} else {
-					deviceDone = true
-				}
-			} else if kv != nil {
-				kvs = append(kvs, kv)
-			} else {
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
-
-		req := DeviceSvcInfo20Msg{
-			ReplacementHMacOrNull: nil, // Not used (FDO 2.0 Errata 1)
-			IsMoreServiceInfo:     !deviceDone,
-			ServiceInfo:           kvs,
-		}
-
-		typ, resp, err := transport.Send(ctx, protocol.TO2DeviceSvcInfo20MsgType, req, sess)
-		if err != nil {
-			return fmt.Errorf("error sending TO2.DeviceSvcInfo20: %w", err)
-		}
-
-		switch typ {
-		case protocol.TO2OwnerSvcInfo20MsgType:
-			captureMsgType(ctx, typ)
-			var ownerInfoMsg OwnerSvcInfo20Msg
-			if err := cbor.NewDecoder(resp).Decode(&ownerInfoMsg); err != nil {
-				_ = resp.Close()
-				captureErr(ctx, protocol.MessageBodyErrCode, "")
-				return fmt.Errorf("error parsing TO2.OwnerSvcInfo20: %w", err)
-			}
-			_ = resp.Close()
-
-			// Process owner service info through device modules using same logic as 1.0.1
-			// This returns any response KVs that device modules want to send back
-			responseKVs, err := processOwnerServiceInfo20(ctx, ownerInfoMsg.ServiceInfo, c.DeviceModules, &modules)
-			if err != nil {
-				return fmt.Errorf("error processing owner service info: %w", err)
-			}
-
-			// If device modules produced responses, save them for next request
-			if len(responseKVs) > 0 {
-				pendingResponses = append(pendingResponses, responseKVs...)
-				slog.Debug("FDO 2.0 device modules produced responses", "count", len(responseKVs))
-			}
-
-			// Check if done
-			if ownerInfoMsg.IsDone && deviceDone && !ownerInfoMsg.IsMoreServiceInfo {
-				// Send Done20 with replacement HMAC
-				return sendDone20(ctx, transport, proveDvNonce, setupDvNonce, replacementHMAC, sess)
-			}
-
-		case protocol.ErrorMsgType:
-			var errMsg protocol.ErrorMessage
-			_ = cbor.NewDecoder(resp).Decode(&errMsg)
-			_ = resp.Close()
-			return fmt.Errorf("error from TO2.DeviceSvcInfo20: %w", errMsg)
-
-		default:
-			_ = resp.Close()
-			captureErr(ctx, protocol.MessageBodyErrCode, "")
-			return fmt.Errorf("unexpected response type %d to TO2.DeviceSvcInfo20", typ)
-		}
-	}
-}
-
 // sendDone20 sends TO2.Done20 (90) and receives TO2.DoneAck20 (91)
 func sendDone20(ctx context.Context, transport Transport, proveDvNonce, setupDvNonce protocol.Nonce, replacementHMAC *protocol.Hmac, sess kex.Session) error {
 	req := Done20Msg{
@@ -861,118 +774,57 @@ func sendDone20(ctx context.Context, transport Transport, proveDvNonce, setupDvN
 	}
 }
 
-// processOwnerServiceInfo20 processes owner service info KVs using the same logic as 1.0.1
-// This is the unified client-side FSIM processing for FDO 2.0
-// Returns any response KVs that device modules want to send back
-func processOwnerServiceInfo20(ctx context.Context, serviceInfo []*serviceinfo.KV, deviceModules map[string]serviceinfo.DeviceModule, modules *deviceModuleMap) ([]*serviceinfo.KV, error) {
-	var responseKVs []*serviceinfo.KV
+// to2v200Key marks a context as running the FDO 2.0 TO2 protocol, so that the
+// service info exchange shared with FDO 1.01 uses the 2.0 messages.
+type to2v200Key struct{}
 
-	for _, kv := range serviceInfo {
-		// Parse the key to extract module name and message type
-		moduleName, messageName, ok := strings.Cut(kv.Key, ":")
-		if !ok {
-			slog.Warn("invalid service info key format", "key", kv.Key)
-			continue
-		}
+func withTO2v200(ctx context.Context) context.Context {
+	return context.WithValue(ctx, to2v200Key{}, true)
+}
 
-		// Get the device module
-		mod, active := modules.Lookup(moduleName)
+func isTO2v200(ctx context.Context) bool {
+	v, _ := ctx.Value(to2v200Key{}).(bool)
+	return v
+}
 
-		// Handle "active" message specially - call Transition() (same as 1.0.1 handleActive)
-		if messageName == "active" {
-			var newActive bool
-			if err := cbor.NewDecoder(bytes.NewReader(kv.Val)).Decode(&newActive); err != nil {
-				return nil, fmt.Errorf("error decoding active message for %s: %w", moduleName, err)
-			}
-
-			// Transition internal state if changed
-			if newActive != active {
-				if err := mod.Transition(newActive); err != nil {
-					return nil, fmt.Errorf("error transitioning module %s: %w", moduleName, err)
-				}
-			}
-			modules.active[moduleName] = newActive
-
-			// Send active response (same as 1.0.1 handleActive)
-			if newActive && !active {
-				// Check if this is an unknown module
-				_, isUnknown := mod.(serviceinfo.UnknownModule)
-				responseActive := newActive
-				if isUnknown && moduleName != "devmod" {
-					responseActive = false
-				}
-				// Create response KV
-				var buf bytes.Buffer
-				if err := cbor.NewEncoder(&buf).Encode(responseActive); err != nil {
-					return nil, fmt.Errorf("error encoding active response for %s: %w", moduleName, err)
-				}
-				responseKVs = append(responseKVs, &serviceinfo.KV{
-					Key: moduleName + ":active",
-					Val: buf.Bytes(),
-				})
-			}
-			slog.Debug("FDO 2.0 transitioned module", "module", moduleName, "active", newActive)
-			continue
-		}
-
-		// For non-active messages, module must be active
-		if !active {
-			return nil, fmt.Errorf("device has not activated module %q", moduleName)
-		}
-
-		// Create respond/yield callback functions that collect responses
-		currentModule := moduleName
-		var writers []*responseWriter
-		respond := func(message string) io.Writer {
-			// Return a buffer that will be flushed after Receive returns
-			w := &responseWriter{
-				key:         currentModule + ":" + message,
-				responseKVs: &responseKVs,
-			}
-			writers = append(writers, w)
-			return w
-		}
-		yield := func() {
-			// No-op for 2.0 - responses are collected and sent in next request
-		}
-
-		// Process the message through the device module
-		if err := mod.Receive(ctx, messageName, bytes.NewReader(kv.Val), respond, yield); err != nil {
-			return nil, fmt.Errorf("error processing service info %s:%s: %w", moduleName, messageName, err)
-		}
-
-		// Flush all response writers after Receive completes
-		for _, w := range writers {
-			w.Flush()
-		}
-		slog.Debug("FDO 2.0 successfully processed message", "module", moduleName, "message", messageName)
+// sendDeviceSvcInfo20 sends TO2.DeviceSvcInfo20 (88) and receives
+// TO2.OwnerSvcInfo20 (89). It is the FDO 2.0 form of sendDeviceServiceInfo,
+// used by the service info exchange loop shared with FDO 1.01.
+func sendDeviceSvcInfo20(ctx context.Context, transport Transport, msg deviceServiceInfo, sess kex.Session) (*ownerServiceInfo, error) {
+	req := DeviceSvcInfo20Msg{
+		ReplacementHMacOrNull: nil, // Not used (FDO 2.0 Errata 1)
+		IsMoreServiceInfo:     msg.IsMoreServiceInfo,
+		ServiceInfo:           msg.ServiceInfo,
 	}
-	return responseKVs, nil
-}
+	typ, resp, err := transport.Send(ctx, protocol.TO2DeviceSvcInfo20MsgType, req, sess)
+	if err != nil {
+		return nil, fmt.Errorf("TO2.DeviceSvcInfo20: %w", err)
+	}
+	defer func() { _ = resp.Close() }()
 
-// responseWriter collects device module responses for FDO 2.0
-type responseWriter struct {
-	key         string
-	buf         bytes.Buffer
-	responseKVs *[]*serviceinfo.KV
-	flushed     bool
-}
+	switch typ {
+	case protocol.TO2OwnerSvcInfo20MsgType:
+		captureMsgType(ctx, typ)
+		var info OwnerSvcInfo20Msg
+		if err := cbor.NewDecoder(resp).Decode(&info); err != nil {
+			captureErr(ctx, protocol.MessageBodyErrCode, "")
+			return nil, fmt.Errorf("error parsing TO2.OwnerSvcInfo20 contents: %w", err)
+		}
+		return &ownerServiceInfo{
+			IsMoreServiceInfo: info.IsMoreServiceInfo,
+			IsDone:            info.IsDone,
+			ServiceInfo:       info.ServiceInfo,
+		}, nil
 
-func (w *responseWriter) Write(p []byte) (n int, err error) {
-	n, err = w.buf.Write(p)
-	return n, err
-}
+	case protocol.ErrorMsgType:
+		var errMsg protocol.ErrorMessage
+		if err := cbor.NewDecoder(resp).Decode(&errMsg); err != nil {
+			return nil, fmt.Errorf("error parsing error message contents of TO2.OwnerSvcInfo20 response: %w", err)
+		}
+		return nil, fmt.Errorf("error received from TO2.DeviceSvcInfo20 request: %w", errMsg)
 
-// Flush adds the buffered data to responseKVs. Called after module.Receive returns.
-func (w *responseWriter) Flush() {
-	if w.buf.Len() > 0 && !w.flushed {
-		// Make a copy of the buffer data
-		data := make([]byte, w.buf.Len())
-		copy(data, w.buf.Bytes())
-		*w.responseKVs = append(*w.responseKVs, &serviceinfo.KV{
-			Key: w.key,
-			Val: data,
-		})
-		w.flushed = true
+	default:
+		captureErr(ctx, protocol.MessageBodyErrCode, "")
+		return nil, fmt.Errorf("unexpected message type for response to TO2.DeviceSvcInfo20: %d", typ)
 	}
 }

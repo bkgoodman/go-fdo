@@ -78,6 +78,20 @@ func versionAndMsgFromPath(w http.ResponseWriter, r *http.Request) (protocol.Ver
 	return version, uint8(typ), true
 }
 
+// msgTypeAllowedForVersion reports whether a message type may be sent under
+// the given protocol (URL) version: TO2 1.01 messages (60-71) only under
+// 101, and TO2 2.0 messages (80-91) only under 200.
+func msgTypeAllowedForVersion(msgType uint8, version protocol.Version) bool {
+	switch {
+	case protocol.TO2HelloDeviceMsgType <= msgType && msgType <= protocol.TO2Done2MsgType:
+		return version == protocol.Version101
+	case protocol.TO2HelloDeviceProbeMsgType <= msgType && msgType <= protocol.TO2DoneAck20MsgType:
+		return version == protocol.Version200
+	default:
+		return true
+	}
+}
+
 // isEncryptedTO2Message returns true if the message type requires encryption/decryption.
 // In FDO 1.01: messages 65-71 (after ProveDevice/64, key exchange complete)
 // In FDO 2.0: messages 86-91 (after OVNextEntry/85, key exchange complete)
@@ -109,6 +123,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inject version into context for downstream handlers
 	ctx = protocol.ContextWithVersion(ctx, version)
 
+	// TO2 message types are version specific
+	if !msgTypeAllowedForVersion(msgType, version) {
+		writeErr(w, msgType, fmt.Errorf("message type %d is not part of FDO version %s", msgType, version))
+		return
+	}
+
 	proto := protocol.Of(msgType)
 
 	// Parse request headers
@@ -129,23 +149,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get responder for message
-	var resp protocol.Responder
-	var isProtocolStart bool
-	switch proto {
-	case protocol.DIProtocol:
-		resp = h.DIResponder
-		isProtocolStart = msgType == 10
-	case protocol.TO0Protocol:
-		resp = h.TO0Responder
-		isProtocolStart = msgType == 20
-	case protocol.TO1Protocol:
-		resp = h.TO1Responder
-		isProtocolStart = msgType == 30
-	case protocol.TO2Protocol:
-		resp = h.TO2Responder
-		// TO2 starts at msg 60 (1.01) or msg 80 (2.0)
-		isProtocolStart = msgType == protocol.TO2HelloDeviceMsgType || msgType == protocol.TO2HelloDeviceProbeMsgType
-	}
+	resp, isProtocolStart := h.responder(proto, msgType)
 	if resp == nil {
 		writeErr(w, msgType, fmt.Errorf("unsupported message type"))
 		return
@@ -166,10 +170,80 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx = h.Tokens.TokenContext(ctx, initToken)
 	}
+	if err := h.checkSessionProtocol(ctx, isProtocolStart, proto); err != nil {
+		writeErr(w, msgType, err)
+		return
+	}
+	if err := h.pinSessionVersion(ctx, isProtocolStart, version); err != nil {
+		writeErr(w, msgType, err)
+		return
+	}
 
 	debugRequest(w, r, func(w http.ResponseWriter, r *http.Request) {
 		h.handleRequest(ctx, w, r, msgType, resp)
 	})
+}
+
+// responder returns the responder for a message and whether the message
+// starts its protocol.
+func (h Handler) responder(proto protocol.Protocol, msgType uint8) (resp protocol.Responder, isProtocolStart bool) {
+	switch proto {
+	case protocol.DIProtocol:
+		return h.DIResponder, msgType == protocol.DIAppStartMsgType
+	case protocol.TO0Protocol:
+		return h.TO0Responder, msgType == protocol.TO0HelloMsgType
+	case protocol.TO1Protocol:
+		return h.TO1Responder, msgType == protocol.TO1HelloRVMsgType
+	case protocol.TO2Protocol:
+		// TO2 starts at msg 60 (1.01) or msg 80 (2.0)
+		return h.TO2Responder, msgType == protocol.TO2HelloDeviceMsgType || msgType == protocol.TO2HelloDeviceProbeMsgType
+	default:
+		return nil, false
+	}
+}
+
+// checkSessionProtocol checks that a message of an existing session belongs to
+// the protocol (DI, TO0, TO1, TO2) the session was started for. It does nothing
+// for protocol start messages, which create a new session, or if the
+// TokenService does not implement protocol.TokenProtocolService.
+func (h Handler) checkSessionProtocol(ctx context.Context, isProtocolStart bool, proto protocol.Protocol) error {
+	tps, ok := h.Tokens.(protocol.TokenProtocolService)
+	if !ok || isProtocolStart {
+		return nil
+	}
+	sessProto, err := tps.TokenProtocol(ctx)
+	if err != nil {
+		return fmt.Errorf("error retrieving session protocol: %w", err)
+	}
+	if sessProto != proto {
+		return fmt.Errorf("%s message in a session started for %s", proto, sessProto)
+	}
+	return nil
+}
+
+// pinSessionVersion records the protocol version of a new session, or checks
+// that a message of an existing session uses the version the session started
+// with. It does nothing if the TokenService does not implement
+// protocol.TokenVersionService.
+func (h Handler) pinSessionVersion(ctx context.Context, isProtocolStart bool, version protocol.Version) error {
+	tvs, ok := h.Tokens.(protocol.TokenVersionService)
+	if !ok {
+		return nil
+	}
+	if isProtocolStart {
+		if err := tvs.SetTokenVersion(ctx, version); err != nil {
+			return fmt.Errorf("error recording session protocol version: %w", err)
+		}
+		return nil
+	}
+	sessVersion, err := tvs.TokenVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("error retrieving session protocol version: %w", err)
+	}
+	if sessVersion != version {
+		return fmt.Errorf("message for FDO version %s in a session started with version %s", version, sessVersion)
+	}
+	return nil
 }
 
 func (h Handler) handleError(ctx context.Context, token string) http.HandlerFunc {
