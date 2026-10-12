@@ -4,6 +4,7 @@
 package fdo
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -289,6 +290,16 @@ type TO2Server struct {
 	// Use this delegate cert for onboarding (or empty string)
 	OnboardDelegate string
 
+	// LenientKeyExchange relaxes the FDO 2.0 TO2 key exchange check: a Device
+	// may select any ECDH suite for an ECDSA Owner key (or any DHKEX suite for
+	// an RSA Owner key), even one that is not offered in
+	// TO2.HelloDeviceAck20 and that the spec's key exchange mapping does not
+	// allow for the attestation keys (e.g. ECDH384 with P-256 device and
+	// Owner keys). The offer itself is unchanged. This is NOT spec compliant;
+	// it exists for interoperability testing with Devices that do not choose
+	// from the Owner's offer.
+	LenientKeyExchange bool
+
 	// Use this delegate cert for rendezvous (or empty string)
 	RvDelegate string
 }
@@ -341,6 +352,8 @@ func (s *TO2Server) Resell(ctx context.Context, guid protocol.GUID, nextOwner cr
 }
 
 // Respond validates a request and returns the appropriate response message.
+//
+//nolint:gocyclo // Protocol handler requires multiple message type cases
 func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (respType uint8, resp any) {
 	// Inject a mutable error into the context for error info capturing without
 	// complex error wrapping or overburdened method signatures.
@@ -350,6 +363,7 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 	// Handle each message type
 	var err error
 	switch msgType {
+	// FDO 1.01 TO2 messages
 	case protocol.TO2HelloDeviceMsgType:
 		respType = protocol.TO2ProveOVHdrMsgType
 		resp, err = s.proveOVHdr(ctx, msg)
@@ -372,6 +386,31 @@ func (s *TO2Server) Respond(ctx context.Context, msgType uint8, msg io.Reader) (
 		s.Modules.CleanupModules(ctx)
 		respType = protocol.TO2Done2MsgType
 		resp, err = s.to2Done2(ctx, msg)
+
+	// FDO 2.0 TO2 messages
+	// Key difference: Device proves itself FIRST (anti-DoS)
+	case protocol.TO2HelloDeviceProbeMsgType:
+		respType = protocol.TO2HelloDeviceAck20MsgType
+		resp, err = s.helloDeviceAck20(ctx, msg)
+	case protocol.TO2ProveDevice20MsgType:
+		respType = protocol.TO2ProveOVHdr20MsgType
+		resp, err = s.proveOVHdr20(ctx, msg)
+	case protocol.TO2GetOVNextEntry20MsgType:
+		respType = protocol.TO2OVNextEntry20MsgType
+		resp, err = s.ovNextEntry20(ctx, msg)
+	case protocol.TO2DeviceSvcInfoRdy20MsgType:
+		respType = protocol.TO2SetupDevice20MsgType
+		resp, err = s.setupDevice20(ctx, msg)
+	case protocol.TO2DeviceSvcInfo20MsgType:
+		respType = protocol.TO2OwnerSvcInfo20MsgType
+		resp, err = s.ownerServiceInfo20(ctx, msg)
+		if err != nil {
+			s.Modules.CleanupModules(ctx)
+		}
+	case protocol.TO2Done20MsgType:
+		s.Modules.CleanupModules(ctx)
+		respType = protocol.TO2DoneAck20MsgType
+		resp, err = s.doneAck20(ctx, msg)
 	}
 
 	// Return response on success
@@ -405,4 +444,39 @@ func (s *TO2Server) HandleError(ctx context.Context, errMsg protocol.ErrorMessag
 	// This should only be applicable if errMsg.PrevMsgType == 69, but the
 	// device reported error message cannot be completely trusted
 	s.Modules.CleanupModules(ctx)
+}
+
+// ownerServiceInfo20 converts 2.0 DeviceSvcInfo20Msg to 1.0.1 format and reuses existing logic
+func (s *TO2Server) ownerServiceInfo20(ctx context.Context, msg io.Reader) (*OwnerSvcInfo20Msg, error) {
+	var req DeviceSvcInfo20Msg
+	if err := cbor.NewDecoder(msg).Decode(&req); err != nil {
+		captureErr(ctx, protocol.MessageBodyErrCode, "")
+		return nil, fmt.Errorf("error decoding TO2.DeviceSvcInfo20 request: %w", err)
+	}
+
+	// Convert 2.0 message to 1.0.1 format and encode as CBOR
+	deviceInfo := deviceServiceInfo{
+		ServiceInfo:       req.ServiceInfo,
+		IsMoreServiceInfo: req.IsMoreServiceInfo,
+	}
+
+	var deviceInfoBuf bytes.Buffer
+	if err := cbor.NewEncoder(&deviceInfoBuf).Encode(&deviceInfo); err != nil {
+		return nil, fmt.Errorf("error encoding device service info: %w", err)
+	}
+
+	// Call the existing 1.0.1 ownerServiceInfo method
+	ownerInfo, err := s.ownerServiceInfo(ctx, &deviceInfoBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert 1.0.1 response to 2.0 format
+	result := &OwnerSvcInfo20Msg{
+		IsMoreServiceInfo: ownerInfo.IsMoreServiceInfo,
+		IsDone:            ownerInfo.IsDone,
+		ServiceInfo:       ownerInfo.ServiceInfo,
+	}
+
+	return result, nil
 }
