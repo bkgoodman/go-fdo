@@ -137,22 +137,20 @@ make          # Default: run lint + test
 
 #### TPM Spec Compliance Tests
 
-Separate build tag, must run from `tpm/` directory. There are two test
-suites: the core spec compliance phases (`TestSpecCompliance`) and the
-Phase 9 library integration tests (`TestPhase9`).
+Separate build tag, must run from `tpm/` directory. Two suites:
+`TestSpecCompliance` (library functions the credential store uses, checked
+against the spec tables) and the Phase 9 library integration tests
+(`TestPhase9`). Both remove existing FDO state from the TPM first.
 
-**Hardware TPM (Linux) — the standard way to run:**
-
-On Linux the Platform hierarchy is locked after boot, even for root.
-You **must** set `FDO_TPM_OWNER_HIERARCHY=1` so tests use Owner hierarchy
-instead of Platform for Profile A/B NV indices. Without it every
-`NVDefineSpace` call will fail with `TPM_RC_BAD_AUTH`.
+**Hardware TPM (Linux):** `TestSpecCompliance` creates DCTPM under the Owner
+hierarchy by default, so it needs no extra setting. The Phase 9 tests still
+need `FDO_TPM_OWNER_HIERARCHY=1` (Platform hierarchy is locked after boot).
 
 ```bash
 cd tpm
 
-# All spec compliance phases against hardware TPM
-FDO_TPM_OWNER_HIERARCHY=1 go test -v -tags=spec_compliance_test -run TestSpecCompliance -count=1
+# Spec compliance against hardware TPM
+go test -v -tags=spec_compliance_test -run TestSpecCompliance -count=1
 
 # Phase 9 library integration tests against hardware TPM
 FDO_TPM_OWNER_HIERARCHY=1 go test -v -tags=spec_compliance_test -run TestPhase9 -count=1
@@ -166,13 +164,15 @@ FDO_TPM_OWNER_HIERARCHY=1 go test -v -tags=spec_compliance_test -count=1
 ```bash
 cd tpm
 FDO_TPM=sim go test -v -tags=spec_compliance_test -count=1
+FDO_TPM=sim FDO_TPM_PLATFORM_HIERARCHY=1 go test -v -tags=spec_compliance_test -run TestSpecCompliance -count=1
 ```
+
+Store-level TPM tests: `cd cred && go test -v -tags=tpmsim -count=1`.
 
 **Notes:**
 
-- P-384/SHA-384 tests are skipped when hardware TPM does not support P-384.
-- `FDO_TPM_OWNER_HIERARCHY=1` means `PlatformCreate` will be false — not
-  fully spec-compliant but required in Linux userspace.
+- P-384/SHA-384 cases are skipped when the TPM does not list NIST P-384
+  (or with `FDO_TPM_P384=0`).
 - See `tpm/TPM_COMPLIANCE_TESTING.md` for detailed test instructions.
 
 #### Integration Tests

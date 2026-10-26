@@ -46,7 +46,7 @@ func dumpTPMState(t *testing.T, thetpm tpmlib.TPM, label string) {
 	if info.HasDCTPM {
 		t.Logf("  DCTPM     (0x%08X)    [%d bytes]", tpmlib.DCTPMIndex, info.DCTPMSize)
 		var dctpm dctpmDump
-		if err := cbor.Unmarshal(info.RawDCTPM, &dctpm); err != nil {
+		if err := tpmlib.DecodeDCTPM(info.RawDCTPM, &dctpm); err != nil {
 			t.Logf("    (decode error: %v)", err)
 		} else {
 			t.Logf("    Magic             0x%08X", dctpm.Magic)
@@ -308,7 +308,7 @@ func TestPhase9_ProductionAPI_NVOnly(t *testing.T) {
 
 	// Decode consolidated DCTPM
 	var verifyDCTPM dctpmDump
-	if err := cbor.Unmarshal(info.RawDCTPM, &verifyDCTPM); err != nil {
+	if err := tpmlib.DecodeDCTPM(info.RawDCTPM, &verifyDCTPM); err != nil {
 		t.Fatalf("DCTPM decode: %v", err)
 	}
 	if verifyDCTPM.Magic != tpmlib.DCTPMMagic {

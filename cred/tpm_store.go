@@ -227,14 +227,9 @@ func (s *tpmStore) Save(dc fdo.DeviceCredential) error {
 		return fmt.Errorf("encoding DCTPM: %w", err)
 	}
 
-	// Undefine first in case this is a re-save (TO2 credential update);
-	// CBOR size may change if RvInfo or DeviceInfo differs.
-	_ = tpm.UndefineNVSpace(s.tpmc, tpm.DCTPMIndex)
-	dctpmName, err := tpm.DefineNVSpace(s.tpmc, tpm.DCTPMIndex, uint16(len(dctpmBytes)), tpm.NVProfileDCTPM, s.usePlatform)
-	if err != nil {
-		return fmt.Errorf("define DCTPM NV: %w", err)
-	}
-	if err := tpm.WriteNV(s.tpmc, tpm.DCTPMIndex, dctpmName, dctpmBytes, tpm.NVProfileDCTPM); err != nil {
+	// Single in-place NV_Write when the index exists (TO2 credential update),
+	// so an interruption leaves the old or the new credentials, never none.
+	if err := tpm.WriteDCTPM(s.tpmc, dctpmBytes, s.usePlatform); err != nil {
 		return fmt.Errorf("write DCTPM NV: %w", err)
 	}
 	slog.Debug("tpm: wrote consolidated DCTPM NV",
@@ -296,7 +291,7 @@ func (s *tpmStore) loadFromNV() (*fdo.DeviceCredential, error) {
 
 	// Decode consolidated DCTPM CBOR structure
 	var dctpm dctpmNVData
-	if err := cbor.Unmarshal(info.RawDCTPM, &dctpm); err != nil {
+	if err := tpm.DecodeDCTPM(info.RawDCTPM, &dctpm); err != nil {
 		return nil, fmt.Errorf("decoding DCTPM NV: %w", err)
 	}
 

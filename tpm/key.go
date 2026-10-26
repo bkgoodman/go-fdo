@@ -8,7 +8,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	_ "crypto/sha512" // SHA-384 for DeviceKeyAuthPolicy
 	"encoding/asn1"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -306,10 +308,34 @@ func readPublicRsaKey(t TPM, handle tpm2.NamedHandle) (*rsa.PublicKey, error) {
 // Spec-compliant key creation (UserWithAuth=1, AdminWithPolicy=1, empty authValue)
 // =========================================================================
 
+// DeviceKeyAuthPolicy returns the Device key authPolicy of the FDO TPM spec
+// (Table 12): the digest of TPM2_PolicyCommandCode(TPM_CC_Certify) for the
+// key's nameAlg, H(zero digest || TPM_CC_PolicyCommandCode || TPM_CC_Certify).
+// It lets any party obtain TPM2_Certify evidence that the key is in this TPM;
+// every other ADMIN-role command (e.g. TPM2_ObjectChangeAuth) fails it.
+func DeviceKeyAuthPolicy(nameAlg tpm2.TPMAlgID) (tpm2.TPM2BDigest, error) {
+	var h crypto.Hash
+	switch nameAlg {
+	case tpm2.TPMAlgSHA256:
+		h = crypto.SHA256
+	case tpm2.TPMAlgSHA384:
+		h = crypto.SHA384
+	default:
+		return tpm2.TPM2BDigest{}, fmt.Errorf("unsupported Device key nameAlg 0x%04x", uint16(nameAlg))
+	}
+	d := h.New()
+	d.Write(make([]byte, h.Size()))
+	_ = binary.Write(d, binary.BigEndian, uint32(tpm2.TPMCCPolicyCommandCode))
+	_ = binary.Write(d, binary.BigEndian, uint32(tpm2.TPMCCCertify))
+	return tpm2.TPM2BDigest{Buffer: d.Sum(nil)}, nil
+}
+
 // GenerateSpecECKey creates an ECC signing key per the FDO TPM spec Table 11:
 //   - UserWithAuth = true (key usage via HMAC session with empty authValue)
 //   - AdminWithPolicy = true (admin ops require policy session)
-//   - No AuthPolicy required for key usage — empty authValue is sufficient
+//   - NoDA = true (unrelated DA lockouts do not disable the key)
+//   - AuthPolicy = DeviceKeyAuthPolicy (Table 12): permits TPM2_Certify only;
+//     signing uses the USER role (empty authValue) and never this policy
 //   - Unique field populated with the unique string bytes
 //
 // The key is created as a transient primary under the Endorsement hierarchy.
@@ -317,9 +343,14 @@ func readPublicRsaKey(t TPM, handle tpm2.NamedHandle) (*rsa.PublicKey, error) {
 //
 // uniqueString must be 2*coordSize bytes (e.g., 64 for P-256, 96 for P-384).
 func GenerateSpecECKey(t TPM, curveID tpm2.TPMECCCurve, hashAlg tpm2.TPMAlgID, uniqueString []byte) (*tpm2.NamedHandle, crypto.PublicKey, error) {
+	authPolicy, err := DeviceKeyAuthPolicy(hashAlg)
+	if err != nil {
+		return nil, nil, err
+	}
 	template := tpm2.TPMTPublic{
-		Type:    tpm2.TPMAlgECC,
-		NameAlg: hashAlg,
+		Type:       tpm2.TPMAlgECC,
+		NameAlg:    hashAlg,
+		AuthPolicy: authPolicy,
 		ObjectAttributes: tpm2.TPMAObject{
 			FixedTPM:            true,
 			FixedParent:         true,
@@ -327,6 +358,7 @@ func GenerateSpecECKey(t TPM, curveID tpm2.TPMECCCurve, hashAlg tpm2.TPMAlgID, u
 			SignEncrypt:         true,
 			UserWithAuth:        true, // per spec Table 11: empty authValue for key usage
 			AdminWithPolicy:     true, // per spec Table 11: policy required for admin ops
+			NoDA:                true, // per spec Table 11
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgECC,
 			&tpm2.TPMSECCParms{
@@ -367,7 +399,8 @@ func GenerateSpecECKey(t TPM, curveID tpm2.TPMECCCurve, hashAlg tpm2.TPMAlgID, u
 // GenerateSpecHMACKey creates an HMAC key per the FDO TPM spec Table 11:
 //   - UserWithAuth = true (key usage via HMAC session with empty authValue)
 //   - AdminWithPolicy = true (admin ops require policy session)
-//   - No AuthPolicy required for key usage — empty authValue is sufficient
+//   - NoDA = true (unrelated DA lockouts do not disable the key)
+//   - Empty AuthPolicy (Table 12): the ADMIN role is unavailable
 //   - Unique field populated with the unique string bytes
 //
 // The key is created as a transient primary under the Endorsement hierarchy.
@@ -383,6 +416,7 @@ func GenerateSpecHMACKey(t TPM, uniqueString []byte) (*tpm2.NamedHandle, error) 
 			SignEncrypt:         true,
 			UserWithAuth:        true, // per spec Table 11: empty authValue for key usage
 			AdminWithPolicy:     true, // per spec Table 11: policy required for admin ops
+			NoDA:                true, // per spec Table 11
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgKeyedHash,
 			&tpm2.TPMSKeyedHashParms{
@@ -457,9 +491,14 @@ func CreateSRK(t TPM) (*tpm2.NamedHandle, error) {
 //
 // Returns a NamedHandle (loaded, transient). Caller should persist via PersistKey.
 func CreateChildECKey(t TPM, parent tpm2.NamedHandle, curveID tpm2.TPMECCCurve, hashAlg tpm2.TPMAlgID) (*tpm2.NamedHandle, crypto.PublicKey, error) {
+	authPolicy, err := DeviceKeyAuthPolicy(hashAlg)
+	if err != nil {
+		return nil, nil, err
+	}
 	template := tpm2.TPMTPublic{
-		Type:    tpm2.TPMAlgECC,
-		NameAlg: hashAlg,
+		Type:       tpm2.TPMAlgECC,
+		NameAlg:    hashAlg,
+		AuthPolicy: authPolicy,
 		ObjectAttributes: tpm2.TPMAObject{
 			FixedTPM:            true,
 			FixedParent:         true,
@@ -467,6 +506,7 @@ func CreateChildECKey(t TPM, parent tpm2.NamedHandle, curveID tpm2.TPMECCCurve, 
 			SignEncrypt:         true,
 			UserWithAuth:        true,
 			AdminWithPolicy:     true,
+			NoDA:                true, // per spec Table 11
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgECC,
 			&tpm2.TPMSECCParms{
@@ -530,6 +570,7 @@ func CreateChildHMACKey(t TPM, parent tpm2.NamedHandle) (*tpm2.NamedHandle, erro
 			SignEncrypt:         true,
 			UserWithAuth:        true,
 			AdminWithPolicy:     true,
+			NoDA:                true, // per spec Table 11
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgKeyedHash,
 			&tpm2.TPMSKeyedHashParms{

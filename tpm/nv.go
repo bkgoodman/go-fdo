@@ -8,7 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
+	_ "crypto/sha256" // crypto.SHA256 in ProveDAKPossession
 	"encoding/asn1"
 	"fmt"
 	"math/big"
@@ -121,7 +121,7 @@ func ReadDAKPublicKey(t TPM) (crypto.PublicKey, error) {
 // DAKProof contains the result of a DAK possession proof.
 type DAKProof struct {
 	PublicKey crypto.PublicKey // DAK public key
-	Challenge [32]byte         // SHA-256 hash that was signed
+	Challenge []byte           // digest that was signed (SHA-256 for P-256, SHA-384 for P-384)
 	Signature []byte           // ASN.1-encoded ECDSA signature
 }
 
@@ -138,14 +138,21 @@ func ProveDAKPossession(t TPM, challenge []byte) (*DAKProof, error) {
 		return nil, err
 	}
 
-	// Generate or hash challenge
-	var digest [32]byte
+	// Generate or hash the challenge with the digest size the DAK's signing
+	// scheme expects (TPM2_Sign refuses a mismatched digest size).
+	h := crypto.SHA256
+	if ec, ok := pubKey.(*ecdsa.PublicKey); ok && ec.Curve == elliptic.P384() {
+		h = crypto.SHA384
+	}
+	digest := make([]byte, h.Size())
 	if challenge == nil {
-		if _, err := rand.Read(digest[:]); err != nil {
+		if _, err := rand.Read(digest); err != nil {
 			return nil, fmt.Errorf("generate random challenge: %w", err)
 		}
 	} else {
-		digest = sha256.Sum256(challenge)
+		d := h.New()
+		d.Write(challenge)
+		digest = d.Sum(nil)
 	}
 
 	// Discover DAK name
@@ -161,7 +168,7 @@ func ProveDAKPossession(t TPM, challenge []byte) (*DAKProof, error) {
 			Name:   dkResp.Name,
 			Auth:   tpm2.PasswordAuth(nil),
 		},
-		Digest:     tpm2.TPM2BDigest{Buffer: digest[:]},
+		Digest:     tpm2.TPM2BDigest{Buffer: digest},
 		Validation: tpm2.TPMTTKHashCheck{Tag: tpm2.TPMSTHashCheck},
 	}).Execute(t)
 	if err != nil {
@@ -191,15 +198,26 @@ func ProveDAKPossession(t TPM, challenge []byte) (*DAKProof, error) {
 
 // nvReadOwner reads NV data using Owner hierarchy authorization.
 func nvReadOwner(t TPM, index uint32, nvName tpm2.TPM2BName, size uint16) ([]byte, error) {
-	resp, err := (tpm2.NVRead{
-		AuthHandle: tpm2.AuthHandle{Handle: tpm2.TPMRHOwner, Auth: tpm2.PasswordAuth(nil)},
-		NVIndex:    tpm2.NamedHandle{Handle: tpm2.TPMHandle(index), Name: nvName},
-		Size:       size,
-	}).Execute(t)
-	if err != nil {
-		return nil, err
+	// Read in chunks of TPM_PT_NV_BUFFER_MAX (reads need not be atomic).
+	chunk := int(size)
+	if bufMax, err := NVBufferMax(t); err == nil && bufMax > 0 && bufMax < chunk {
+		chunk = bufMax
 	}
-	return resp.Data.Buffer, nil
+	out := make([]byte, 0, size)
+	for off := 0; off < int(size); off += chunk {
+		n := min(chunk, int(size)-off)
+		resp, err := (tpm2.NVRead{
+			AuthHandle: tpm2.AuthHandle{Handle: tpm2.TPMRHOwner, Auth: tpm2.PasswordAuth(nil)},
+			NVIndex:    tpm2.NamedHandle{Handle: tpm2.TPMHandle(index), Name: nvName},
+			Size:       uint16(n),   //nolint:gosec // n <= size (uint16)
+			Offset:     uint16(off), //nolint:gosec // off < size (uint16)
+		}).Execute(t)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resp.Data.Buffer...)
+	}
+	return out, nil
 }
 
 // =========================================================================
@@ -229,9 +247,11 @@ func nvProfileAttrs(profile NVProfile) tpm2.TPMANV {
 			NoDA: true, PlatformCreate: true, NT: tpm2.TPMNTOrdinary,
 		}
 	case NVProfileDCTPM:
+		// WriteSTClear: allows the optional per-boot TPM2_NV_WriteLock (spec
+		// Table 9); no effect unless someone calls it.
 		return tpm2.TPMANV{
 			OwnerWrite: true, AuthWrite: true, OwnerRead: true, AuthRead: true,
-			NoDA: true, NT: tpm2.TPMNTOrdinary,
+			NoDA: true, WriteSTClear: true, NT: tpm2.TPMNTOrdinary,
 		}
 	default:
 		return tpm2.TPMANV{NT: tpm2.TPMNTOrdinary}

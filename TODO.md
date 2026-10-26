@@ -50,8 +50,13 @@
 
 ### Protocol Defects
 
-- [ ] **FDO 2.0 ECDH `ShSe` random order is wrong (flag day with
-  fdo-uefi-rs and fido-device-onboard-rs).** `kex/ecdh.go:300` builds
+- [x] **FIXED 2026-10-24 (uncommitted): FDO 2.0 ECDH `ShSe` random order was wrong (flag day with
+  fdo-uefi-rs and fido-device-onboard-rs).** Fix: `kex.SetDeviceSentA` (called
+  by the 2.0 client and server), role-based order in `ecdhSharedSecret`, flag
+  persisted (trailing omitempty). KAT: `kex/ecdh_kat_test.go` (vectors shared
+  with both Rust repos, cross-checked in Python). Interop verified: Rust
+  client 7/7, fdo-uefi-rs QEMU TO2 pass; pre-fix server fails at msg 86.
+  Original report: `kex/ecdh.go:300` builds
   `Shx || xB.Rand || xA.Rand` by position (written for 1.1 in `e04409d`);
   at 2.0 the Device sends xA, so that yields `Shx || OwnerRandom ||
   DeviceRandom`. The spec defines `Shx || DeviceRandom || OwnerRandom` by
@@ -126,6 +131,14 @@
   bug. Related trap: a `yield()` while the current message is still empty
   makes `exchangeServiceInfoRound` end the round (`IsMoreServiceInfo=false`)
   and everything written after it is lost.
+
+- [ ] **2.0 Owner refuses to onboard a device again after credential replacement**
+  (found 2026-10-26, swtpm interop). After TO2 without reuse the Owner stores
+  the replacement voucher with zero extensions; `to2_server_v200.go`
+  (`HelloDeviceProbe`) rejects `len(ov.Entries) == 0` and reports it as
+  `error retrieving voucher ...: %!w(<nil>)` (err is nil there). Decide the
+  intended flow (extend to an owner key first, or accept the Owner's own
+  zero-extension voucher) and fix the error message.
 
 ### Code Quality
 
@@ -235,18 +248,43 @@ Spec: `~/internet-of-things-specs/securing-fdo-in-tpm.bs`, branch
 below came from the go-tpm-tools reference simulator (scratch tests in
 `/tmp/tpmprobe`). Test changes against swtpm and real TPM hardware.
 
-- [ ] **noDA=1 on FDO keys.** Spec Table 11 now says `noDA = 1`; `tpm`
+- [x] **DONE 2026-10-24 (uncommitted): noDA=1 on FDO keys.** Spec Table 11 now says `noDA = 1`; `tpm`
   key templates (`CreateChildECKey`, `CreateChildHMACKey`,
   `GenerateSpec*`) leave NoDA unset, so a DA lockout caused by unrelated
   software makes the DAK/HMAC key unusable (`TPM_RC_LOCKOUT`).
-- [ ] **DCTPM `TPMA_NV_WRITE_STCLEAR=1`** (spec adopted it 2026-10-21 for
+- [x] **DONE 2026-10-26 (uncommitted; `TestDCTPMWriteLock`): DCTPM `TPMA_NV_WRITE_STCLEAR=1`** (spec adopted it 2026-10-21 for
   the optional per-boot write lock). `tpm/nv.go` `nvProfileAttrs(NVProfileDCTPM)`.
-- [ ] **DCTPM `PLATFORMCREATE`**: spec says SHOULD when Platform hierarchy
-  is available; `NVProfileDCTPM` never sets it.
-- [ ] **HMAC/DAK replacement order**: persist new key at a different
-  handle, single `NV_Write` of DCTPM, then evict old (spec HMAC section
-  "Commit order"). Check what the TO2 credential-update path does today.
-- [ ] **Implied `rvserver.local` uses the wrong scheme/port (bug).**
+- [x] **DCTPM `PLATFORMCREATE`** (no change; opt-in now works with in-place saves): already supported (`FDO_TPM_PLATFORM_HIERARCHY=1`
+  -> `DefineNVSpace` uses Platform auth + PlatformCreate, falls back to Owner
+  when Platform is locked). But it breaks the TO2 re-save: `Save` ignores the
+  `UndefineNVSpace` error (Owner auth cannot undefine a platform-created
+  index), then `DefineNVSpace` fails because the index exists. Fixed by the
+  in-place write below. (Found 2026-10-26.)
+- [x] **FIXED 2026-10-26 (uncommitted): DCTPM re-save was not atomic.** Now
+  `tpm.WriteDCTPM` (define once at 512, single in-place `NV_Write`, zero
+  padding; legacy exact-size index is grown with a logged warning) and
+  `tpm.DecodeDCTPM` (first CBOR item, trailing bytes ignored; used by
+  `cred` and `examples/cmd/tpm_common.go`). Tests `tpm/dctpm_test.go`
+  (in-place proven with NV_WriteLock; mutation-checked). Spec sentence added
+  to securing-fdo-in-tpm.bs (uncommitted). go-fdo-quick-di `inspect_tpm.go`
+  still uses strict `cbor.Unmarshal`: switch at the re-pin.
+  Original: **DCTPM re-save is not atomic (real gap, found 2026-10-26).** `cred/tpm_store.go`
+  `Save` (TO2 credential update) does `UndefineNVSpace` -> `DefineNVSpace`
+  (sized to the exact CBOR) -> `WriteNV`. Power loss between undefine and
+  write leaves no credentials at all. Fix: define DCTPM once at DI with spare
+  room (spec: min 384, 512 RECOMMENDED), then every save is a single
+  `NV_Write` in place (CBOR has its own length; pad the rest) and must fit
+  `TPM_PT_NV_BUFFER_MAX`. TO2 keeps the same HMAC key (only the HMAC value
+  over the new header changes), so the spec's key-handle swap order only
+  matters if key rotation is added later.
+- [ ] **HMAC-SHA384 is not the persisted key.** `tpm_store` uses
+  `tpm.NewHmac(SHA384)` (a primary re-derived from a fixed template each
+  time) for the 384 HMAC, not a persisted HMAC key recorded in DCTPM. Only
+  matters for SHA-384 vouchers. (Found 2026-10-26.)
+- [x] **FIXED 2026-10-26 (uncommitted): implied fallback is now https://rvserver.local:443.**
+  Note: `protocol.parseURLs` defaults to scheme `tls` with no port when
+  RVProtocol is absent; the spec default is HTTPS/443 (not changed).
+  Original: **Implied `rvserver.local` uses the wrong scheme/port (bug).**
   `examples/cmd/client.go` (`transferOwnership`) appends
   `http://rvserver.local:8080` when DCRVInfo has no `rvserver.local`
   directive. Port 8080 is only what go-fdo's own test setup uses; it is
@@ -256,11 +294,20 @@ below came from the go-tpm-tools reference simulator (scratch tests in
   is implementation-defined (TPM spec, DCRVInfo note in Table 1). Fix the
   client, and make the
   tests that rely on 8080 put an explicit directive in RVInfo instead.
-- [ ] **`tpm/spec_compliance_test.go`** still tests the old multi-index /
-  unique-string design (Profiles A/B/C, `*_US_Index`); rewrite against
-  the single-DCTPM spec.
-- [ ] **Device key authPolicy = `PolicyCommandCode(TPM_CC_Certify)`**
-  (spec Table 10/12, adopted 2026-10-23, SHOULD). DAK templates
+- [x] **DONE 2026-10-26 (uncommitted): `tpm/spec_compliance_test.go` rewritten** against
+  the single-DCTPM spec, driving the library functions the store uses
+  (Constants, DCTPM_Index, Keys for child/primary x P-256/P-384, Lifecycle);
+  store-level `TestTPMStore_SaveInPlace` (mutation-checked); docs updated
+  (AGENTS.md, tpm/TPM_COMPLIANCE_TESTING.md). Not yet run on hardware.
+- [x] **FIXED 2026-10-26 (uncommitted): `tpm.ProveDAKPossession` failed for P-384
+  DAKs** (always signed a SHA-256 digest -> TPM_RC_SIZE). Digest now follows
+  the curve; `DAKProof.Challenge` is `[]byte` (callers use `[:]`, unchanged).
+- [x] **DONE 2026-10-24 (uncommitted): Device key authPolicy = `PolicyCommandCode(TPM_CC_Certify)`**
+  (spec Table 10/12, adopted 2026-10-23, SHOULD). `tpm.DeviceKeyAuthPolicy`;
+  test `tpm/device_key_policy_test.go` (simulator: Certify via policy OK,
+  ObjectChangeAuth refused, empty-password Sign OK; mutation-checked);
+  spec_compliance_test helpers updated. Not yet run: `test_tpm_examples.sh`
+  (needs swtpm on devvm), hardware TPM. DAK templates
   (`CreateChildECKey`, `GenerateSpec*`) set an empty authPolicy; set the
   digest for the key's nameAlg (SHA256 `048e9a3a…65850`, SHA384
   `a7108d53…1019a`). The HMAC key stays empty. Signing must still work

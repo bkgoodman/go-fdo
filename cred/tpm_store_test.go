@@ -25,7 +25,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-tpm/tpm2"
+
 	"github.com/fido-device-onboard/go-fdo"
+	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 	"github.com/fido-device-onboard/go-fdo/tpm"
 )
@@ -464,4 +467,100 @@ func TestTPMStore_ClearAndReprovision(t *testing.T) {
 	}
 
 	t.Log("=== PASSED: Clear + Reprovision (--tpm-clear → fresh DI) ===")
+}
+
+// TestTPMStore_SaveInPlace checks the TO2 credential update path against the
+// FDO TPM spec: DCTPM is defined once (512 bytes) and later saves write it in
+// place with a single NV_Write; a save that fails leaves the previous
+// credentials loadable; a DCTPM with the wrong magic is not loaded.
+func TestTPMStore_SaveInPlace(t *testing.T) {
+	t.Setenv("FDO_TPM_OWNER_HIERARCHY", "1")
+	store, err := Open(filepath.Join(t.TempDir(), "cred.bin"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ts := store.(*tpmStore)
+
+	if _, _, _, err := store.NewDI(protocol.Secp256r1KeyType); err != nil {
+		t.Fatalf("NewDI: %v", err)
+	}
+	dctpmSize := func() uint16 {
+		t.Helper()
+		info, err := tpm.ReadNVCredentials(ts.tpmc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.DCTPMSize
+	}
+	cred := func(guid byte, rv int) fdo.DeviceCredential {
+		dc := fdo.DeviceCredential{
+			Version: 200, DeviceInfo: "in-place", GUID: protocol.GUID{guid},
+			PublicKeyHash: protocol.Hash{Algorithm: protocol.Sha256Hash, Value: make([]byte, 32)},
+		}
+		for range rv {
+			dc.RvInfo = append(dc.RvInfo, []protocol.RvInstruction{{Variable: protocol.RVDns, Value: []byte{0x6d, 'r', 'v', '.', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'}}})
+		}
+		return dc
+	}
+	loadGUID := func() protocol.GUID {
+		t.Helper()
+		dc, _, _, _, err := store.Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return dc.GUID
+	}
+
+	if err := store.Save(cred(1, 0)); err != nil {
+		t.Fatalf("Save(DI): %v", err)
+	}
+	if got := dctpmSize(); got != tpm.DCTPMDefaultSize {
+		t.Fatalf("DCTPM size after DI = %d, want %d", got, tpm.DCTPMDefaultSize)
+	}
+
+	// TO2 update with a longer RVInfo: same index, new contents.
+	if err := store.Save(cred(2, 3)); err != nil {
+		t.Fatalf("Save(TO2): %v", err)
+	}
+	if got := dctpmSize(); got != tpm.DCTPMDefaultSize {
+		t.Fatalf("DCTPM size after TO2 = %d, want %d (index must not be redefined)", got, tpm.DCTPMDefaultSize)
+	}
+	if g := loadGUID(); g != (protocol.GUID{2}) {
+		t.Fatalf("after TO2 update loaded GUID %x", g)
+	}
+
+	// A failed update (here: DCTPM write-locked) leaves the old credentials.
+	rp, err := tpm2.NVReadPublic{NVIndex: tpm2.TPMHandle(tpm.DCTPMIndex)}.Execute(ts.tpmc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (tpm2.NVWriteLock{
+		AuthHandle: tpm2.AuthHandle{Handle: tpm2.TPMHandle(tpm.DCTPMIndex), Name: rp.NVName, Auth: tpm2.PasswordAuth(nil)},
+		NVIndex:    tpm2.NamedHandle{Handle: tpm2.TPMHandle(tpm.DCTPMIndex), Name: rp.NVName},
+	}).Execute(ts.tpmc); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(cred(3, 1)); err == nil {
+		t.Fatal("Save succeeded on a write-locked DCTPM")
+	}
+	if g := loadGUID(); g != (protocol.GUID{2}) {
+		t.Fatalf("failed update changed the credentials: loaded GUID %x", g)
+	}
+
+	// Wrong magic: readers SHALL treat it as no credentials.
+	// (Undefining also clears the write lock; the keys stay.)
+	if err := tpm.UndefineNVSpace(ts.tpmc, tpm.DCTPMIndex); err != nil {
+		t.Fatal(err)
+	}
+	bad, err := cbor.Marshal(dctpmNVData{Magic: 0x12345678, Active: true, DeviceKeyHandle: tpm.DAKHandle, HMACKeyHandle: tpm.HMACKeyHandle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tpm.WriteDCTPM(ts.tpmc, bad, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := store.Load(); err == nil {
+		t.Fatal("Load accepted a DCTPM with the wrong magic")
+	}
 }
