@@ -299,6 +299,13 @@ below came from the go-tpm-tools reference simulator (scratch tests in
   (Constants, DCTPM_Index, Keys for child/primary x P-256/P-384, Lifecycle);
   store-level `TestTPMStore_SaveInPlace` (mutation-checked); docs updated
   (AGENTS.md, tpm/TPM_COMPLIANCE_TESTING.md). Not yet run on hardware.
+- [x] **FIXED 2026-10-27: DCTPM DeviceKeyType held the protocol key type (10 =
+  secp256r1); the spec says 0 = DAK (1 IDevID, 2 LDevID).** Found by running
+  `client -tpm-check` on fdo-uefi-rs's DI output (which writes 0). Load never
+  used the field (the DAK's public area gives the curve). fido-device-onboard-rs
+  has the same deviation (its TODO).
+- [ ] Phase 9 tests (`tpm/phase9_integration_test.go`, tag `spec_compliance_test`)
+  have pre-existing errcheck/gosec findings; `make lint` does not build that tag.
 - [x] **FIXED 2026-10-26 (uncommitted): `tpm.ProveDAKPossession` failed for P-384
   DAKs** (always signed a SHA-256 digest -> TPM_RC_SIZE). Digest now follows
   the curve; `DAKProof.Challenge` is `[]byte` (callers use `[:]`, unchanged).

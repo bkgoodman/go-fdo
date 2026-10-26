@@ -13,6 +13,14 @@ import (
 	"github.com/fido-device-onboard/go-fdo/cbor"
 )
 
+// DCTPM.DeviceKeyType values (FDO TPM spec): which key DeviceKeyHandle
+// references. go-fdo always provisions a DAK.
+const (
+	DeviceKeyTypeDAK    = 0 // purpose-built Device Attestation Key
+	DeviceKeyTypeIDevID = 1 // TCG IDevID
+	DeviceKeyTypeLDevID = 2 // TCG LDevID
+)
+
 // DCTPMDefaultSize is the size the DCTPM index is defined with when it is
 // first created (FDO TPM spec, DCTPM sizing: minimum 384 bytes, 512
 // RECOMMENDED). Later updates are written in place, so the index must leave

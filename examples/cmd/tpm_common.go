@@ -72,7 +72,7 @@ func tpmShowCredentials() error {
 			fmt.Printf("    Version           %d\n", dctpm.Version)
 			fmt.Printf("    DeviceInfo        %q\n", dctpm.DeviceInfo)
 			fmt.Printf("    GUID              %s\n", dctpm.GUID)
-			fmt.Printf("    KeyType           %s\n", dctpm.KeyType)
+			fmt.Printf("    DeviceKeyType     %d (%s)\n", dctpm.DeviceKeyType, deviceKeyTypeName(dctpm.DeviceKeyType))
 			fmt.Printf("    DeviceKeyHandle   0x%08X\n", dctpm.DeviceKeyHandle)
 			fmt.Printf("    HMACKeyHandle     0x%08X\n", dctpm.HMACKeyHandle)
 			fmt.Printf("    PublicKeyHash     alg=%d value=%s\n", dctpm.PublicKeyHash.Algorithm, hex.EncodeToString(dctpm.PublicKeyHash.Value))
@@ -218,7 +218,21 @@ type dctpmDisplay struct {
 	GUID            protocol.GUID              `cbor:"4,keyasint"`
 	RvInfo          [][]protocol.RvInstruction `cbor:"5,keyasint"`
 	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
-	KeyType         protocol.KeyType           `cbor:"7,keyasint"`
+	DeviceKeyType   uint8                      `cbor:"7,keyasint"`
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
 	HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+}
+
+// deviceKeyTypeName names a DCTPM.DeviceKeyType value (FDO TPM spec).
+func deviceKeyTypeName(t uint8) string {
+	switch t {
+	case tpm.DeviceKeyTypeDAK:
+		return "DAK"
+	case tpm.DeviceKeyTypeIDevID:
+		return "IDevID"
+	case tpm.DeviceKeyTypeLDevID:
+		return "LDevID"
+	default:
+		return "invalid"
+	}
 }

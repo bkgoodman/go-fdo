@@ -72,6 +72,8 @@ func tpmCheckSpec() error {
 		check(false, "DCTPM decodes as one CBOR item: %v", err)
 	} else {
 		check(dctpm.Magic == tpm.DCTPMMagic, "DCTPM magic 0x%08X", dctpm.Magic)
+		check(dctpm.DeviceKeyType <= tpm.DeviceKeyTypeLDevID, "DCTPM DeviceKeyType %d (%s; 0 = DAK, 1 = IDevID, 2 = LDevID)",
+			dctpm.DeviceKeyType, deviceKeyTypeName(dctpm.DeviceKeyType))
 		if dctpm.DeviceKeyHandle != 0 {
 			dakHandle = dctpm.DeviceKeyHandle
 		}

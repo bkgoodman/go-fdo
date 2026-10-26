@@ -93,13 +93,13 @@ func openTPM(t *testing.T) transport.TPMCloser {
 
 	dev, err := linuxtpm.Open("/dev/tpmrm0")
 	if err == nil {
-		t.Cleanup(func() { dev.Close() })
+		t.Cleanup(func() { _ = dev.Close() })
 		t.Log("TPM backend: /dev/tpmrm0")
 		return dev
 	}
 	dev, err2 := linuxtpm.Open("/dev/tpm0")
 	if err2 == nil {
-		t.Cleanup(func() { dev.Close() })
+		t.Cleanup(func() { _ = dev.Close() })
 		t.Log("TPM backend: /dev/tpm0")
 		return dev
 	}
@@ -131,7 +131,7 @@ type specDCTPM struct {
 	GUID            protocol.GUID              `cbor:"4,keyasint"`
 	RvInfo          [][]protocol.RvInstruction `cbor:"5,keyasint"`
 	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
-	KeyType         protocol.KeyType           `cbor:"7,keyasint"`
+	DeviceKeyType   uint8                      `cbor:"7,keyasint"`
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
 	HMACKeyHandle   uint32                     `cbor:"9,keyasint,omitempty"`
 }
@@ -598,7 +598,7 @@ func testLifecycle(t *testing.T) {
 		GUID:            protocol.GUID{0xa1, 0xb2, 0xc3, 0xd4},
 		RvInfo:          mustRvInfo(t, "rvserver.local"),
 		PublicKeyHash:   protocol.Hash{Algorithm: protocol.Sha384Hash, Value: pkh[:]},
-		KeyType:         kc.keyType,
+		DeviceKeyType:   tpmlib.DeviceKeyTypeDAK,
 		DeviceKeyHandle: tpmlib.DAKHandle,
 		HMACKeyHandle:   tpmlib.HMACKeyHandle,
 	}
@@ -633,7 +633,8 @@ func testLifecycle(t *testing.T) {
 
 	write(di)
 	got := load()
-	if got.GUID != di.GUID || got.DeviceKeyHandle != tpmlib.DAKHandle || got.HMACKeyHandle != tpmlib.HMACKeyHandle {
+	if got.GUID != di.GUID || got.DeviceKeyType != tpmlib.DeviceKeyTypeDAK ||
+		got.DeviceKeyHandle != tpmlib.DAKHandle || got.HMACKeyHandle != tpmlib.HMACKeyHandle {
 		t.Fatalf("DI round trip: %+v", got)
 	}
 	readPub, err := tpmlib.ReadDAKPublicKey(thetpm)

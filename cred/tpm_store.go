@@ -35,7 +35,7 @@ type dctpmNVData struct {
 	GUID            protocol.GUID              `cbor:"4,keyasint"`
 	RvInfo          [][]protocol.RvInstruction `cbor:"5,keyasint"`
 	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
-	KeyType         protocol.KeyType           `cbor:"7,keyasint"`
+	DeviceKeyType   uint8                      `cbor:"7,keyasint"` // 0 = DAK (spec); not the protocol key type
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
 	HMACKeyHandle   uint32                     `cbor:"9,keyasint,omitempty"`
 }
@@ -210,7 +210,7 @@ func (s *tpmStore) Save(dc fdo.DeviceCredential) error {
 		GUID:            dc.GUID,
 		RvInfo:          dc.RvInfo,
 		PublicKeyHash:   dc.PublicKeyHash,
-		KeyType:         s.keyType,
+		DeviceKeyType:   tpm.DeviceKeyTypeDAK,
 		DeviceKeyHandle: s.dakHandle,
 		HMACKeyHandle:   s.hmacHandle,
 	}
@@ -305,7 +305,6 @@ func (s *tpmStore) loadFromNV() (*fdo.DeviceCredential, error) {
 		return nil, fmt.Errorf("device not active (DCActive == false)")
 	}
 
-	s.keyType = dctpm.KeyType
 
 	// Resolve DAK handle: use stored value if present, else default
 	if dctpm.DeviceKeyHandle != 0 {
@@ -342,7 +341,7 @@ func (s *tpmStore) loadFromNV() (*fdo.DeviceCredential, error) {
 	slog.Debug("tpm: loaded credentials from consolidated DCTPM NV",
 		"guid", fmt.Sprintf("%x", dc.GUID),
 		"version", dc.Version,
-		"keyType", s.keyType,
+		"deviceKeyType", dctpm.DeviceKeyType,
 		"dakHandle", fmt.Sprintf("0x%08X", s.dakHandle),
 		"hmacHandle", fmt.Sprintf("0x%08X", s.hmacHandle),
 	)
