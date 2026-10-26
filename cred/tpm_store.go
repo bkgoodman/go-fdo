@@ -239,9 +239,9 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 
 // Save persists all credential data to the single consolidated DCTPM NV index.
 //
-// Per the spec, DCTPM is a CBOR array:
-//   [Magic, Active, Version, DeviceInfo, GUID, RvInfo, PubKeyHash,
-//    KeyType, DeviceKeyHandle, HMACKeyHandle, DCMinFirmwareRev]
+// Per the spec, DCTPM is a CBOR array: [Magic, Active, Version, DeviceInfo,
+// GUID, RvInfo, PubKeyHash, DeviceKeyType, DeviceKeyHandle, HMACKeyHandle,
+// DCMinFirmwareRev].
 //
 // DCMinFirmwareRev is seeded from RVMinFirmwareRev when no DCTPM exists yet
 // (DI) and otherwise preserved, never decreased (TO2 replaces RvInfo).
