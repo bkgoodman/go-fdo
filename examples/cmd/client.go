@@ -83,6 +83,7 @@ var (
 	tpmProveDak  bool   // Prove DAK possession by signing a challenge
 	tpmChallenge string // Optional challenge for -tpm-prove (hashed with SHA-256)
 	tpmClear     bool   // Clear all FDO credentials from TPM
+	tpmCheck     bool   // Check the FDO state in the TPM against the TPM spec
 )
 
 func sanitizeLogValue(s string) string {
@@ -206,6 +207,7 @@ func init() {
 	clientFlags.BoolVar(&tpmProveDak, "tpm-prove", false, "Prove DAK possession by signing a challenge")
 	clientFlags.StringVar(&tpmChallenge, "tpm-challenge", "", "Optional challenge `string` for -tpm-prove (hashed with SHA-256; random if empty)")
 	clientFlags.BoolVar(&tpmClear, "tpm-clear", false, "Clear all FDO credentials from TPM (NV indices + persistent keys)")
+	clientFlags.BoolVar(&tpmCheck, "tpm-check", false, "Check the FDO state in the TPM (any implementation's) against the FDO TPM spec; exit non-zero on failure")
 }
 
 func client(ctx context.Context) error {
@@ -215,8 +217,10 @@ func client(ctx context.Context) error {
 
 	// Handle TPM credential inspection operations (no -tpm flag needed;
 	// tpmOpen falls back to tpm.DefaultOpen which is build-tag-selected).
-	if tpmShow || tpmExportDak || tpmProveDak || tpmClear {
+	if tpmShow || tpmExportDak || tpmProveDak || tpmClear || tpmCheck {
 		switch {
+		case tpmCheck:
+			return tpmCheckSpec()
 		case tpmClear:
 			return tpmClearCredentials()
 		case tpmShow:
@@ -372,7 +376,10 @@ func transferOwnership(ctx context.Context, rvInfo [][]protocol.RvInstruction, c
 	directives := protocol.ParseDeviceRvInfo(rvInfo)
 
 	// FDO 2.0: rvserver.local is an implied fallback directive even if omitted
-	// from DCRVInfo. Append it only if no directive already references it.
+	// from DCRVInfo (TPM spec, DCRVInfo note; position is implementation
+	// defined). Append it only if no directive already references it. The
+	// implied directive is [RVDns "rvserver.local"] with the RendezvousInfo
+	// defaults: HTTPS on port 443 (base spec, "Recommended RendezvousInfo").
 	hasRVServerLocal := false
 	for _, dir := range directives {
 		for _, u := range dir.URLs {
@@ -388,7 +395,7 @@ func transferOwnership(ctx context.Context, rvInfo [][]protocol.RvInstruction, c
 	if !hasRVServerLocal {
 		localDirective := protocol.RvDirective{
 			URLs: []*url.URL{
-				{Scheme: "http", Host: net.JoinHostPort("rvserver.local", "8080")},
+				{Scheme: "https", Host: net.JoinHostPort("rvserver.local", "443")},
 			},
 		}
 		directives = append(directives, localDirective)

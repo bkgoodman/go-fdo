@@ -19,3 +19,6 @@ func tpmExportDAK() error {
 func tpmProveDAK() error {
 	return fmt.Errorf("TPM support not compiled (build with -tags=tpm or -tags=tpmsim)")
 }
+func tpmCheckSpec() error {
+	return fmt.Errorf("TPM support not compiled (build with -tags=tpm or -tags=tpmsim)")
+}

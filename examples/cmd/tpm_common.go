@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 	"github.com/fido-device-onboard/go-fdo/tpm"
 )
@@ -59,7 +58,7 @@ func tpmShowCredentials() error {
 		fmt.Printf("  DCTPM (0x%08X)      [%d bytes]\n", tpm.DCTPMIndex, info.DCTPMSize)
 
 		var dctpm dctpmDisplay
-		if err := cbor.Unmarshal(info.RawDCTPM, &dctpm); err != nil {
+		if err := tpm.DecodeDCTPM(info.RawDCTPM, &dctpm); err != nil {
 			fmt.Printf("    (decode error: %v)\n", err)
 		} else {
 			fmt.Printf("    Magic             0x%08X", dctpm.Magic)
@@ -72,7 +71,7 @@ func tpmShowCredentials() error {
 			fmt.Printf("    Active            %v\n", dctpm.Active)
 			fmt.Printf("    Version           %d\n", dctpm.Version)
 			fmt.Printf("    DeviceInfo        %q\n", dctpm.DeviceInfo)
-			fmt.Printf("    GUID              %x\n", dctpm.GUID)
+			fmt.Printf("    GUID              %s\n", dctpm.GUID)
 			fmt.Printf("    KeyType           %s\n", dctpm.KeyType)
 			fmt.Printf("    DeviceKeyHandle   0x%08X\n", dctpm.DeviceKeyHandle)
 			fmt.Printf("    HMACKeyHandle     0x%08X\n", dctpm.HMACKeyHandle)
