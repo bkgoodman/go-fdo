@@ -75,6 +75,7 @@ func tpmShowCredentials() error {
 			fmt.Printf("    DeviceKeyType     %d (%s)\n", dctpm.DeviceKeyType, deviceKeyTypeName(dctpm.DeviceKeyType))
 			fmt.Printf("    DeviceKeyHandle   0x%08X\n", dctpm.DeviceKeyHandle)
 			fmt.Printf("    HMACKeyHandle     0x%08X\n", dctpm.HMACKeyHandle)
+			fmt.Printf("    MinFirmwareRev    %d (0 = no minimum)\n", dctpm.MinFirmwareRev)
 			fmt.Printf("    PublicKeyHash     alg=%d value=%s\n", dctpm.PublicKeyHash.Algorithm, hex.EncodeToString(dctpm.PublicKeyHash.Value))
 			if len(dctpm.RvInfo) == 0 {
 				fmt.Println("    RvInfo            (none)")
@@ -221,6 +222,7 @@ type dctpmDisplay struct {
 	DeviceKeyType   uint8                      `cbor:"7,keyasint"`
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
 	HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+	MinFirmwareRev  uint64                     `cbor:"10,keyasint,omitempty"` // absent in older ten-item DCTPMs
 }
 
 // deviceKeyTypeName names a DCTPM.DeviceKeyType value (FDO TPM spec).

@@ -564,3 +564,109 @@ func TestTPMStore_SaveInPlace(t *testing.T) {
 		t.Fatal("Load accepted a DCTPM with the wrong magic")
 	}
 }
+
+// TestTPMStore_MinFirmwareRev checks DCTPM.DCMinFirmwareRev (TPM spec): all
+// eleven items are written; the value is seeded at DI from RVMinFirmwareRev,
+// preserved when TO2 replaces RvInfo, never decreased, and a ten-item DCTPM
+// written by older code loads (as 0).
+func TestTPMStore_MinFirmwareRev(t *testing.T) {
+	t.Setenv("FDO_TPM_OWNER_HIERARCHY", "1")
+	store, err := Open(filepath.Join(t.TempDir(), "cred.bin"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ts := store.(*tpmStore)
+	if _, _, _, err := store.NewDI(protocol.Secp256r1KeyType); err != nil {
+		t.Fatalf("NewDI: %v", err)
+	}
+
+	rv := func(minRev uint64) [][]protocol.RvInstruction {
+		dns, _ := cbor.Marshal("rv.example.com")
+		dir := []protocol.RvInstruction{{Variable: protocol.RVDns, Value: dns}}
+		if minRev > 0 {
+			v, _ := cbor.Marshal(minRev)
+			dir = append(dir, protocol.RvInstruction{Variable: protocol.RVMinFirmwareRev, Value: v})
+		}
+		return [][]protocol.RvInstruction{dir}
+	}
+	cred := func(guid byte, minRev uint64) fdo.DeviceCredential {
+		return fdo.DeviceCredential{Version: 200, DeviceInfo: "minrev", GUID: protocol.GUID{guid}, RvInfo: rv(minRev),
+			PublicKeyHash: protocol.Hash{Algorithm: protocol.Sha256Hash, Value: make([]byte, 32)}}
+	}
+	stored := func() (items int, minRev uint64) {
+		t.Helper()
+		info, err := tpm.ReadNVCredentials(ts.tpmc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw []cbor.RawBytes
+		if err := tpm.DecodeDCTPM(info.RawDCTPM, &raw); err != nil {
+			t.Fatal(err)
+		}
+		var d dctpmNVRead
+		if err := tpm.DecodeDCTPM(info.RawDCTPM, &d); err != nil {
+			t.Fatal(err)
+		}
+		return len(raw), d.MinFirmwareRev
+	}
+
+	if err := store.Save(cred(1, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if n, v := stored(); n != 11 || v != 7 {
+		t.Fatalf("after DI: %d items, DCMinFirmwareRev %d; want 11, 7 (seeded from RVMinFirmwareRev)", n, v)
+	}
+
+	// TO2 replaces RvInfo (no tag 18): the stored minimum is preserved.
+	if err := store.Save(cred(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, v := stored(); v != 7 {
+		t.Fatalf("after TO2 without tag 18: DCMinFirmwareRev %d, want 7 (preserved)", v)
+	}
+
+	// Device ratchets to 9; a later save with a lower tag 18 must not lower it.
+	info, _ := tpm.ReadNVCredentials(ts.tpmc)
+	var d dctpmNVRead
+	if err := tpm.DecodeDCTPM(info.RawDCTPM, &d); err != nil {
+		t.Fatal(err)
+	}
+	d.MinFirmwareRev = 9
+	raised, _ := cbor.Marshal(dctpmNVData(d))
+	if err := tpm.WriteDCTPM(ts.tpmc, raised, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(cred(3, 3)); err != nil {
+		t.Fatal(err)
+	}
+	if _, v := stored(); v != 9 {
+		t.Fatalf("after ratchet to 9 and save with tag 18 = 3: DCMinFirmwareRev %d, want 9", v)
+	}
+
+	// Ten-item DCTPM from older code: loads, and reads as 0.
+	type tenItems struct {
+		Magic           uint32                     `cbor:"0,keyasint"`
+		Active          bool                       `cbor:"1,keyasint"`
+		Version         uint16                     `cbor:"2,keyasint"`
+		DeviceInfo      string                     `cbor:"3,keyasint"`
+		GUID            protocol.GUID              `cbor:"4,keyasint"`
+		RvInfo          [][]protocol.RvInstruction `cbor:"5,keyasint"`
+		PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
+		DeviceKeyType   uint8                      `cbor:"7,keyasint"`
+		DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
+		HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+	}
+	old, _ := cbor.Marshal(tenItems{Magic: tpm.DCTPMMagic, Active: true, Version: 200, GUID: protocol.GUID{4},
+		PublicKeyHash:   protocol.Hash{Algorithm: protocol.Sha256Hash, Value: make([]byte, 32)},
+		DeviceKeyHandle: tpm.DAKHandle, HMACKeyHandle: tpm.HMACKeyHandle})
+	if err := tpm.WriteDCTPM(ts.tpmc, old, false); err != nil {
+		t.Fatal(err)
+	}
+	if n, v := stored(); n != 10 || v != 0 {
+		t.Fatalf("ten-item DCTPM: %d items, DCMinFirmwareRev %d", n, v)
+	}
+	if dc, _, _, _, err := store.Load(); err != nil || dc.GUID != (protocol.GUID{4}) {
+		t.Fatalf("Load of ten-item DCTPM: %v", err)
+	}
+}

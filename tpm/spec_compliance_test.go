@@ -133,7 +133,8 @@ type specDCTPM struct {
 	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
 	DeviceKeyType   uint8                      `cbor:"7,keyasint"`
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
-	HMACKeyHandle   uint32                     `cbor:"9,keyasint,omitempty"`
+	HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+	MinFirmwareRev  uint64                     `cbor:"10,keyasint"`
 }
 
 func mustRvInfo(t *testing.T, host string) [][]protocol.RvInstruction {

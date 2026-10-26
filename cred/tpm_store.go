@@ -23,7 +23,8 @@ import (
 
 // dctpmNVData is the consolidated CBOR structure stored in the single DCTPM NV index.
 // Per the spec CDDL: DCTPM = [DCTPMMagic, DCActive, DCProtVer, DCDeviceInfo,
-//   DCGuid, DCRVInfo, DCPubKeyHash, DeviceKeyType, DeviceKeyHandle, HMACKeyHandle]
+// DCGuid, DCRVInfo, DCPubKeyHash, DeviceKeyType, DeviceKeyHandle, HMACKeyHandle,
+// DCMinFirmwareRev].
 //
 // The Go CBOR library encodes structs as CBOR arrays (not maps), with field
 // ordering determined by the keyasint tags. This matches the spec's array encoding.
@@ -37,7 +38,49 @@ type dctpmNVData struct {
 	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
 	DeviceKeyType   uint8                      `cbor:"7,keyasint"` // 0 = DAK (spec); not the protocol key type
 	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
-	HMACKeyHandle   uint32                     `cbor:"9,keyasint,omitempty"`
+	HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+	MinFirmwareRev  uint64                     `cbor:"10,keyasint"` // DCMinFirmwareRev; 0 = no minimum
+}
+
+// dctpmNVRead is dctpmNVData for decoding: DCMinFirmwareRev may be absent
+// (an older ten-item DCTPM), which the spec says to read as 0. Writers always
+// write all eleven items.
+type dctpmNVRead struct {
+	Magic           uint32                     `cbor:"0,keyasint"`
+	Active          bool                       `cbor:"1,keyasint"`
+	Version         uint16                     `cbor:"2,keyasint"`
+	DeviceInfo      string                     `cbor:"3,keyasint"`
+	GUID            protocol.GUID              `cbor:"4,keyasint"`
+	RvInfo          [][]protocol.RvInstruction `cbor:"5,keyasint"`
+	PublicKeyHash   protocol.Hash              `cbor:"6,keyasint"`
+	DeviceKeyType   uint8                      `cbor:"7,keyasint"`
+	DeviceKeyHandle uint32                     `cbor:"8,keyasint"`
+	HMACKeyHandle   uint32                     `cbor:"9,keyasint"`
+	MinFirmwareRev  uint64                     `cbor:"10,keyasint,omitempty"`
+}
+
+// rvMinFirmwareRev returns the highest RVMinFirmwareRev (RV tag 18) in the
+// device RendezvousInfo, or 0.
+func rvMinFirmwareRev(rvInfo [][]protocol.RvInstruction) uint64 {
+	var rev uint64
+	for _, d := range protocol.ParseDeviceRvInfo(rvInfo) {
+		rev = max(rev, d.MinFirmwareRev)
+	}
+	return rev
+}
+
+// storedMinFirmwareRev returns DCMinFirmwareRev from the DCTPM currently in
+// the TPM, and whether a valid DCTPM was found.
+func (s *tpmStore) storedMinFirmwareRev() (uint64, bool) {
+	info, err := tpm.ReadNVCredentials(s.tpmc)
+	if err != nil || !info.HasDCTPM {
+		return 0, false
+	}
+	var cur dctpmNVRead
+	if err := tpm.DecodeDCTPM(info.RawDCTPM, &cur); err != nil || cur.Magic != tpm.DCTPMMagic {
+		return 0, false
+	}
+	return cur.MinFirmwareRev, true
 }
 
 type tpmStore struct {
@@ -198,7 +241,10 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 //
 // Per the spec, DCTPM is a CBOR array:
 //   [Magic, Active, Version, DeviceInfo, GUID, RvInfo, PubKeyHash,
-//    KeyType, DeviceKeyHandle, HMACKeyHandle]
+//    KeyType, DeviceKeyHandle, HMACKeyHandle, DCMinFirmwareRev]
+//
+// DCMinFirmwareRev is seeded from RVMinFirmwareRev when no DCTPM exists yet
+// (DI) and otherwise preserved, never decreased (TO2 replaces RvInfo).
 //
 // No separate DCActive or DCOV indices are written.
 func (s *tpmStore) Save(dc fdo.DeviceCredential) error {
@@ -213,6 +259,11 @@ func (s *tpmStore) Save(dc fdo.DeviceCredential) error {
 		DeviceKeyType:   tpm.DeviceKeyTypeDAK,
 		DeviceKeyHandle: s.dakHandle,
 		HMACKeyHandle:   s.hmacHandle,
+	}
+	if cur, ok := s.storedMinFirmwareRev(); ok {
+		dctpm.MinFirmwareRev = cur
+	} else {
+		dctpm.MinFirmwareRev = rvMinFirmwareRev(dc.RvInfo)
 	}
 	// Default handles if not yet set (e.g. loaded from old-format TPM)
 	if dctpm.DeviceKeyHandle == 0 {
@@ -290,7 +341,7 @@ func (s *tpmStore) loadFromNV() (*fdo.DeviceCredential, error) {
 	}
 
 	// Decode consolidated DCTPM CBOR structure
-	var dctpm dctpmNVData
+	var dctpm dctpmNVRead
 	if err := tpm.DecodeDCTPM(info.RawDCTPM, &dctpm); err != nil {
 		return nil, fmt.Errorf("decoding DCTPM NV: %w", err)
 	}
