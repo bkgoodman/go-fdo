@@ -37,6 +37,14 @@
     included in it.
   - Background: "Protocol Defects" below (the FIXED 2026-10-20 entry).
 
+- [ ] **P1: upstream the FDO 2.0 ECDH ShSe fix (9060b9b) with or right after
+  #285.** #285 (checked 2026-10-27: no `fdo20-split/*` or `fdo20-core`
+  branch has it) still builds `Shx || xB.Rand || xA.Rand`, so spec-conformant
+  2.0 devices (fixed fdo-uefi-rs, fido-device-onboard-rs) fail at msg 86
+  against an upstream server. Port `kex.SetDeviceSentA` + `kex/ecdh_kat_test.go`
+  and the two `to2_*_v200.go` call sites; fold into #285 on the next rebuild,
+  otherwise a follow-up PR. Workstream `fdo20-core-split` (Open).
+
 ### Documentation
 
 - [✅] Create comprehensive CLI commands documentation (`CLI_COMMANDS.md`)
