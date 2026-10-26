@@ -356,7 +356,6 @@ func (s *tpmStore) loadFromNV() (*fdo.DeviceCredential, error) {
 		return nil, fmt.Errorf("device not active (DCActive == false)")
 	}
 
-
 	// Resolve DAK handle: use stored value if present, else default
 	if dctpm.DeviceKeyHandle != 0 {
 		s.dakHandle = dctpm.DeviceKeyHandle
