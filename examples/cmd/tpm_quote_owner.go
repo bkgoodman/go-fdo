@@ -55,7 +55,8 @@ type tpmQuoteCredential struct {
 }
 
 type tpmQuoteOwner struct {
-	roots     *x509.CertPool // TPM vendor CAs; nil = voucher EK only
+	roots     *x509.CertPool // TPM vendor root CAs; nil = voucher EK only
+	interDER  []byte         // TPM vendor intermediate CAs from the CA file (concatenated DER)
 	pcrs      []uint
 	voucherEK []byte // PT_TPM_EK_CERT from the voucher, if any
 
@@ -83,11 +84,17 @@ func newTPMQuoteOwner(caFile string, pcrs []uint, voucherEK []byte) (*tpmQuoteOw
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", caFile, err)
 		}
-		o.roots.AddCert(c)
-		n++
+		// Self-signed certificates are trust anchors; the others are
+		// intermediates (e.g. Intel ODCA issuing CAs not stored in the TPM).
+		if bytes.Equal(c.RawSubject, c.RawIssuer) && c.CheckSignatureFrom(c) == nil {
+			o.roots.AddCert(c)
+			n++
+		} else {
+			o.interDER = append(o.interDER, c.Raw...)
+		}
 	}
 	if n == 0 {
-		return nil, fmt.Errorf("%s: no certificates", caFile)
+		return nil, fmt.Errorf("%s: no self-signed root certificate", caFile)
 	}
 	return o, nil
 }
@@ -179,7 +186,7 @@ func (o *tpmQuoteOwner) ProduceInfo(ctx context.Context, producer *serviceinfo.P
 
 // ekAnchor picks the EK to trust: the manufacturer's record in the voucher
 // first, else the device's EK certificate if it chains to a trusted TPM CA.
-func (o *tpmQuoteOwner) ekAnchor(deviceEKCert []byte) (*rsa.PublicKey, error) {
+func (o *tpmQuoteOwner) ekAnchor(deviceEKCert, deviceEKChain []byte) (*rsa.PublicKey, error) {
 	if o.voucherEK != nil {
 		c, k, err := tpm.ParseEKCert(o.voucherEK)
 		if err != nil {
@@ -197,17 +204,18 @@ func (o *tpmQuoteOwner) ekAnchor(deviceEKCert []byte) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := tpm.VerifyEKCertChain(c, o.roots); err != nil {
+	if err := tpm.VerifyEKCertChain(c, append(append([]byte(nil), o.interDER...), deviceEKChain...), o.roots); err != nil {
 		return nil, fmt.Errorf("EK certificate does not chain to the trusted TPM CA: %w", err)
 	}
-	tqLog("PASS  EK certificate %q chains to the trusted TPM CA (issuer %q)", c.Subject.String(), c.Issuer.String())
+	tqLog("PASS  EK certificate %q chains to the trusted TPM CA (issuer %q; %d bytes of intermediates from the TPM's EK chain NV)",
+		c.Subject.String(), c.Issuer.String(), len(deviceEKChain))
 	return k, nil
 }
 
 // verify checks everything except the credential activation and returns the
 // MakeCredential challenge for it.
 func (o *tpmQuoteOwner) verify(ctx context.Context, ev *tpm.AttestEvidence) (*tpmQuoteCredential, error) {
-	ek, err := o.ekAnchor(ev.EKCert)
+	ek, err := o.ekAnchor(ev.EKCert, ev.EKChain)
 	if err != nil {
 		return nil, err
 	}

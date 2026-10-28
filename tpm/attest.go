@@ -29,6 +29,10 @@ import (
 const (
 	EKRSAHandle = tpm2.TPMHandle(0x81010001)
 	EKRSACertNV = 0x01C00002
+	// EK certificate chain NV range (EK Credential Profile 2.2.1.5.2): the
+	// TPM vendor's embedded intermediate CA certificates, concatenated DER.
+	EKChainNVFirst = 0x01C00100
+	EKChainNVLast  = 0x01C001FF
 )
 
 // AttestEvidence is what the device returns for an attestation request.
@@ -41,6 +45,7 @@ type AttestEvidence struct {
 	QuoteInfo   []byte   `cbor:"6,keyasint"` // TPMS_ATTEST (signed bytes); empty without PCRs
 	QuoteSig    []byte   `cbor:"7,keyasint"` // TPMT_SIGNATURE
 	PCRValues   [][]byte `cbor:"8,keyasint"` // SHA-256 bank, in request order
+	EKChain     []byte   `cbor:"9,keyasint"` // intermediate CA certs from TPM NV (concatenated DER), if any
 }
 
 // AttestOptions are test hooks for simulating a lying device.
@@ -85,9 +90,32 @@ func loadAK(t TPM) (*tpm2.NamedHandle, *tpm2.TPMTPublic, func(), error) {
 
 // ReadEKCertRSA reads the RSA 2048 EK certificate from TPM NV.
 func ReadEKCertRSA(t TPM) ([]byte, error) {
-	rp, err := tpm2.NVReadPublic{NVIndex: tpm2.TPMHandle(EKRSACertNV)}.Execute(t)
+	b, err := readNVIndex(t, EKRSACertNV)
 	if err != nil {
 		return nil, fmt.Errorf("EK certificate (NV 0x%08X): %w", EKRSACertNV, err)
+	}
+	return trimDER(b), nil
+}
+
+// ReadEKChain reads the EK certificate chain indices (concatenated DER of the
+// TPM vendor's intermediate CAs), stopping at the first undefined index.
+// Returns nil if there are none (swtpm, many discrete TPMs).
+func ReadEKChain(t TPM) []byte {
+	var out []byte
+	for idx := uint32(EKChainNVFirst); idx <= EKChainNVLast; idx++ {
+		b, err := readNVIndex(t, idx)
+		if err != nil {
+			break
+		}
+		out = append(out, b...)
+	}
+	return out
+}
+
+func readNVIndex(t TPM, index uint32) ([]byte, error) {
+	rp, err := tpm2.NVReadPublic{NVIndex: tpm2.TPMHandle(index)}.Execute(t)
+	if err != nil {
+		return nil, err
 	}
 	pub, err := rp.NVPublic.Contents()
 	if err != nil {
@@ -97,17 +125,17 @@ func ReadEKCertRSA(t TPM) ([]byte, error) {
 	for off := uint16(0); off < pub.DataSize; {
 		n := min(uint16(512), pub.DataSize-off)
 		r, err := tpm2.NVRead{
-			AuthHandle: tpm2.AuthHandle{Handle: tpm2.TPMHandle(EKRSACertNV), Name: rp.NVName, Auth: tpm2.PasswordAuth(nil)},
-			NVIndex:    tpm2.NamedHandle{Handle: tpm2.TPMHandle(EKRSACertNV), Name: rp.NVName},
+			AuthHandle: tpm2.AuthHandle{Handle: tpm2.TPMHandle(index), Name: rp.NVName, Auth: tpm2.PasswordAuth(nil)},
+			NVIndex:    tpm2.NamedHandle{Handle: tpm2.TPMHandle(index), Name: rp.NVName},
 			Size:       n, Offset: off,
 		}.Execute(t)
 		if err != nil {
-			return nil, fmt.Errorf("EK certificate (NV 0x%08X): %w", EKRSACertNV, err)
+			return nil, err
 		}
 		out = append(out, r.Data.Buffer...)
 		off += n
 	}
-	return trimDER(out), nil
+	return out, nil
 }
 
 // trimDER drops padding after a DER SEQUENCE (EK certificate NV areas may be
@@ -197,6 +225,7 @@ func AttestDeviceKey(t TPM, nonce []byte, pcrs []uint, opt AttestOptions) (*Atte
 	ev := &AttestEvidence{
 		AKPublic:    tpm2.Marshal(akPub),
 		EKCert:      ekCert,
+		EKChain:     ReadEKChain(t),
 		DAKPublic:   tpm2.Marshal(dakPub),
 		CertifyInfo: certify.CertifyInfo.Bytes(),
 		CertifySig:  tpm2.Marshal(certify.Signature),
@@ -304,8 +333,19 @@ func ParseEKCert(der []byte) (*x509.Certificate, *rsa.PublicKey, error) {
 }
 
 // VerifyEKCertChain checks that an EK certificate chains to roots (TPM
-// vendor CAs).
-func VerifyEKCertChain(c *x509.Certificate, roots *x509.CertPool) error {
+// vendor CAs), using the TPM's own intermediate CA certificates (chainDER,
+// concatenated DER from the EK chain NV indices) if given.
+func VerifyEKCertChain(c *x509.Certificate, chainDER []byte, roots *x509.CertPool) error {
+	inter := x509.NewCertPool()
+	if len(chainDER) > 0 {
+		certs, err := x509.ParseCertificates(trimTrailing(chainDER))
+		if err != nil {
+			return fmt.Errorf("EK chain from TPM NV: %w", err)
+		}
+		for _, ic := range certs {
+			inter.AddCert(ic)
+		}
+	}
 	// TPM EK certificates carry the TPM manufacturer/model/version as a
 	// directoryName in a critical SAN (TCG EK Credential Profile), which
 	// crypto/x509 does not mark as handled.
@@ -317,8 +357,42 @@ func VerifyEKCertChain(c *x509.Certificate, roots *x509.CertPool) error {
 	}
 	cc := *c
 	cc.UnhandledCriticalExtensions = unhandled
-	_, err := cc.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+	_, err := cc.Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
 	return err
+}
+
+// trimTrailing drops padding after the last complete DER certificate in a
+// concatenation (NV areas may be padded with 0x00 or 0xFF).
+func trimTrailing(b []byte) []byte {
+	end := 0
+	for end < len(b) && b[end] == 0x30 {
+		c := trimDER(b[end:])
+		if len(c) == len(b)-end && !derComplete(c) {
+			break
+		}
+		end += len(c)
+	}
+	return b[:end]
+}
+
+// derComplete reports whether b is exactly one DER SEQUENCE.
+func derComplete(b []byte) bool {
+	if len(b) < 2 || b[0] != 0x30 {
+		return false
+	}
+	l, hdr := int(b[1]), 2
+	if l&0x80 != 0 {
+		n := l & 0x7f
+		if n == 0 || n > 3 || len(b) < 2+n {
+			return false
+		}
+		l = 0
+		for _, c := range b[2 : 2+n] {
+			l = l<<8 | int(c)
+		}
+		hdr += n
+	}
+	return hdr+l == len(b)
 }
 
 // VerifyAK checks that the AK is a TPM-generated restricted ECDSA signing
