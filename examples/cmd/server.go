@@ -77,7 +77,9 @@ var (
 	uploadReqs            stringList
 	wgets                 stringList
 	sysconfig             stringList
+	tpmQuote              bool
 	tpmQuoteCA            string
+	tpmQuoteDB            *sqlite.DB // voucher lookup for fdo.tpm-quote (EK in OVEExtraInfo)
 	tpmQuotePCRs          string
 	payloadFile           string
 	payloadMimeType       string
@@ -152,7 +154,8 @@ func init() {
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
 	serverFlags.Var(&uploadReqs, "upload", "Use fdo.upload FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.Var(&wgets, "wget", "Use fdo.wget FSIM for each `url` (flag may be used multiple times)")
-	serverFlags.StringVar(&tpmQuoteCA, "tpm-quote-ca", "", "Use the fdo.tpm-quote demo FSIM; `file` holds the PEM CA certificates trusted for TPM EK certificates")
+	serverFlags.BoolVar(&tpmQuote, "tpm-quote", false, "Use the fdo.tpm-quote demo FSIM: PCR quote bound to the Device Key; EK anchored by the voucher (PT_TPM_EK_CERT in OVEExtraInfo) or -tpm-quote-ca")
+	serverFlags.StringVar(&tpmQuoteCA, "tpm-quote-ca", "", "fdo.tpm-quote: `file` of PEM TPM vendor CA certificates, used when the voucher records no EK (implies -tpm-quote)")
 	serverFlags.StringVar(&tpmQuotePCRs, "tpm-quote-pcrs", "0,1,2,3,4,5,6,7,16", "SHA-256 PCR `list` for fdo.tpm-quote")
 	serverFlags.Var(&sysconfig, "sysconfig", "Use fdo.sysconfig FSIM with `key=value` pairs (flag may be used multiple times)")
 	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
@@ -327,6 +330,7 @@ func server(ctx context.Context) error { //nolint:gocyclo
 	}
 	_, dbStatErr := os.Stat(dbPath)
 	state, err := sqlite.Open(dbPath, dbPass)
+	tpmQuoteDB = state
 	if err != nil {
 		return err
 	}
@@ -1283,7 +1287,7 @@ func ownerModules(modules []string, guid protocol.GUID) iter.Seq2[string, servic
 			}
 		}
 
-		if tpmQuoteCA != "" {
+		if tpmQuote || tpmQuoteCA != "" {
 			if !slices.Contains(modules, tpmQuoteModule) {
 				log.Printf("[fdo.tpm-quote] device does not support %s; no TPM evidence", tpmQuoteModule)
 			} else {
@@ -1295,7 +1299,15 @@ func ownerModules(modules []string, guid protocol.GUID) iter.Seq2[string, servic
 					}
 					pcrs = append(pcrs, uint(p))
 				}
-				owner, err := newTPMQuoteOwner(tpmQuoteCA, pcrs)
+				var voucherEK []byte
+				if tpmQuoteDB != nil {
+					if ov, err := tpmQuoteDB.Voucher(context.Background(), guid); err == nil && len(ov.Entries) > 0 {
+						if x := ov.Entries[0].Payload.Val.Extra; x != nil {
+							voucherEK = x.Val[ptTPMEKCert]
+						}
+					}
+				}
+				owner, err := newTPMQuoteOwner(tpmQuoteCA, pcrs, voucherEK)
 				if err != nil {
 					log.Fatalf("fdo.tpm-quote: %v", err)
 				}
