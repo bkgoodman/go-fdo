@@ -84,6 +84,7 @@ var (
 	tpmChallenge string // Optional challenge for -tpm-prove (hashed with SHA-256)
 	tpmClear     bool   // Clear all FDO credentials from TPM
 	tpmCheck     bool   // Check the FDO state in the TPM against the TPM spec
+	tpmPCRExt    string // Extend a PCR (demo measurement) and exit
 )
 
 func sanitizeLogValue(s string) string {
@@ -207,6 +208,7 @@ func init() {
 	clientFlags.BoolVar(&tpmProveDak, "tpm-prove", false, "Prove DAK possession by signing a challenge")
 	clientFlags.StringVar(&tpmChallenge, "tpm-challenge", "", "Optional challenge `string` for -tpm-prove (hashed with SHA-256; random if empty)")
 	clientFlags.BoolVar(&tpmClear, "tpm-clear", false, "Clear all FDO credentials from TPM (NV indices + persistent keys)")
+	clientFlags.StringVar(&tpmPCRExt, "tpm-pcr-extend", "", "Extend SHA-256 PCR `index:text` with sha256(text) and exit (demo measurement for fdo.tpm-quote)")
 	clientFlags.BoolVar(&tpmCheck, "tpm-check", false, "Check the FDO state in the TPM (any implementation's) against the FDO TPM spec; exit non-zero on failure")
 }
 
@@ -217,6 +219,9 @@ func client(ctx context.Context) error {
 
 	// Handle TPM credential inspection operations (no -tpm flag needed;
 	// tpmOpen falls back to tpm.DefaultOpen which is build-tag-selected).
+	if tpmPCRExt != "" {
+		return tpmPCRExtend(tpmPCRExt)
+	}
 	if tpmShow || tpmExportDak || tpmProveDak || tpmClear || tpmCheck {
 		switch {
 		case tpmCheck:
@@ -792,6 +797,7 @@ func transferOwnership2(ctx context.Context, transport fdo.Transport, to1d *cose
 	fsims := map[string]serviceinfo.DeviceModule{
 		"fido_alliance": &fsim.Interop{},
 	}
+	addTPMQuoteFSIM(fsims)
 	if dlDir != "" {
 		fsims["fdo.download"] = &fsim.Download{
 			CreateTemp: func() (*os.File, error) {

@@ -8,7 +8,12 @@ package main
 import (
 	"crypto"
 	"hash"
+
+	"github.com/fido-device-onboard/go-fdo/serviceinfo"
 )
+
+func addTPMQuoteFSIM(map[string]serviceinfo.DeviceModule) {}
+func tpmPCRExtend(string) error { panic("TPM unsupported by TinyGo") }
 
 func tpmCred() (hash.Hash, hash.Hash, crypto.Signer, func() error, error) {
 	panic("TPM unsupported by TinyGo")

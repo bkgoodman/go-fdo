@@ -77,6 +77,8 @@ var (
 	uploadReqs            stringList
 	wgets                 stringList
 	sysconfig             stringList
+	tpmQuoteCA            string
+	tpmQuotePCRs          string
 	payloadFile           string
 	payloadMimeType       string
 	bmoFile               string
@@ -150,6 +152,8 @@ func init() {
 	serverFlags.StringVar(&uploadDir, "upload-dir", "uploads", "The directory `path` to put file uploads")
 	serverFlags.Var(&uploadReqs, "upload", "Use fdo.upload FSIM for each `file` (flag may be used multiple times)")
 	serverFlags.Var(&wgets, "wget", "Use fdo.wget FSIM for each `url` (flag may be used multiple times)")
+	serverFlags.StringVar(&tpmQuoteCA, "tpm-quote-ca", "", "Use the fdo.tpm-quote demo FSIM; `file` holds the PEM CA certificates trusted for TPM EK certificates")
+	serverFlags.StringVar(&tpmQuotePCRs, "tpm-quote-pcrs", "0,1,2,3,4,5,6,7,16", "SHA-256 PCR `list` for fdo.tpm-quote")
 	serverFlags.Var(&sysconfig, "sysconfig", "Use fdo.sysconfig FSIM with `key=value` pairs (flag may be used multiple times)")
 	serverFlags.StringVar(&payloadFile, "payload-file", "", "Use fdo.payload FSIM to send `file` to device")
 	serverFlags.StringVar(&payloadMimeType, "payload-mime", "application/octet-stream", "MIME type for payload file")
@@ -1279,6 +1283,27 @@ func ownerModules(modules []string, guid protocol.GUID) iter.Seq2[string, servic
 			}
 		}
 
+		if tpmQuoteCA != "" {
+			if !slices.Contains(modules, tpmQuoteModule) {
+				log.Printf("[fdo.tpm-quote] device does not support %s; no TPM evidence", tpmQuoteModule)
+			} else {
+				var pcrs []uint
+				for _, f := range strings.Split(tpmQuotePCRs, ",") {
+					p, err := strconv.ParseUint(strings.TrimSpace(f), 10, 8)
+					if err != nil || p > 23 {
+						log.Fatalf("invalid -tpm-quote-pcrs %q", tpmQuotePCRs)
+					}
+					pcrs = append(pcrs, uint(p))
+				}
+				owner, err := newTPMQuoteOwner(tpmQuoteCA, pcrs)
+				if err != nil {
+					log.Fatalf("fdo.tpm-quote: %v", err)
+				}
+				if !yield(tpmQuoteModule, owner) {
+					return
+				}
+			}
+		}
 		if slices.Contains(modules, "fdo.sysconfig") && len(sysconfig) > 0 {
 			sysconfigOwner := &fsim.SysConfigOwner{}
 			for _, param := range sysconfig {

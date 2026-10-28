@@ -5,7 +5,16 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/fido-device-onboard/go-fdo/serviceinfo"
+)
+
+func addTPMQuoteFSIM(map[string]serviceinfo.DeviceModule) {}
+func tpmPCRExtend(string) error {
+	return fmt.Errorf("TPM support not compiled (build with -tags=tpm or -tags=tpmsim)")
+}
 
 func tpmClearCredentials() error {
 	return fmt.Errorf("TPM support not compiled (build with -tags=tpm or -tags=tpmsim)")

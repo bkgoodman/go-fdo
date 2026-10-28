@@ -316,6 +316,11 @@ func (s *tpmStore) Load() (*fdo.DeviceCredential, hash.Hash, hash.Hash, crypto.S
 	return dc, s.h256, s.h384, s.key, nil
 }
 
+// TPM returns the store's TPM connection, so other TPM users in the same
+// process (e.g. the fdo.tpm-quote FSIM) can share it: swtpm and the kernel
+// resource manager serialize on one connection.
+func (s *tpmStore) TPM() tpm.TPM { return s.tpmc }
+
 // openHMACs sets h256 and h384 from the persistent HMAC key at s.hmacHandle.
 // The key's hash matches the Device key (TPM spec Table 10) and the Device
 // uses that hash for every HMAC it computes (DI.SetHMAC, TO2 replacement), so
