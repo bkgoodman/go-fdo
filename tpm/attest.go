@@ -239,10 +239,11 @@ func ActivateAKCredential(t TPM, idObject, encSecret []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer flushAK()
-	ek, err := tpm2.ReadPublic{ObjectHandle: EKRSAHandle}.Execute(t)
+	ek, flushEK, err := loadEKRSA(t)
 	if err != nil {
-		return nil, fmt.Errorf("EK (0x%08X): %w", EKRSAHandle, err)
+		return nil, err
 	}
+	defer flushEK()
 	// The EK's authPolicy is PolicySecret(TPM_RH_ENDORSEMENT).
 	ps, closePS, err := tpm2.PolicySession(t, tpm2.TPMAlgSHA256, 16)
 	if err != nil {
@@ -257,7 +258,7 @@ func ActivateAKCredential(t TPM, idObject, encSecret []byte) ([]byte, error) {
 	}
 	r, err := tpm2.ActivateCredential{
 		ActivateHandle: tpm2.AuthHandle{Handle: ak.Handle, Name: ak.Name, Auth: tpm2.PasswordAuth(nil)},
-		KeyHandle:      tpm2.AuthHandle{Handle: EKRSAHandle, Name: ek.Name, Auth: ps},
+		KeyHandle:      tpm2.AuthHandle{Handle: ek.Handle, Name: ek.Name, Auth: ps},
 		CredentialBlob: tpm2.TPM2BIDObject{Buffer: idObject},
 		Secret:         tpm2.TPM2BEncryptedSecret{Buffer: encSecret},
 	}.Execute(t)
@@ -265,6 +266,25 @@ func ActivateAKCredential(t TPM, idObject, encSecret []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ActivateCredential: %w", err)
 	}
 	return r.CertInfo.Buffer, nil
+}
+
+// loadEKRSA returns the RSA 2048 EK: the persistent one at EKRSAHandle
+// (swtpm, some platforms) or, if none, the EK recreated from the TCG default
+// template (EK Credential Profile template L-1), as on most real and firmware
+// TPMs. The caller calls the returned flush.
+func loadEKRSA(t TPM) (*tpm2.NamedHandle, func(), error) {
+	if rp, err := (tpm2.ReadPublic{ObjectHandle: EKRSAHandle}).Execute(t); err == nil {
+		return &tpm2.NamedHandle{Handle: EKRSAHandle, Name: rp.Name}, func() {}, nil
+	}
+	cp, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.AuthHandle{Handle: tpm2.TPMRHEndorsement, Auth: tpm2.PasswordAuth(nil)},
+		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+	}.Execute(t)
+	if err != nil {
+		return nil, nil, fmt.Errorf("EK: no persistent RSA EK at 0x%08X and recreating it from the default template failed: %w", EKRSAHandle, err)
+	}
+	return &tpm2.NamedHandle{Handle: cp.ObjectHandle, Name: cp.Name},
+		func() { _, _ = tpm2.FlushContext{FlushHandle: cp.ObjectHandle}.Execute(t) }, nil
 }
 
 // --- Verifier side (no TPM needed) ---
