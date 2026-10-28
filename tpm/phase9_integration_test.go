@@ -179,7 +179,7 @@ func TestPhase9_ProductionAPI_NVOnly(t *testing.T) {
 	t.Logf("Step 3: Created and persisted DAK at 0x%08X", tpmlib.DAKHandle)
 
 	// Step 4: Create HMAC key as child of SRK → persist
-	hmacHandle, err := tpmlib.CreateChildHMACKey(thetpm, *srk)
+	hmacHandle, err := tpmlib.CreateChildHMACKey(thetpm, *srk, tpm2.TPMAlgSHA256)
 	if err != nil {
 		t.Fatalf("CreateChildHMACKey: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestPhase9_HMACDeterminism(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { tpm2.FlushContext{FlushHandle: srk.Handle}.Execute(thetpm) }()
-	handle, err := tpmlib.CreateChildHMACKey(thetpm, *srk)
+	handle, err := tpmlib.CreateChildHMACKey(thetpm, *srk, tpm2.TPMAlgSHA256)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +625,7 @@ func TestPhase9_CleanupFDOState(t *testing.T) {
 		t.Fatalf("PersistKey (DAK): %v", err)
 	}
 
-	hmacHandle, err := tpmlib.CreateChildHMACKey(thetpm, *srk)
+	hmacHandle, err := tpmlib.CreateChildHMACKey(thetpm, *srk, tpm2.TPMAlgSHA256)
 	if err != nil {
 		t.Fatalf("CreateChildHMACKey: %v", err)
 	}

@@ -285,10 +285,22 @@ below came from the go-tpm-tools reference simulator (scratch tests in
   `TPM_PT_NV_BUFFER_MAX`. TO2 keeps the same HMAC key (only the HMAC value
   over the new header changes), so the spec's key-handle swap order only
   matters if key rotation is added later.
-- [ ] **HMAC-SHA384 is not the persisted key.** `tpm_store` uses
-  `tpm.NewHmac(SHA384)` (a primary re-derived from a fixed template each
-  time) for the 384 HMAC, not a persisted HMAC key recorded in DCTPM. Only
-  matters for SHA-384 vouchers. (Found 2026-10-26.)
+- [x] **FIXED 2026-10-28: HMAC-SHA384 is now the persisted key.** The HMAC
+  key follows the Device key (TPM spec Table 10: nameAlg and HMAC scheme hash
+  SHA-384 for P-384, 48-byte unique string); `GenerateSpecHMACKey` /
+  `CreateChildHMACKey` take the hash. The Device uses its key's hash for every
+  HMAC and for DCPubKeyHash (`deviceHashAlg`, DI and both TO2 clients), not
+  the base spec table's Owner-dependent choice: only the Device computes and
+  verifies the HMAC, and a TPM HMAC key is fixed to one hash (a no-fixed-hash
+  key needs decrypt=1; rejected). Base-spec errata drafted in the
+  fdo20-spec-issues workstream; TPM spec sentence on bgoodman-tpm. P-384 devices from
+  before this (SHA-256 HMAC key) keep the re-derived SHA-384 key, with a
+  warning. Tests: tpm `TestSpecHmacKeyHash`, cred
+  `TestTPMStore_P384PersistedHMAC` (mutation-checked), spec compliance,
+  tpm-check; pe2 swtpm interop `p384` and `legacy384`.
+  Original: `tpm_store` used `tpm.NewHmac(SHA384)` (a primary re-derived from
+  a fixed template each time), not a persisted HMAC key recorded in DCTPM.
+  (Found 2026-10-26.)
 - [x] **FIXED 2026-10-26 (uncommitted): implied fallback is now https://rvserver.local:443.**
   Note: `protocol.parseURLs` defaults to scheme `tls` with no port when
   RVProtocol is absent; the spec default is HTTPS/443 (not changed).

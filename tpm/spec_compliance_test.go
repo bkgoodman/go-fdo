@@ -223,7 +223,7 @@ func provisionKeys(t *testing.T, thetpm transport.TPM, kc keyCase) crypto.Public
 		if err := tpmlib.PersistKey(thetpm, *dak, tpmlib.DAKHandle); err != nil {
 			t.Fatal(err)
 		}
-		if hk, err = tpmlib.CreateChildHMACKey(thetpm, *srk); err != nil {
+		if hk, err = tpmlib.CreateChildHMACKey(thetpm, *srk, kc.nameAlg); err != nil {
 			t.Fatalf("CreateChildHMACKey: %v", err)
 		}
 	} else {
@@ -232,7 +232,7 @@ func provisionKeys(t *testing.T, thetpm transport.TPM, kc keyCase) crypto.Public
 			coord = 48
 		}
 		dkUS := make([]byte, 2*coord)
-		hmacUS := make([]byte, 32)
+		hmacUS := make([]byte, coord)
 		_, _ = rand.Read(dkUS)
 		_, _ = rand.Read(hmacUS)
 		if dak, pub, err = tpmlib.GenerateSpecECKey(thetpm, kc.curve, kc.nameAlg, dkUS); err != nil {
@@ -241,7 +241,7 @@ func provisionKeys(t *testing.T, thetpm transport.TPM, kc keyCase) crypto.Public
 		if err := tpmlib.PersistKey(thetpm, *dak, tpmlib.DAKHandle); err != nil {
 			t.Fatal(err)
 		}
-		if hk, err = tpmlib.GenerateSpecHMACKey(thetpm, hmacUS); err != nil {
+		if hk, err = tpmlib.GenerateSpecHMACKey(thetpm, kc.nameAlg, hmacUS); err != nil {
 			t.Fatalf("GenerateSpecHMACKey: %v", err)
 		}
 	}
@@ -491,6 +491,32 @@ func testKeys(t *testing.T) {
 				if len(hkPub.AuthPolicy.Buffer) != 0 {
 					t.Errorf("HMAC key authPolicy %x, want empty (spec Table 12)", hkPub.AuthPolicy.Buffer)
 				}
+				if hkPub.NameAlg != kc.nameAlg {
+					t.Errorf("HMAC key nameAlg 0x%x, want 0x%x (matches the Device key, Table 10)", uint16(hkPub.NameAlg), uint16(kc.nameAlg))
+				}
+				kh, err := hkPub.Parameters.KeyedHashDetail()
+				if err != nil || kh.Scheme.Scheme != tpm2.TPMAlgHMAC {
+					t.Fatalf("HMAC key scheme not TPM_ALG_HMAC (Table 10): %+v %v", kh, err)
+				}
+				if d, err := kh.Scheme.Details.HMAC(); err != nil || d.HashAlg != kc.nameAlg {
+					t.Errorf("HMAC key scheme hash %+v, want 0x%x (matches the Device key, Table 10)", d, uint16(kc.nameAlg))
+				}
+			})
+
+			t.Run("HMAC_DeviceKeyHash", func(t *testing.T) {
+				own := crypto.SHA256
+				if kc.nameAlg == tpm2.TPMAlgSHA384 {
+					own = crypto.SHA384
+				}
+				h, err := tpmlib.NewSpecHmac(thetpm, own, tpmlib.HMACKeyHandle)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = h.Write([]byte("fdo"))
+				if s := h.Sum(nil); h.Err() != nil || len(s) != own.Size() {
+					t.Errorf("HMAC-%v with the persisted key: len %d, %v", own, len(s), h.Err())
+				}
+				_ = h.Close()
 			})
 
 			t.Run("Sign_EmptyAuth", func(t *testing.T) {

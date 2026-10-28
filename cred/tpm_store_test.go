@@ -19,8 +19,10 @@ package cred
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"hash"
 	"os"
 	"path/filepath"
 	"testing"
@@ -668,5 +670,63 @@ func TestTPMStore_MinFirmwareRev(t *testing.T) {
 	}
 	if dc, _, _, _, err := store.Load(); err != nil || dc.GUID != (protocol.GUID{4}) {
 		t.Fatalf("Load of ten-item DCTPM: %v", err)
+	}
+}
+
+// TestTPMStore_P384PersistedHMAC: a P-384 device gets a persisted HMAC key
+// fixed to SHA-384 (TPM spec Table 10). Its HMAC-SHA384 is the same after
+// Load and is computed by the persisted key at HMACKeyHandle (not the old
+// template-re-derived key), and HMAC-SHA256 is refused.
+func TestTPMStore_P384PersistedHMAC(t *testing.T) {
+	t.Setenv("FDO_TPM_OWNER_HIERARCHY", "1")
+	store, err := Open(filepath.Join(t.TempDir(), "cred.bin"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ts := store.(*tpmStore)
+	h256, h384, _, err := store.NewDI(protocol.Secp384r1KeyType)
+	if err != nil {
+		t.Fatalf("NewDI: %v", err)
+	}
+	msg := []byte("voucher header")
+	mac := func(h hash.Hash) ([]byte, error) {
+		h.Reset()
+		_, _ = h.Write(msg)
+		s := h.Sum(nil)
+		if f, ok := h.(interface{ Err() error }); ok && f.Err() != nil {
+			return nil, f.Err()
+		}
+		return s, nil
+	}
+	atDI, err := mac(h384)
+	if err != nil || len(atDI) != 48 {
+		t.Fatalf("HMAC-SHA384 at DI: len %d, %v", len(atDI), err)
+	}
+	if _, err := mac(h256); err == nil {
+		t.Error("HMAC-SHA256 succeeded on a P-384 device's SHA-384 HMAC key; expected the TPM to refuse")
+	}
+
+	dc := fdo.DeviceCredential{Version: 200, DeviceInfo: "p384", GUID: protocol.GUID{3},
+		PublicKeyHash: protocol.Hash{Algorithm: protocol.Sha384Hash, Value: make([]byte, 48)}}
+	if err := store.Save(dc); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	_, _, h384b, _, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	afterLoad, err := mac(h384b)
+	if err != nil || !bytes.Equal(afterLoad, atDI) {
+		t.Fatalf("HMAC-SHA384 after Load = %x (%v), want %x", afterLoad, err, atDI)
+	}
+
+	persisted, err := tpm.NewSpecHmac(ts.tpmc, crypto.SHA384, tpm.HMACKeyHandle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = persisted.Close() }()
+	if want, err := mac(persisted); err != nil || !bytes.Equal(want, atDI) {
+		t.Errorf("store HMAC-SHA384 %x is not the persisted key's %x (%v)", atDI, want, err)
 	}
 }

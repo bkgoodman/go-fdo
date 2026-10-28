@@ -405,10 +405,13 @@ func GenerateSpecECKey(t TPM, curveID tpm2.TPMECCCurve, hashAlg tpm2.TPMAlgID, u
 //
 // The key is created as a transient primary under the Endorsement hierarchy.
 // Caller should persist it via PersistKey() from nv.go.
-func GenerateSpecHMACKey(t TPM, uniqueString []byte) (*tpm2.NamedHandle, error) {
+//
+// nameAlg is SHA-256 for a P-256 Device key and SHA-384 for P-384 (the unique
+// string is 32 or 48 bytes to match).
+func GenerateSpecHMACKey(t TPM, nameAlg tpm2.TPMAlgID, uniqueString []byte) (*tpm2.NamedHandle, error) {
 	template := tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgKeyedHash,
-		NameAlg: tpm2.TPMAlgSHA256,
+		NameAlg: nameAlg,
 		ObjectAttributes: tpm2.TPMAObject{
 			FixedTPM:            true,
 			FixedParent:         true,
@@ -420,10 +423,12 @@ func GenerateSpecHMACKey(t TPM, uniqueString []byte) (*tpm2.NamedHandle, error) 
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgKeyedHash,
 			&tpm2.TPMSKeyedHashParms{
+				// HMAC hash = nameAlg = the Device key's hash (TPM spec
+				// Table 10). The Device uses it for every HMAC it computes.
 				Scheme: tpm2.TPMTKeyedHashScheme{
 					Scheme: tpm2.TPMAlgHMAC,
 					Details: tpm2.NewTPMUSchemeKeyedHash(tpm2.TPMAlgHMAC,
-						&tpm2.TPMSSchemeHMAC{HashAlg: tpm2.TPMAlgSHA256}),
+						&tpm2.TPMSSchemeHMAC{HashAlg: nameAlg}),
 				},
 			}),
 		Unique: tpm2.NewTPMUPublicID(tpm2.TPMAlgKeyedHash,
@@ -559,10 +564,11 @@ func CreateChildECKey(t TPM, parent tpm2.NamedHandle, curveID tpm2.TPMECCCurve, 
 // The child key is generated from the TPM's RNG (sensitiveDataOrigin=1).
 //
 // Returns a NamedHandle (loaded, transient). Caller should persist via PersistKey.
-func CreateChildHMACKey(t TPM, parent tpm2.NamedHandle) (*tpm2.NamedHandle, error) {
+// nameAlg follows the Device key as in GenerateSpecHMACKey.
+func CreateChildHMACKey(t TPM, parent tpm2.NamedHandle, nameAlg tpm2.TPMAlgID) (*tpm2.NamedHandle, error) {
 	template := tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgKeyedHash,
-		NameAlg: tpm2.TPMAlgSHA256,
+		NameAlg: nameAlg,
 		ObjectAttributes: tpm2.TPMAObject{
 			FixedTPM:            true,
 			FixedParent:         true,
@@ -574,10 +580,12 @@ func CreateChildHMACKey(t TPM, parent tpm2.NamedHandle) (*tpm2.NamedHandle, erro
 		},
 		Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgKeyedHash,
 			&tpm2.TPMSKeyedHashParms{
+				// HMAC hash = nameAlg = the Device key's hash (TPM spec
+				// Table 10). The Device uses it for every HMAC it computes.
 				Scheme: tpm2.TPMTKeyedHashScheme{
 					Scheme: tpm2.TPMAlgHMAC,
 					Details: tpm2.NewTPMUSchemeKeyedHash(tpm2.TPMAlgHMAC,
-						&tpm2.TPMSSchemeHMAC{HashAlg: tpm2.TPMAlgSHA256}),
+						&tpm2.TPMSSchemeHMAC{HashAlg: nameAlg}),
 				},
 			}),
 	}

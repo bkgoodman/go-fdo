@@ -242,7 +242,10 @@ func TO2(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol.To1
 		if err != nil {
 			return nil, fmt.Errorf("error parsing manufacturer public key type from incomplete replacement ownership voucher header: %w", err)
 		}
-		alg, err = hashAlgFor(c.Key.Public(), nextOwnerPublicKey)
+		if _, err := hashAlgFor(c.Key.Public(), nextOwnerPublicKey); err != nil {
+			return nil, fmt.Errorf("unsupported replacement owner key: %w", err)
+		}
+		alg, err = deviceHashAlg(c.Key.Public())
 		if err != nil {
 			return nil, fmt.Errorf("error selecting the appropriate hash algorithm: %w", err)
 		}

@@ -389,7 +389,9 @@ func (h *specHmac) start() {
 		Auth: tpm2.TPM2BAuth{
 			Buffer: sequenceAuth,
 		},
-		HashAlg: tpm2.TPMAlgNull,
+		// Named explicitly: the TPM refuses a hash other than the one the
+		// key's scheme fixes, instead of silently using the key's.
+		HashAlg: specHashAlg(h.Hash),
 	}.Execute(h.Device)
 	if err != nil {
 		h.err = fmt.Errorf("HmacStart (spec): %w", err)
@@ -513,4 +515,11 @@ func (h *specHmac) Close() error {
 		h.Reset()
 	}
 	return nil
+}
+
+func specHashAlg(h crypto.Hash) tpm2.TPMAlgID {
+	if h == crypto.SHA384 {
+		return tpm2.TPMAlgSHA384
+	}
+	return tpm2.TPMAlgSHA256
 }

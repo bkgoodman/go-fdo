@@ -95,7 +95,7 @@ func TestDeviceKeyCertifyPolicy(t *testing.T) {
 
 		flush(sim, dak.Handle) // the simulator has 3 transient object slots
 
-		hk, err := tpm.CreateChildHMACKey(sim, *srk)
+		hk, err := tpm.CreateChildHMACKey(sim, *srk, tpm2.TPMAlgSHA256)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestDeviceKeyCertifyPolicy(t *testing.T) {
 		checkDeviceKey(t, sim, *dak, *ak)
 		flush(sim, dak.Handle)
 
-		hk, err := tpm.GenerateSpecHMACKey(sim, us[:32])
+		hk, err := tpm.GenerateSpecHMACKey(sim, tpm2.TPMAlgSHA256, us[:32])
 		if err != nil {
 			t.Fatal(err)
 		}

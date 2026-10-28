@@ -94,7 +94,10 @@ func TO2v200(ctx context.Context, transport Transport, to1d *cose.Sign1[protocol
 		if err != nil {
 			return nil, fmt.Errorf("error parsing Owner2 key: %w", err)
 		}
-		alg, err = hashAlgFor(c.Key.Public(), owner2Pub)
+		if _, err := hashAlgFor(c.Key.Public(), owner2Pub); err != nil {
+			return nil, fmt.Errorf("unsupported Owner2 key: %w", err)
+		}
+		alg, err = deviceHashAlg(c.Key.Public())
 		if err != nil {
 			return nil, fmt.Errorf("error selecting hash algorithm: %w", err)
 		}

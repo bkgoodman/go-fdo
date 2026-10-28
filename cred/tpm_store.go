@@ -7,6 +7,8 @@ package cred
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
 	"hash"
@@ -170,7 +172,7 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 		slog.Info("tpm: DAK persisted (child method)", "handle", fmt.Sprintf("0x%08X", tpm.DAKHandle))
 
 		// Create + persist HMAC key
-		hmacHandle, err := tpm.CreateChildHMACKey(s.tpmc, *srk)
+		hmacHandle, err := tpm.CreateChildHMACKey(s.tpmc, *srk, hashAlg)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("create child HMAC key: %w", err)
 		}
@@ -187,7 +189,7 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 		if _, err := rand.Read(deviceKeyUS); err != nil {
 			return nil, nil, nil, fmt.Errorf("generating device key unique string: %w", err)
 		}
-		hmacUS := make([]byte, 32)
+		hmacUS := make([]byte, coordSize) // 32 (SHA-256) or 48 (SHA-384) bytes
 		if _, err := rand.Read(hmacUS); err != nil {
 			return nil, nil, nil, fmt.Errorf("generating HMAC unique string: %w", err)
 		}
@@ -201,7 +203,7 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 		}
 		slog.Info("tpm: DAK persisted (primary method)", "handle", fmt.Sprintf("0x%08X", tpm.DAKHandle))
 
-		hmacHandle, err := tpm.GenerateSpecHMACKey(s.tpmc, hmacUS)
+		hmacHandle, err := tpm.GenerateSpecHMACKey(s.tpmc, hashAlg, hmacUS)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("create primary HMAC key: %w", err)
 		}
@@ -215,18 +217,11 @@ func (s *tpmStore) NewDI(keyType protocol.KeyType) (hash.Hash, hash.Hash, crypto
 	s.dakHandle = tpm.DAKHandle
 	s.hmacHandle = tpm.HMACKeyHandle
 
-	// Step 3: Create spec-compliant HMAC (SHA-256) from persistent key
+	// Step 3: HMAC-SHA256 and HMAC-SHA384 from the persistent HMAC key
+	if err := s.openHMACs(keyType == protocol.Secp384r1KeyType); err != nil {
+		return nil, nil, nil, err
+	}
 	var err error
-	s.h256, err = tpm.NewSpecHmac(s.tpmc, crypto.SHA256, tpm.HMACKeyHandle)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("spec HMAC SHA-256: %w", err)
-	}
-
-	// SHA-384 HMAC: use legacy ephemeral key (spec only defines SHA-256 HMAC key)
-	s.h384, err = tpm.NewHmac(s.tpmc, crypto.SHA384)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("TPM HMAC SHA-384: %w", err)
-	}
 
 	// Step 7: Load persistent DAK as signing key (empty password auth)
 	s.key, err = tpm.LoadPersistentKey(s.tpmc, tpm.DAKHandle)
@@ -313,19 +308,52 @@ func (s *tpmStore) Load() (*fdo.DeviceCredential, hash.Hash, hash.Hash, crypto.S
 		return nil, nil, nil, nil, fmt.Errorf("load persistent DAK: %w", loadErr)
 	}
 
-	// Create spec HMAC (SHA-256) from persistent key at resolved handle
-	s.h256, loadErr = tpm.NewSpecHmac(s.tpmc, crypto.SHA256, s.hmacHandle)
-	if loadErr != nil {
-		return nil, nil, nil, nil, fmt.Errorf("spec HMAC SHA-256: %w", loadErr)
-	}
-
-	// SHA-384 HMAC: use legacy ephemeral key
-	s.h384, loadErr = tpm.NewHmac(s.tpmc, crypto.SHA384)
-	if loadErr != nil {
-		return nil, nil, nil, nil, fmt.Errorf("TPM HMAC SHA-384: %w", loadErr)
+	ec, _ := s.key.Public().(*ecdsa.PublicKey)
+	if loadErr = s.openHMACs(ec != nil && ec.Curve == elliptic.P384()); loadErr != nil {
+		return nil, nil, nil, nil, loadErr
 	}
 
 	return dc, s.h256, s.h384, s.key, nil
+}
+
+// openHMACs sets h256 and h384 from the persistent HMAC key at s.hmacHandle.
+// The key's hash matches the Device key (TPM spec Table 10) and the Device
+// uses that hash for every HMAC it computes (DI.SetHMAC, TO2 replacement), so
+// only the matching one is ever used; the other fails when used (the TPM
+// refuses it). A P-384 device provisioned before the HMAC key followed the
+// Device key has an HMAC-SHA256 key; for it, h384 is the old key re-derived
+// from a fixed template (not persisted, not in DCTPM), so its existing
+// HMAC-SHA384 vouchers still verify.
+func (s *tpmStore) openHMACs(deviceP384 bool) error {
+	var err error
+	if s.h256, err = tpm.NewSpecHmac(s.tpmc, crypto.SHA256, s.hmacHandle); err != nil {
+		return fmt.Errorf("spec HMAC SHA-256: %w", err)
+	}
+	pub, err := (tpm2.ReadPublic{ObjectHandle: tpm2.TPMHandle(s.hmacHandle)}).Execute(s.tpmc)
+	if err != nil {
+		return fmt.Errorf("ReadPublic HMAC key: %w", err)
+	}
+	keyHash := tpm2.TPMAlgSHA256
+	if pt, err := pub.OutPublic.Contents(); err == nil {
+		keyHash = pt.NameAlg
+		if kh, err := pt.Parameters.KeyedHashDetail(); err == nil && kh.Scheme.Scheme == tpm2.TPMAlgHMAC {
+			if d, err := kh.Scheme.Details.HMAC(); err == nil {
+				keyHash = d.HashAlg
+			}
+		}
+	}
+	if keyHash == tpm2.TPMAlgSHA384 || !deviceP384 {
+		if s.h384, err = tpm.NewSpecHmac(s.tpmc, crypto.SHA384, s.hmacHandle); err != nil {
+			return fmt.Errorf("spec HMAC SHA-384: %w", err)
+		}
+		return nil
+	}
+	slog.Warn("tpm: P-384 device with an HMAC-SHA256 key (provisioned before the HMAC key followed the Device key); HMAC-SHA384 uses a re-derived legacy key",
+		"handle", fmt.Sprintf("0x%08X", s.hmacHandle))
+	if s.h384, err = tpm.NewHmac(s.tpmc, crypto.SHA384); err != nil {
+		return fmt.Errorf("TPM HMAC SHA-384: %w", err)
+	}
+	return nil
 }
 
 // loadFromNV reads credential data from the consolidated DCTPM NV index.

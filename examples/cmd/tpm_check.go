@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"fmt"
 
@@ -126,6 +127,31 @@ func tpmCheckSpec() error {
 	}
 	attrs("HMAC key", hkPub.ObjectAttributes)
 	check(len(hkPub.AuthPolicy.Buffer) == 0, "HMAC key authPolicy empty (Table 12): got %x", hkPub.AuthPolicy.Buffer)
+	check(hkPub.NameAlg == dakPub.NameAlg, "HMAC key nameAlg matches the Device key (Table 10): HMAC 0x%04x, Device 0x%04x",
+		uint16(hkPub.NameAlg), uint16(dakPub.NameAlg))
+	kh, err := hkPub.Parameters.KeyedHashDetail()
+	var hmacHash tpm2.TPMAlgID
+	if err == nil && kh.Scheme.Scheme == tpm2.TPMAlgHMAC {
+		if d, err := kh.Scheme.Details.HMAC(); err == nil {
+			hmacHash = d.HashAlg
+		}
+	}
+	check(hmacHash == hkPub.NameAlg, "HMAC key scheme TPM_ALG_HMAC with hash = nameAlg (Table 10): scheme hash 0x%04x", uint16(hmacHash))
+	own := crypto.SHA256
+	if hkPub.NameAlg == tpm2.TPMAlgSHA384 {
+		own = crypto.SHA384
+	}
+	hm, err := tpm.NewSpecHmac(tpmc, own, hmacHandle)
+	if err == nil {
+		_, _ = hm.Write([]byte("fdo"))
+		if s := hm.Sum(nil); hm.Err() != nil {
+			err = hm.Err()
+		} else if len(s) != own.Size() {
+			err = fmt.Errorf("%d-byte result", len(s))
+		}
+		_ = hm.Close()
+	}
+	check(err == nil, "HMAC-%v with the persisted HMAC key: %v", own, err)
 
 	// --- Device key use: USER role with empty auth ---
 	h, err := dakPub.NameAlg.Hash()

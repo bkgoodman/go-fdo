@@ -795,6 +795,24 @@ func hashAlgFor(devicePubKey, ownerPubKey crypto.PublicKey) (protocol.HashAlg, e
 	}
 }
 
+// deviceHashAlg is the hash a Device uses for its HMAC (DI.SetHMAC, TO2
+// replacement) and for the owner-key hash in its credential: the one that
+// matches its own key. Only the Device computes and verifies the HMAC, so the
+// choice is the Device's; manufacturers and owners store what it sends. (The
+// base spec's key-size table also lists an HMAC type per Device/Owner key
+// pair; a TPM HMAC key is fixed to one hash, so following the Owner's key
+// would break a P-256 device onboarding to a P-384 owner. Errata pending.)
+func deviceHashAlg(devicePubKey crypto.PublicKey) (protocol.HashAlg, error) {
+	size, err := hashSizeForPubKey(devicePubKey)
+	if err != nil {
+		return 0, fmt.Errorf("device attestation key: %w", err)
+	}
+	if size == 384 {
+		return protocol.Sha384Hash, nil
+	}
+	return protocol.Sha256Hash, nil
+}
+
 func hashSizeForPubKey(pubKey crypto.PublicKey) (int, error) {
 	switch key := pubKey.(type) {
 	case *ecdsa.PublicKey:

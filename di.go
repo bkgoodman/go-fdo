@@ -98,7 +98,11 @@ func DI(ctx context.Context, transport Transport, info any, c DIConfig) (*Device
 		EmitDIFailed(ctx, err)
 		return nil, fmt.Errorf("error parsing manufacturer public key type from received ownership voucher header: %w", err)
 	}
-	alg, err := hashAlgFor(c.Key.Public(), ownerPubKey)
+	if _, err := hashAlgFor(c.Key.Public(), ownerPubKey); err != nil {
+		EmitDIFailed(ctx, err)
+		return nil, fmt.Errorf("unsupported manufacturer key: %w", err)
+	}
+	alg, err := deviceHashAlg(c.Key.Public())
 	if err != nil {
 		// Emit DI failed event for client-side tracking
 		EmitDIFailed(ctx, err)
